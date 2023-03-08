@@ -1,0 +1,36 @@
+version: '3'
+
+networks:
+  api-tests:
+    driver: bridge
+
+services:
+  # Test Container for Jenkins
+  ci-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    env_file:
+      - dockertest.env
+    depends_on:
+      - pennsievedb-ci
+    environment:
+      - POSTGRES_HOST=pennsievedb-ci
+    volumes:
+      - $PWD:/go/src/github.com/pennsieve/packages-service
+    networks:
+      - api-tests
+
+  pennsievedb:
+    image: pennsieve/pennsievedb:V20221102133799-seed
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - api-tests
+
+  pennsievedb-ci:
+    image: pennsieve/pennsievedb:V20221102133799-seed
+    restart: always
+    networks:
+      - api-tests
