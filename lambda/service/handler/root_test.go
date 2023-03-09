@@ -166,6 +166,11 @@ type MockDatasetsService struct {
 
 // Need to statisfy service.DatasetsService
 
+func (m *MockDatasetsService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error) {
+	args := m.Called(ctx, datasetId, request)
+	return args.Get(0).(*models.RestoreResponse), args.Error(1)
+}
+
 func (m *MockDatasetsService) GetDataset(ctx context.Context, datasetId string) (*pgdb.Dataset, error) {
 	args := m.Called(ctx, datasetId)
 	return args.Get(0).(*pgdb.Dataset), args.Error(1)
@@ -191,4 +196,12 @@ func (m *MockDatasetsService) OnGetDatasetReturn(datasetId string, returnedDatas
 }
 func (m *MockDatasetsService) OnGetDatasetFail(datasetId string, returnedError error) {
 	m.On("GetDataset", mock.Anything, datasetId).Return(&pgdb.Dataset{}, returnedError)
+}
+
+func (m *MockDatasetsService) OnRestorePackagesReturn(datasetId string, request models.RestoreRequest, returnedResponse *models.RestoreResponse) {
+	m.On("RestorePackages", mock.Anything, datasetId, request).Return(returnedResponse, nil)
+}
+
+func (m *MockDatasetsService) OnRestorePackagesFail(datasetId string, request models.RestoreRequest, returnedError error) {
+	m.On("RestorePackages", mock.Anything, datasetId, request).Return(&models.RestoreResponse{}, returnedError)
 }
