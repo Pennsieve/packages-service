@@ -126,7 +126,7 @@ func (m *MockDatasetsStore) CountDatasetPackagesByState(_ context.Context, _ int
 func (m *MockDatasetsStore) GetDatasetPackageByNodeId(_ context.Context, _ int64, _ string) (*pgdb.Package, error) {
 	return m.GetDatasetPackageByNodeIdReturn.ret()
 }
-func (m *MockDatasetsStore) TransitionState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
+func (m *MockDatasetsStore) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
 	return m.TransitionStateReturn.ret()
 }
 
