@@ -34,7 +34,7 @@ func (h *RestoreHandler) post(ctx context.Context) (*events.APIGatewayV2HTTPResp
 		return h.logAndBuildError("unauthorized", http.StatusUnauthorized), nil
 	}
 	h.logger.Info("OK")
-	return h.buildResponse(`{"success": [], "failures": [{"id": "", "error": "not yet implemented"}] }`, http.StatusOK)
+	return h.buildResponse(models.RestoreResponse{Failures: []models.Failure{{Error: "not yet implemented"}}}, http.StatusOK)
 }
 
 func (h *RestoreHandler) get(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
