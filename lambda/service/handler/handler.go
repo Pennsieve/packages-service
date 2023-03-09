@@ -90,13 +90,14 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 func (h *RequestHandler) WithDefaultService() *RequestHandler {
 	srv := service.NewDatasetsService(PennsieveDB, int(h.claims.OrgClaim.IntId))
 	h.datasetsService = srv
+	h.packagesService = service.NewPackagesService(PennsieveDB, int(h.claims.OrgClaim.IntId))
 	return h
 }
 
-// WithService simply attaches the passed in service.DatasetsService to the RequestHandler. Used for
+// WithService simply attaches the passed in service.PackagesService to the RequestHandler. Used for
 // tests that do not need to use PennsieveDB.
-func (h *RequestHandler) WithService(dsService service.DatasetsService) *RequestHandler {
-	h.datasetsService = dsService
+func (h *RequestHandler) WithService(service service.PackagesService) *RequestHandler {
+	h.packagesService = service
 	return h
 }
 

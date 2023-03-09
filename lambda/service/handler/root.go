@@ -10,8 +10,8 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 
 	switch h.path {
 	case "/packages/restore":
-		trashcanHandler := RestoreHandler{*h}
-		return trashcanHandler.handle(ctx)
+		restoreHandler := RestoreHandler{*h}
+		return restoreHandler.handle(ctx)
 	default:
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}

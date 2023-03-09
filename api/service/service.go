@@ -17,7 +17,7 @@ type DatasetsService interface {
 }
 
 type PackagesService interface {
-	RestorePackages(ctx context.Context, datasetId string, request *models.RestoreRequest, undo bool) (*models.RestoreResponse, error)
+	RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error)
 }
 
 type packagesService struct {
@@ -50,7 +50,7 @@ func NewDatasetsService(db *sql.DB, orgId int) DatasetsService {
 	return datasetsSvc
 }
 
-func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request *models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
+func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
 	response := models.RestoreResponse{}
 	err := s.StoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.DatasetsStore) error {
 		dataset, err := store.GetDatasetByNodeId(ctx, datasetId)

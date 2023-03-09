@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
@@ -33,8 +34,26 @@ func (h *RestoreHandler) post(ctx context.Context) (*events.APIGatewayV2HTTPResp
 	if authorized := authorizer.HasRole(*h.claims, permissions.CreateDeleteFiles); !authorized {
 		return h.logAndBuildError("unauthorized", http.StatusUnauthorized), nil
 	}
-	h.logger.Info("OK")
-	return h.buildResponse(models.RestoreResponse{Failures: []models.Failure{{Error: "not yet implemented"}}}, http.StatusOK)
+	datasetId, ok := h.request.QueryStringParameters["dataset_id"]
+	if !ok {
+		return h.logAndBuildError("query param 'dataset_id' is required", http.StatusBadRequest), nil
+	}
+	var request models.RestoreRequest
+	if err := json.Unmarshal([]byte(h.body), &request); err != nil {
+		return h.logAndBuildError("unable to unmarshall request body as RestoreRequest", http.StatusBadRequest), nil
+	}
+	response, err := h.packagesService.RestorePackages(ctx, datasetId, request, true)
+	if err == nil {
+		h.logger.Info("Returning OK")
+		return h.buildResponse(response, http.StatusOK)
+	}
+	switch err.(type) {
+	case models.DatasetNotFoundError:
+		return h.logAndBuildError(err.Error(), http.StatusNotFound), nil
+	default:
+		h.logger.Errorf("restore packages failed: %v", err)
+		return nil, err
+	}
 }
 
 func (h *RestoreHandler) get(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {

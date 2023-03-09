@@ -47,7 +47,25 @@ func TestTransitionPackageState(t *testing.T) {
 			}
 			store.OnTransitionPackageStateReturn(datasetIntId, okIds[0], packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: okIds[0]})
 
+			// Not treating package not found from state transition as an error.
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
+		},
+		"unexpected package state transition error": func(store *MockDatasetsStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
+			okIds := []string{"N:package:1234"}
+			expectedError := errors.New("unexpected package state transition")
+			failedIds := map[string]error{"N:package:0987": expectedError}
+			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
+			var failures []models.Failure
+			for id, err := range failedIds {
+				if pErr, ok := err.(models.PackageNotFoundError); ok {
+					pErr.Id = models.PackageNodeId(id)
+				}
+				store.OnTransitionPackageStateFail(datasetIntId, id, packageState.Deleted, packageState.Restoring, err)
+				failures = append(failures, models.Failure{Id: id, Error: fmt.Sprintf("unexpected error restoring package: %v", err)})
+			}
+			store.OnTransitionPackageStateReturn(datasetIntId, okIds[0], packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: okIds[0]})
+
+			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: failures}, expectedError
 		},
 		"no errors": func(store *MockDatasetsStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			packageNodeIds := []string{"N:package:1234", "N:package:0987"}
@@ -63,7 +81,7 @@ func TestTransitionPackageState(t *testing.T) {
 		mockFactory := MockFactory{mockStore: mockStore}
 		service := NewPackagesServiceWithFactory(&mockFactory, orgId)
 		t.Run(tName, func(t *testing.T) {
-			response, err := service.RestorePackages(context.Background(), datasetNodeId, request, false)
+			response, err := service.RestorePackages(context.Background(), datasetNodeId, *request, false)
 			mockStore.AssertExpectations(t)
 			assert.Equal(t, orgId, mockFactory.orgId)
 			if expectedError == nil {
@@ -94,42 +112,10 @@ func (mr MockReturn[T]) ret() (T, error) {
 
 type MockDatasetsStore struct {
 	mock.Mock
-	GetDatasetByNodeIdReturn          MockReturn[*pgdb.Dataset]
 	GetTrashcanRootPaginatedReturn    MockReturn[*store.PackagePage]
 	GetTrashcanPaginatedReturn        MockReturn[*store.PackagePage]
 	CountDatasetPackagesByStateReturn MockReturn[int]
 	GetDatasetPackageByNodeIdReturn   MockReturn[*pgdb.Package]
-	TransitionStateReturn             MockReturn[*pgdb.Package]
-}
-
-func (m *MockDatasetsStore) getExpectedErrors() []error {
-	expected := make([]error, 5)
-	var i int
-	if err := m.GetDatasetByNodeIdReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	if err := m.GetTrashcanRootPaginatedReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	if err := m.GetTrashcanPaginatedReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	if err := m.CountDatasetPackagesByStateReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	if err := m.GetDatasetPackageByNodeIdReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	if err := m.TransitionStateReturn.Error; err != nil {
-		expected[i] = err
-		i++
-	}
-	return expected[:i]
 }
 
 func (m *MockDatasetsStore) GetTrashcanRootPaginated(_ context.Context, _ int64, _ int, _ int) (*store.PackagePage, error) {

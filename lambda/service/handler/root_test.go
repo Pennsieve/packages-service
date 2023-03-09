@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
@@ -37,40 +38,38 @@ func (m queryParamMap) expectedOffset(t *testing.T) int {
 	return m.expectedInt(t, "offset", DefaultOffset)
 }
 
-func TestTrashcanRoute(t *testing.T) {
-	t.Skip("Need to update")
+func TestRestoreRoute(t *testing.T) {
 	expectedDatasetID := "N:Dataset:1234"
-	for tName, expectedQueryParams := range map[string]queryParamMap{
-		"without root_node_id param": {"dataset_id": expectedDatasetID},
-		"with root_node_id param":    {"dataset_id": expectedDatasetID, "root_node_id": "N:collection:abcd"},
-		"with limit param":           {"dataset_id": expectedDatasetID, "root_node_id": "N:collection:abcd", "limit": "30"},
-		"with offset param":          {"dataset_id": expectedDatasetID, "offset": "10"},
-	} {
-		req := newTestRequest("GET",
-			"/datasets/trashcan",
-			"getTrashcanRequestID",
-			expectedQueryParams,
-			"")
-		mockService := new(MockDatasetsService)
-
-		claims := authorizer.Claims{
-			DatasetClaim: dataset.Claim{
-				Role:   dataset.Viewer,
-				NodeId: expectedDatasetID,
-				IntId:  1234,
-			}}
-		expectedLimit := expectedQueryParams.expectedLimit(t)
-		expectedOffset := expectedQueryParams.expectedOffset(t)
-		mockService.OnGetTrashcanPageReturn(expectedDatasetID, expectedQueryParams["root_node_id"], expectedLimit, expectedOffset, &models.TrashcanPage{})
-		handler := NewHandler(req, &claims).WithService(mockService)
-		t.Run(tName, func(t *testing.T) {
-			_, err := handler.handle(context.Background())
-			if assert.NoError(t, err) {
-				mockService.AssertExpectations(t)
-			}
-		})
-
+	expectedQueryParams := map[string]string{
+		"dataset_id": expectedDatasetID,
 	}
+	requestObject := models.RestoreRequest{
+		NodeIds: []string{"N:package:1234"},
+	}
+	requestBody, err := json.Marshal(requestObject)
+	if err != nil {
+		assert.FailNow(t, "could not marshall test request body", requestObject)
+	}
+	req := newTestRequest("POST",
+		"/packages/restore",
+		"restorePackagesID",
+		expectedQueryParams,
+		string(requestBody))
+	mockService := new(MockDatasetsService)
+
+	claims := authorizer.Claims{
+		DatasetClaim: dataset.Claim{
+			Role:   dataset.Editor,
+			NodeId: expectedDatasetID,
+			IntId:  1234,
+		}}
+	mockService.OnRestorePackagesReturn(expectedDatasetID, requestObject, true, &models.RestoreResponse{Success: []string{"N:package:1234"}})
+	handler := NewHandler(req, &claims).WithService(mockService)
+	_, err = handler.handle(context.Background())
+	if assert.NoError(t, err) {
+		mockService.AssertExpectations(t)
+	}
+
 }
 
 func TestTrashcanRouteHandledErrors(t *testing.T) {
@@ -166,8 +165,8 @@ type MockDatasetsService struct {
 
 // Need to statisfy service.DatasetsService
 
-func (m *MockDatasetsService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error) {
-	args := m.Called(ctx, datasetId, request)
+func (m *MockDatasetsService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
+	args := m.Called(ctx, datasetId, request, undo)
 	return args.Get(0).(*models.RestoreResponse), args.Error(1)
 }
 
@@ -198,10 +197,10 @@ func (m *MockDatasetsService) OnGetDatasetFail(datasetId string, returnedError e
 	m.On("GetDataset", mock.Anything, datasetId).Return(&pgdb.Dataset{}, returnedError)
 }
 
-func (m *MockDatasetsService) OnRestorePackagesReturn(datasetId string, request models.RestoreRequest, returnedResponse *models.RestoreResponse) {
-	m.On("RestorePackages", mock.Anything, datasetId, request).Return(returnedResponse, nil)
+func (m *MockDatasetsService) OnRestorePackagesReturn(datasetId string, request models.RestoreRequest, undo bool, returnedResponse *models.RestoreResponse) {
+	m.On("RestorePackages", mock.Anything, datasetId, request, undo).Return(returnedResponse, nil)
 }
 
-func (m *MockDatasetsService) OnRestorePackagesFail(datasetId string, request models.RestoreRequest, returnedError error) {
-	m.On("RestorePackages", mock.Anything, datasetId, request).Return(&models.RestoreResponse{}, returnedError)
+func (m *MockDatasetsService) OnRestorePackagesFail(datasetId string, request models.RestoreRequest, undo bool, returnedError error) {
+	m.On("RestorePackages", mock.Anything, datasetId, request, undo).Return(&models.RestoreResponse{}, returnedError)
 }
