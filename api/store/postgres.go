@@ -42,31 +42,33 @@ type PackagePage struct {
 	Packages   []pgdb.Package
 }
 
-type DatasetsStoreFactory interface {
+type SQLStoreFactory interface {
 	NewSimpleStore(orgId int) DatasetsStore
 	ExecStoreTx(ctx context.Context, orgId int, fn func(store DatasetsStore) error) error
 }
 
+type DatasetsStoreFactory SQLStoreFactory
+
 func NewDatasetsStoreFactory(pennsieveDB *sql.DB) DatasetsStoreFactory {
-	return &datasetsStoreFactory{DB: pennsieveDB}
+	return &sqlStoreFactory{DB: pennsieveDB}
 }
 
-type datasetsStoreFactory struct {
+type sqlStoreFactory struct {
 	DB *sql.DB
 }
 
-// NewSimpleStore returns a DatasetsStore instance that
+// NewSimpleStore returns a PackagesStore instance that
 // will run statements directly on database
-func (d *datasetsStoreFactory) NewSimpleStore(orgId int) DatasetsStore {
-	return NewQueries(d.DB, orgId)
+func (f *sqlStoreFactory) NewSimpleStore(orgId int) DatasetsStore {
+	return NewQueries(f.DB, orgId)
 }
 
 // ExecStoreTx will execute the function fn, passing in a new DatasetsStore instance that
 // is backed by a database transaction. Any methods fn runs against the passed in DatasetsStore will run
 // in this transaction. If fn returns a non-nil error, the transaction will be rolled back.
 // Otherwise, the transaction will be committed.
-func (d *datasetsStoreFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(DatasetsStore) error) error {
-	tx, err := d.DB.BeginTx(ctx, nil)
+func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(store DatasetsStore) error) error {
+	tx, err := f.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -90,6 +92,29 @@ type Queries struct {
 
 func NewQueries(db pg.DBTX, orgId int) *Queries {
 	return &Queries{db: db, OrgId: orgId}
+}
+
+func (q *Queries) TransitionState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
+	query := fmt.Sprintf(`UPDATE "%d".packages SET state = $1 WHERE node_id = $2 AND dataset_id = $3 AND state = $4 RETURNING %s`, q.OrgId, packageColumnsString)
+	var pkg pgdb.Package
+	if err := q.db.QueryRowContext(ctx, query, targetState, packageId, datasetId, expectedState).Scan(
+		&pkg.Id,
+		&pkg.Name,
+		&pkg.PackageType,
+		&pkg.PackageState,
+		&pkg.NodeId,
+		&pkg.ParentId,
+		&pkg.DatasetId,
+		&pkg.OwnerId,
+		&pkg.Size,
+		&pkg.ImportId,
+		&pkg.Attributes,
+		&pkg.CreatedAt,
+		&pkg.UpdatedAt); errors.Is(err, sql.ErrNoRows) {
+		return &pkg, models.PackageNotFoundError{Id: models.PackageNodeId(packageId), OrgId: q.OrgId, DatasetId: models.DatasetIntId(datasetId)}
+	} else {
+		return &pkg, err
+	}
 }
 
 func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error) {
@@ -209,4 +234,5 @@ type DatasetsStore interface {
 	GetTrashcanPaginated(ctx context.Context, datasetId int64, parentId int64, limit int, offset int) (*PackagePage, error)
 	CountDatasetPackagesByState(ctx context.Context, datasetId int64, state packageState.State) (int, error)
 	GetDatasetPackageByNodeId(ctx context.Context, datasetId int64, packageNodeId string) (*pgdb.Package, error)
+	TransitionState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
 }

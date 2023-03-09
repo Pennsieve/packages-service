@@ -9,7 +9,7 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -35,7 +35,7 @@ func pingUntilReady(db *sql.DB) error {
 
 func loadFromFile(t *testing.T, db *sql.DB, sqlFile string) {
 	path := filepath.Join("testdata", sqlFile)
-	sqlBytes, ioErr := ioutil.ReadFile(path)
+	sqlBytes, ioErr := os.ReadFile(path)
 	if assert.NoError(t, ioErr) {
 		sqlStr := string(sqlBytes)
 		_, err := db.Exec(sqlStr)

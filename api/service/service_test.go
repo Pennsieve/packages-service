@@ -74,6 +74,7 @@ type MockDatasetsStore struct {
 	GetTrashcanPaginatedReturn        MockReturn[*store.PackagePage]
 	CountDatasetPackagesByStateReturn MockReturn[int]
 	GetDatasetPackageByNodeIdReturn   MockReturn[*pgdb.Package]
+	TransitionStateReturn             MockReturn[*pgdb.Package]
 }
 
 func (m *MockDatasetsStore) getExpectedErrors() []error {
@@ -99,6 +100,10 @@ func (m *MockDatasetsStore) getExpectedErrors() []error {
 		expected[i] = err
 		i++
 	}
+	if err := m.TransitionStateReturn.Error; err != nil {
+		expected[i] = err
+		i++
+	}
 	return expected[:i]
 }
 
@@ -120,6 +125,9 @@ func (m *MockDatasetsStore) CountDatasetPackagesByState(_ context.Context, _ int
 
 func (m *MockDatasetsStore) GetDatasetPackageByNodeId(_ context.Context, _ int64, _ string) (*pgdb.Package, error) {
 	return m.GetDatasetPackageByNodeIdReturn.ret()
+}
+func (m *MockDatasetsStore) TransitionState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
+	return m.TransitionStateReturn.ret()
 }
 
 type MockFactory struct {

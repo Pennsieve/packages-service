@@ -50,6 +50,7 @@ type RequestHandler struct {
 
 	logger          *log.Entry
 	datasetsService service.DatasetsService
+	packagesService service.PackagesService
 	claims          *authorizer.Claims
 }
 

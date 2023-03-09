@@ -10,6 +10,10 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 )
 
+type PackagesService interface {
+	RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error)
+}
+
 type DatasetsService interface {
 	GetDataset(ctx context.Context, datasetId string) (*pgdb.Dataset, error)
 	GetTrashcanPage(ctx context.Context, datasetID string, rootNodeId string, limit int, offset int) (*models.TrashcanPage, error)
