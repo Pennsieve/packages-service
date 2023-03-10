@@ -13,6 +13,11 @@ cd "$root_dir/lambda/service"
 go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))
 go tool cover -func=coverage.out
 
+echo "RUNNING lambda/restore TEST COVERAGE"
+cd "$root_dir/lambda/restore"
+go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))
+go tool cover -func=coverage.out
+
 cd "$root_dir/api"
 echo "RUNNING api TEST COVERAGE"
 go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))

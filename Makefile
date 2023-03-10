@@ -3,10 +3,18 @@
 LAMBDA_BUCKET ?= "pennsieve-cc-lambda-functions-use1"
 WORKING_DIR   ?= "$(shell pwd)"
 API_DIR ?= "api"
+
+# Service Lambda
 SERVICE_NAME  ?= "packages-service"
 SERVICE_EXEC  ?= "packages_service"
 SERVICE_PACK  ?= "packagesService"
-PACKAGE_NAME  ?= "${SERVICE_NAME}-${IMAGE_TAG}.zip"
+SERVICE_PACKAGE_NAME  ?= "${SERVICE_NAME}-${IMAGE_TAG}.zip"
+
+# Restore Package Lambda
+RESTORE_NAME  ?= "restore-package"
+RESTORE_EXEC  ?= "restore_package"
+RESTORE_PACK  ?= "restorePackage"
+RESTORE_PACKAGE_NAME  ?= "${RESTORE_NAME}-${IMAGE_TAG}.zip"
 
 .DEFAULT: help
 
@@ -51,28 +59,45 @@ docker-clean:
 # Build lambda and create ZIP file
 package:
 	@echo ""
-	@echo "***********************"
-	@echo "*   Building lambda   *"
-	@echo "***********************"
+	@echo "*******************************"
+	@echo "*   Building service lambda   *"
+	@echo "*******************************"
 	@echo ""
-	cd lambda/service; \
+	cd ${WORKING_DIR}/lambda/service; \
   		env GOOS=linux GOARCH=amd64 go build -o $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_EXEC); \
 		cd $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/ ; \
-			zip -r $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(PACKAGE_NAME) .
+			zip -r $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_PACKAGE_NAME) .
+	@echo ""
+	@echo "***************************************"
+	@echo "*   Building restore package lambda   *"
+	@echo "***************************************"
+	@echo ""
+	cd ${WORKING_DIR}/lambda/restore; \
+  		env GOOS=linux GOARCH=amd64 go build -o $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_EXEC); \
+		cd $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/ ; \
+			zip -r $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) .
 
 # Copy Service lambda to S3 location
 publish:
 	@make package
 	@echo ""
-	@echo "*************************"
-	@echo "*   Publishing lambda   *"
-	@echo "*************************"
+	@echo "******************************************"
+	@echo "*   Publishing packages-service lambda   *"
+	@echo "******************************************"
 	@echo ""
-	aws s3 cp $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
-	rm -rf $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(PACKAGE_NAME)
+	aws s3 cp $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
+	rm -rf $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_PACKAGE_NAME)
+	@echo ""
+	@echo "*****************************************"
+	@echo "*   Publishing restore package lambda   *"
+	@echo "*****************************************"
+	@echo ""
+	aws s3 cp $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
+	rm -rf $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME)
 
 # Run go mod tidy on modules
 tidy:
 	cd ${WORKING_DIR}/lambda/service; go mod tidy
+	cd ${WORKING_DIR}/lambda/restore; go mod tidy
 	cd ${WORKING_DIR}/api; go mod tidy
 
