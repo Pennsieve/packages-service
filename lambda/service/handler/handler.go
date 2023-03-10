@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/pennsieve/packages-service/api/service"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	log "github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ import (
 )
 
 var PennsieveDB *sql.DB
+var AWSConfig aws.Config
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -26,7 +28,6 @@ func init() {
 			log.SetLevel(log.InfoLevel)
 			log.Warnf("could not set log level to %q: %v", level, err)
 		}
-
 	}
 }
 
@@ -87,7 +88,11 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
 func (h *RequestHandler) WithDefaultService() *RequestHandler {
-	h.packagesService = service.NewPackagesService(PennsieveDB, int(h.claims.OrgClaim.IntId))
+	svc, err := service.NewPackagesService(PennsieveDB, AWSConfig, int(h.claims.OrgClaim.IntId))
+	if err != nil {
+		log.Fatalf("unable to create service: %v", err)
+	}
+	h.packagesService = svc
 	return h
 }
 

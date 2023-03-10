@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -15,23 +16,33 @@ type PackagesService interface {
 }
 
 type packagesService struct {
-	StoreFactory store.SQLStoreFactory
-	OrgId        int
+	SQSStoreFactory store.SQLStoreFactory
+	QueueStore      store.QueueStore
+	OrgId           int
 }
 
-func NewPackagesServiceWithFactory(factory store.SQLStoreFactory, orgId int) PackagesService {
-	return &packagesService{StoreFactory: factory, OrgId: orgId}
+func newPackagesServiceWithFactory(factory store.SQLStoreFactory, orgId int) *packagesService {
+	return &packagesService{SQSStoreFactory: factory, OrgId: orgId}
 }
 
-func NewPackagesService(db *sql.DB, orgId int) PackagesService {
+func (s *packagesService) withQueueStore(queueStore store.QueueStore) *packagesService {
+	s.QueueStore = queueStore
+	return s
+}
+
+func NewPackagesService(db *sql.DB, awsConfig aws.Config, orgId int) (PackagesService, error) {
 	str := store.NewSQLStoreFactory(db)
-	svc := NewPackagesServiceWithFactory(str, orgId)
-	return svc
+	svc := newPackagesServiceWithFactory(str, orgId)
+	queueStore, err := store.NewQueueStore(awsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return svc.withQueueStore(queueStore), nil
 }
 
 func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
 	response := models.RestoreResponse{}
-	err := s.StoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.SQLStore) error {
+	err := s.SQSStoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.SQLStore) error {
 		dataset, err := store.GetDatasetByNodeId(ctx, datasetId)
 		if err != nil {
 			return err

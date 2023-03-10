@@ -79,7 +79,7 @@ func TestTransitionPackageState(t *testing.T) {
 		mockStore := new(MockPackagesStore)
 		request, expectedResponse, expectedError := configMock(mockStore)
 		mockFactory := MockFactory{mockStore: mockStore}
-		service := NewPackagesServiceWithFactory(&mockFactory, orgId)
+		service := newPackagesServiceWithFactory(&mockFactory, orgId)
 		t.Run(tName, func(t *testing.T) {
 			response, err := service.RestorePackages(context.Background(), datasetNodeId, *request, false)
 			mockStore.AssertExpectations(t)

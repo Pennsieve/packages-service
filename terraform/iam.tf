@@ -70,6 +70,19 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     resources = ["*"]
   }
 
+  statement {
+    sid    = "PackageServiceLambdaWriteToEventsPermission"
+    effect = "Allow"
+
+    actions = [
+      "sqs:SendMessage",
+    ]
+
+    resources = [
+      aws_sqs_queue.restore_package_queue.arn,
+    ]
+  }
+
 }
 
 #
@@ -142,6 +155,23 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
       "rds-db:connect"
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid    = "RestorePackageLambdaReadFromEventsPermission"
+    effect = "Allow"
+
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl"
+    ]
+
+    resources = [
+      aws_sqs_queue.restore_package_queue.arn,
+      "${aws_sqs_queue.restore_package_queue.arn}/*",
+    ]
   }
 
 }
