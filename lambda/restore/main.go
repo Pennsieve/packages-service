@@ -22,7 +22,7 @@ func init() {
 		}
 
 	}
-
+	// Open DB connection pool here so that it can be reused if lambda handles more than one request
 	db, err := pgdb.ConnectRDS()
 	if err != nil {
 		panic(fmt.Sprintf("unable to connect to RDS database: %s", err))

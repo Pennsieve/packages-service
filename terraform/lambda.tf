@@ -16,11 +16,11 @@ resource "aws_lambda_function" "service_lambda" {
 
   environment {
     variables = {
-      ENV                   = var.environment_name
-      PENNSIEVE_DOMAIN      = data.terraform_remote_state.account.outputs.domain_name,
-      REGION                = var.aws_region
-      RDS_PROXY_ENDPOINT    = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
-      RESTORE_PACKAGE_QUEUE = aws_sqs_queue.restore_package_queue.name
+      ENV                       = var.environment_name
+      PENNSIEVE_DOMAIN          = data.terraform_remote_state.account.outputs.domain_name,
+      REGION                    = var.aws_region
+      RDS_PROXY_ENDPOINT        = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
+      RESTORE_PACKAGE_QUEUE_URL = aws_sqs_queue.restore_package_queue.url
     }
   }
 }
@@ -43,11 +43,11 @@ resource "aws_lambda_function" "restore_package_lambda" {
 
   environment {
     variables = {
-      ENV                   = var.environment_name
-      PENNSIEVE_DOMAIN      = data.terraform_remote_state.account.outputs.domain_name,
-      REGION                = var.aws_region
-      RDS_PROXY_ENDPOINT    = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
-      RESTORE_PACKAGE_QUEUE = aws_sqs_queue.restore_package_queue.name
+      ENV                       = var.environment_name
+      PENNSIEVE_DOMAIN          = data.terraform_remote_state.account.outputs.domain_name,
+      REGION                    = var.aws_region
+      RDS_PROXY_ENDPOINT        = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
+      RESTORE_PACKAGE_QUEUE_URL = aws_sqs_queue.restore_package_queue.url
     }
   }
 }

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/service"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	log "github.com/sirupsen/logrus"
@@ -15,7 +15,7 @@ import (
 )
 
 var PennsieveDB *sql.DB
-var AWSConfig aws.Config
+var SQSClient *sqs.Client
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -33,10 +33,7 @@ func init() {
 
 func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (*events.APIGatewayV2HTTPResponse, error) {
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
-	handler, err := NewHandler(&request, claims).WithDefaultService()
-	if err != nil {
-		return nil, err
-	}
+	handler := NewHandler(&request, claims).WithDefaultService()
 	return handler.handle(ctx)
 }
 
@@ -90,13 +87,10 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 // WithDefaultService adds a new service.PackagesService to the RequestHandler that
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
-func (h *RequestHandler) WithDefaultService() (*RequestHandler, error) {
-	svc, err := service.NewPackagesService(PennsieveDB, AWSConfig, int(h.claims.OrgClaim.IntId))
-	if err != nil {
-		return nil, fmt.Errorf("unable to create service: %w", err)
-	}
+func (h *RequestHandler) WithDefaultService() *RequestHandler {
+	svc := service.NewPackagesService(PennsieveDB, SQSClient, int(h.claims.OrgClaim.IntId))
 	h.packagesService = svc
-	return h, nil
+	return h
 }
 
 // WithService simply attaches the passed in service.PackagesService to the RequestHandler. Used for

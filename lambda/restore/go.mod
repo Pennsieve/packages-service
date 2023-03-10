@@ -6,6 +6,7 @@ replace github.com/pennsieve/packages-service/api => ../../api
 
 require (
 	github.com/aws/aws-lambda-go v1.38.0
+	github.com/pennsieve/packages-service/api v0.0.0-00010101000000-000000000000
 	github.com/pennsieve/pennsieve-go-core v1.2.5
 	github.com/sirupsen/logrus v1.9.0
 )

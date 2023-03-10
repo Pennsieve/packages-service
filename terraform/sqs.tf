@@ -14,6 +14,7 @@ resource "aws_sqs_queue" "restore_package_deadletter_queue" {
 }
 
 resource "aws_lambda_event_source_mapping" "restore_package_mapping" {
-  event_source_arn = aws_sqs_queue.restore_package_queue.arn
-  function_name    = aws_lambda_function.restore_package_lambda.arn
+  event_source_arn        = aws_sqs_queue.restore_package_queue.arn
+  function_name           = aws_lambda_function.restore_package_lambda.arn
+  function_response_types = ["ReportBatchItemFailures"]
 }

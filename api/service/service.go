@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -30,14 +30,11 @@ func (s *packagesService) withQueueStore(queueStore store.QueueStore) *packagesS
 	return s
 }
 
-func NewPackagesService(db *sql.DB, awsConfig aws.Config, orgId int) (PackagesService, error) {
+func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int) PackagesService {
 	str := store.NewSQLStoreFactory(db)
 	svc := newPackagesServiceWithFactory(str, orgId)
-	queueStore, err := store.NewQueueStore(awsConfig)
-	if err != nil {
-		return nil, err
-	}
-	return svc.withQueueStore(queueStore), nil
+	queueStore := store.NewQueueStore(sqsClient)
+	return svc.withQueueStore(queueStore)
 }
 
 func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
@@ -74,7 +71,7 @@ func (s *packagesService) RestorePackages(ctx context.Context, datasetId string,
 		}
 		queueMessage := models.RestorePackageMessage{NodeIds: response.Success}
 		if err = s.QueueStore.SendRestorePackage(ctx, queueMessage); err != nil {
-			// This will rollback Tx even though it's not a DB action.
+			// This will roll back Tx even though it's not a DB action.
 			return err
 		}
 		return nil
