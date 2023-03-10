@@ -46,7 +46,8 @@ func TestTransitionPackageState(t *testing.T) {
 				failures = append(failures, models.Failure{Id: id, Error: fmt.Sprintf("deleted package %s not found in dataset %s", id, datasetNodeId)})
 			}
 			store.OnTransitionPackageStateReturn(datasetIntId, okIds[0], packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: okIds[0]})
-			store.OnSendRestorePackageReturn(models.RestorePackageMessage{NodeIds: okIds})
+			message := newRestoreMessage(orgId, okIds...)
+			store.OnSendRestorePackageReturn(*message)
 			// Not treating package not found from state transition as an error.
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
 		},
@@ -74,7 +75,8 @@ func TestTransitionPackageState(t *testing.T) {
 				store.OnTransitionPackageStateReturn(datasetIntId, p, packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: p})
 			}
 			sqsError := errors.New("unexpected sqs send error")
-			store.OnSendRestorePackageFail(models.RestorePackageMessage{NodeIds: packageNodeIds}, sqsError)
+			message := newRestoreMessage(orgId, packageNodeIds...)
+			store.OnSendRestorePackageFail(*message, sqsError)
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, nil, sqsError
 		},
 		"no errors": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
@@ -83,7 +85,8 @@ func TestTransitionPackageState(t *testing.T) {
 			for _, p := range packageNodeIds {
 				store.OnTransitionPackageStateReturn(datasetIntId, p, packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: p})
 			}
-			store.OnSendRestorePackageReturn(models.RestorePackageMessage{NodeIds: packageNodeIds})
+			message := newRestoreMessage(orgId, packageNodeIds...)
+			store.OnSendRestorePackageReturn(*message)
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: packageNodeIds}, nil
 		},
 	} {
@@ -168,4 +171,11 @@ func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store st
 	m.orgId = orgId
 	m.txError = fn(m.mockStore)
 	return m.txError
+}
+
+func newRestoreMessage(orgId int, ids ...string) *models.RestorePackageMessage {
+	infos := make([]string, len(ids))
+	copy(infos, ids)
+	msg := models.RestorePackageMessage{OrgId: orgId, NodeIds: infos}
+	return &msg
 }

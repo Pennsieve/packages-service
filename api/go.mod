@@ -3,7 +3,6 @@ module github.com/pennsieve/packages-service/api
 go 1.18
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.17.5
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.4
 	github.com/lib/pq v1.10.7
 	github.com/pennsieve/pennsieve-go-core v1.2.3
@@ -12,6 +11,7 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.17.5 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.18.14 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.14 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.23 // indirect

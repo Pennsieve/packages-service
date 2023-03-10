@@ -14,4 +14,7 @@ type Failure struct {
 	Error string `json:"error"`
 }
 
-type RestorePackageMessage RestoreRequest
+type RestorePackageMessage struct {
+	OrgId   int      `json:"orgId"`
+	NodeIds []string `json:"nodeIds"`
+}

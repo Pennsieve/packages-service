@@ -28,7 +28,7 @@ func NewQueueStore(sqsClient *sqs.Client) QueueStore {
 func (s *sqsStore) SendRestorePackage(ctx context.Context, restoreMessage models.RestorePackageMessage) error {
 	body, err := json.Marshal(restoreMessage)
 	if err != nil {
-		return fmt.Errorf("%s: unable to marshal %s: %w", m, restoreMessage, err)
+		return fmt.Errorf("%s: unable to marshal %v: %w", m, restoreMessage, err)
 	}
 	bodyStr := string(body)
 	request := sqs.SendMessageInput{QueueUrl: &s.RestorePackageURL, MessageBody: &bodyStr}
