@@ -10,7 +10,38 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// pingUntilReady pings the db up to 10 times, stopping when
+// a ping is successful. Used because there have been problems with
+// the test DB not being fully started and ready to make connections.
+// But there must be a better way.
+func pingUntilReady(db *sql.DB) error {
+	var err error
+	wait := 100 * time.Millisecond
+	for i := 0; i < 10; i++ {
+		if err = db.Ping(); err == nil {
+			return nil
+		}
+		time.Sleep(wait)
+		wait = 2 * wait
+
+	}
+	return err
+}
+
+func openDB(t *testing.T) *sql.DB {
+	config := PostgresConfigFromEnv()
+	db, err := config.Open()
+	if err != nil {
+		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", config, err)
+	}
+	if err = pingUntilReady(db); err != nil {
+		assert.FailNow(t, "cannot ping database", err)
+	}
+	return db
+}
 
 func loadFromFile(t *testing.T, db *sql.DB, sqlFile string) {
 	path := filepath.Join("testdata", sqlFile)
@@ -29,14 +60,12 @@ func truncate(t *testing.T, db *sql.DB, orgID int, table string) {
 }
 
 func TestTransitionPackageState(t *testing.T) {
-	config := PostgresConfigFromEnv()
-	db, err := config.Open()
+	db := openDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	assert.NoErrorf(t, err, "could not open DB with config %s", config)
 	loadFromFile(t, db, "folder-nav-test.sql")
 	defer truncate(t, db, 2, "packages")
 
@@ -53,14 +82,12 @@ func TestTransitionPackageState(t *testing.T) {
 }
 
 func TestTransitionPackageStateNoTransition(t *testing.T) {
-	config := PostgresConfigFromEnv()
-	db, err := config.Open()
+	db := openDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	assert.NoErrorf(t, err, "could not open DB with config %s", config)
 	expectedOrdId := 2
 	loadFromFile(t, db, "folder-nav-test.sql")
 	defer truncate(t, db, expectedOrdId, "packages")
@@ -73,7 +100,7 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 	// But this test will try to move it from UPLOADED to RESTORING incorrectly
 	incorrectCurrentState := packageState.Uploaded
 	requestedFinalState := packageState.Restoring
-	_, err = store.TransitionPackageState(context.Background(), expectedDatasetId, expectedNodeId, incorrectCurrentState, requestedFinalState)
+	_, err := store.TransitionPackageState(context.Background(), expectedDatasetId, expectedNodeId, incorrectCurrentState, requestedFinalState)
 	if assert.Error(t, err) {
 		assert.IsType(t, models.PackageNotFoundError{}, err)
 		assert.Equal(t, expectedNodeId, err.(models.PackageNotFoundError).Id.NodeId)
