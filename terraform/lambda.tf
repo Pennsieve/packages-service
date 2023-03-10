@@ -20,7 +20,7 @@ resource "aws_lambda_function" "service_lambda" {
       PENNSIEVE_DOMAIN      = data.terraform_remote_state.account.outputs.domain_name,
       REGION                = var.aws_region
       RDS_PROXY_ENDPOINT    = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
-      RESTORE_PACKAGE_QUEUE = aws_sqs_queue.restore_package_queue.arn
+      RESTORE_PACKAGE_QUEUE = aws_sqs_queue.restore_package_queue.name
     }
   }
 }
