@@ -76,6 +76,7 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
 
     actions = [
       "sqs:SendMessage",
+      "sqs:GetQueueUrl"
     ]
 
     resources = [
