@@ -28,7 +28,7 @@ func handleBatch(ctx context.Context, event events.SQSEvent, sqlFactory store.SQ
 		handler := NewMessageHandler(r, sqlFactory)
 		if err := handler.handle(ctx); err != nil {
 			handler.logError(err)
-			response.BatchItemFailures = append(response.BatchItemFailures, handler.batchFailure())
+			response.BatchItemFailures = append(response.BatchItemFailures, handler.newBatchItemFailure())
 		}
 	}
 	return response, nil
@@ -81,7 +81,15 @@ func (h *MessageHandler) logError(args ...any) {
 	h.Logger.Error(args...)
 }
 
-func (h *MessageHandler) batchFailure() events.SQSBatchItemFailure {
+func (h *MessageHandler) logErrorWithFields(fields log.Fields, args ...any) {
+	h.Logger.WithFields(fields).Error(args...)
+}
+
+func (h *MessageHandler) logInfo(args ...any) {
+	h.Logger.Info(args...)
+}
+
+func (h *MessageHandler) newBatchItemFailure() events.SQSBatchItemFailure {
 	return events.SQSBatchItemFailure{ItemIdentifier: h.Message.MessageId}
 }
 

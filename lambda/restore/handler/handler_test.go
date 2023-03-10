@@ -24,7 +24,7 @@ func TestNewMessageHandler(t *testing.T) {
 	assert.Equal(sqlFactory, handler.SQLFactory)
 	assert.NotNil(handler.Logger)
 
-	assert.Equal(expectedMessageId, handler.batchFailure().ItemIdentifier)
+	assert.Equal(expectedMessageId, handler.newBatchItemFailure().ItemIdentifier)
 
 	wrappedError := errors.New("inner error")
 	err := handler.errorf("had a problem with %d: %w", 4, wrappedError)
