@@ -36,9 +36,9 @@ func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTP
 	return handler.handle(ctx)
 }
 
-// RequestHandler wraps the incoming request with a logger and a service.DatasetsService.
+// RequestHandler wraps the incoming request with a logger and a service.PackagesService.
 // Some request params are pulled out for convenience. Use NewHandler followed by WithDefaultService to have things
-// initialized nicely. Use WithService in tests where a specially constructed or mock service.DatasetsService is required.
+// initialized nicely. Use WithService in tests where a specially constructed or mock service.PackagesService is required.
 type RequestHandler struct {
 	request   *events.APIGatewayV2HTTPRequest
 	requestID string
@@ -49,7 +49,6 @@ type RequestHandler struct {
 	body        string
 
 	logger          *log.Entry
-	datasetsService service.DatasetsService
 	packagesService service.PackagesService
 	claims          *authorizer.Claims
 }
@@ -84,12 +83,10 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 	return &requestHandler
 }
 
-// WithDefaultService adds a new service.DatasetsService to the RequestHandler that
+// WithDefaultService adds a new service.PackagesService to the RequestHandler that
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
 func (h *RequestHandler) WithDefaultService() *RequestHandler {
-	srv := service.NewDatasetsService(PennsieveDB, int(h.claims.OrgClaim.IntId))
-	h.datasetsService = srv
 	h.packagesService = service.NewPackagesService(PennsieveDB, int(h.claims.OrgClaim.IntId))
 	return h
 }
