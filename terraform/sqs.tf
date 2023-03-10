@@ -3,7 +3,7 @@ resource "aws_sqs_queue" "restore_package_queue" {
   message_retention_seconds  = 86400
   receive_wait_time_seconds  = 20
   visibility_timeout_seconds = 3600
-  redrive_policy             = "{\"deadLetterTargetArn\":\"${aws_sqs_queue.restore_package_deadletter_queue}\",\"maxReceiveCount\":3}"
+  redrive_policy             = "{\"deadLetterTargetArn\":\"${aws_sqs_queue.restore_package_deadletter_queue.arn}\",\"maxReceiveCount\":3}"
 }
 
 resource "aws_sqs_queue" "restore_package_deadletter_queue" {
