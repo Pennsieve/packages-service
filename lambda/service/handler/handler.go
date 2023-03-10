@@ -33,7 +33,10 @@ func init() {
 
 func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (*events.APIGatewayV2HTTPResponse, error) {
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
-	handler := NewHandler(&request, claims).WithDefaultService()
+	handler, err := NewHandler(&request, claims).WithDefaultService()
+	if err != nil {
+		return nil, err
+	}
 	return handler.handle(ctx)
 }
 
@@ -87,13 +90,13 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 // WithDefaultService adds a new service.PackagesService to the RequestHandler that
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
-func (h *RequestHandler) WithDefaultService() *RequestHandler {
+func (h *RequestHandler) WithDefaultService() (*RequestHandler, error) {
 	svc, err := service.NewPackagesService(PennsieveDB, AWSConfig, int(h.claims.OrgClaim.IntId))
 	if err != nil {
-		log.Fatalf("unable to create service: %v", err)
+		return nil, fmt.Errorf("unable to create service: %w", err)
 	}
 	h.packagesService = svc
-	return h
+	return h, nil
 }
 
 // WithService simply attaches the passed in service.PackagesService to the RequestHandler. Used for
