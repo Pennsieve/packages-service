@@ -13,3 +13,5 @@ type Failure struct {
 	Id    string `json:"id"`
 	Error string `json:"error"`
 }
+
+type RestorePackageMessage RestoreRequest

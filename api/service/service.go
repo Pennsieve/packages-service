@@ -72,6 +72,11 @@ func (s *packagesService) RestorePackages(ctx context.Context, datasetId string,
 				}
 			}
 		}
+		queueMessage := models.RestorePackageMessage{NodeIds: response.Success}
+		if err = s.QueueStore.SendRestorePackage(ctx, queueMessage); err != nil {
+			// This will rollback Tx even though it's not a DB action.
+			return err
+		}
 		return nil
 	})
 	return &response, err

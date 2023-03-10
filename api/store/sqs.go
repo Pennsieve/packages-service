@@ -2,12 +2,15 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	log "github.com/sirupsen/logrus"
+	"github.com/pennsieve/packages-service/api/models"
 	"os"
 )
+
+const m = "api/store/sqs"
 
 type sqsStore struct {
 	Client            *sqs.Client
@@ -15,6 +18,7 @@ type sqsStore struct {
 }
 
 type QueueStore interface {
+	SendRestorePackage(ctx context.Context, restoreMessage models.RestorePackageMessage) error
 }
 
 func NewQueueStore(config aws.Config) (QueueStore, error) {
@@ -23,8 +27,21 @@ func NewQueueStore(config aws.Config) (QueueStore, error) {
 	restorePackageUrlRequest := sqs.GetQueueUrlInput{QueueName: &restorePackageQueue}
 	restorePackageResp, err := client.GetQueueUrl(context.Background(), &restorePackageUrlRequest)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get restore package queue URL from name %q: %w", restorePackageQueue, err)
+		return nil, fmt.Errorf("%s: unable to get restore package queue URL from name %q: %w", m, restorePackageQueue, err)
 	}
-	log.Info("restore package queue URL:", restorePackageResp.QueueUrl)
 	return &sqsStore{Client: client, RestorePackageURL: restorePackageResp.QueueUrl}, nil
+}
+
+func (s *sqsStore) SendRestorePackage(ctx context.Context, restoreMessage models.RestorePackageMessage) error {
+	body, err := json.Marshal(restoreMessage)
+	if err != nil {
+		return fmt.Errorf("%s: unable to marshal %s: %w", m, restoreMessage, err)
+	}
+	bodyStr := string(body)
+	request := sqs.SendMessageInput{QueueUrl: s.RestorePackageURL, MessageBody: &bodyStr}
+	_, err = s.Client.SendMessage(ctx, &request)
+	if err != nil {
+		return fmt.Errorf("%s: unable to add %s to the restore package queue: %w", m, bodyStr, err)
+	}
+	return nil
 }
