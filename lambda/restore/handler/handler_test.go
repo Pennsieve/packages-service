@@ -18,10 +18,10 @@ func TestNewMessageHandler(t *testing.T) {
 		MessageId: expectedMessageId,
 	}
 	sqlFactory := new(MockSQLFactory)
-	handler := NewMessageHandler(message, sqlFactory)
+	handler := NewMessageHandler(message, Store{SQLFactory: sqlFactory})
 
 	assert.Equal(message, handler.Message)
-	assert.Equal(sqlFactory, handler.SQLFactory)
+	assert.Equal(sqlFactory, handler.Store.SQLFactory)
 	assert.NotNil(handler.Logger)
 
 	assert.Equal(expectedMessageId, handler.newBatchItemFailure().ItemIdentifier)

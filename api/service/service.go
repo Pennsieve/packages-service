@@ -38,15 +38,16 @@ func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int) PackagesSe
 }
 
 func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
-	response := models.RestoreResponse{}
+	response := models.RestoreResponse{Success: []string{}, Failures: []models.Failure{}}
 	err := s.SQSStoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.SQLStore) error {
 		dataset, err := store.GetDatasetByNodeId(ctx, datasetId)
+		datasetIntId := dataset.Id
 		if err != nil {
 			return err
 		}
 		var restoring []*pgdb.Package
 		for _, nodeId := range request.NodeIds {
-			if p, err := store.TransitionPackageState(ctx, dataset.Id, nodeId, packageState.Deleted, packageState.Restoring); err == nil {
+			if p, err := store.TransitionPackageState(ctx, datasetIntId, nodeId, packageState.Deleted, packageState.Restoring); err == nil {
 				restoring = append(restoring, p)
 				response.Success = append(response.Success, nodeId)
 			} else {
@@ -69,11 +70,10 @@ func (s *packagesService) RestorePackages(ctx context.Context, datasetId string,
 				}
 			}
 		}
-		nodeIds := make([]string, len(restoring))
-		queueMessage := models.RestorePackageMessage{OrgId: s.OrgId, NodeIds: nodeIds}
-		for i, p := range restoring {
-			nodeIds[i] = p.NodeId
+		if len(restoring) == 0 {
+			return nil
 		}
+		queueMessage := models.NewRestorePackageMessage(s.OrgId, datasetIntId, restoring...)
 		if err = s.QueueStore.SendRestorePackage(ctx, queueMessage); err != nil {
 			// This will roll back Tx even though it's not a DB action.
 			return err

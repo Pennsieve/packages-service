@@ -7,6 +7,7 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,60 +35,104 @@ func TestTransitionPackageState(t *testing.T) {
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, nil, err
 		},
 		"package not found error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
-			okIds := []string{"N:package:1234"}
-			failedIds := map[string]error{"N:package:0987": models.PackageNotFoundError{DatasetId: models.DatasetNodeId(datasetNodeId), OrgId: orgId}}
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
+
+			okIds := []string{"N:package:1234"}
+			okPkgs := make([]*pgdb.Package, len(okIds))
+			for i, okId := range okIds {
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
+				okPkgs[i] = okPkg
+			}
+			sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
+			store.OnSendRestorePackageReturn(sqsMessage)
+
+			failedIdErrors := map[string]error{"N:package:0987": models.PackageNotFoundError{DatasetId: models.DatasetNodeId(datasetNodeId), OrgId: orgId}}
+			var failedIds []string
 			var failures []models.Failure
-			for id, err := range failedIds {
+			for id, err := range failedIdErrors {
+				failedIds = append(failedIds, id)
 				if pErr, ok := err.(models.PackageNotFoundError); ok {
 					pErr.Id = models.PackageNodeId(id)
 				}
 				store.OnTransitionPackageStateFail(datasetIntId, id, packageState.Deleted, packageState.Restoring, err)
 				failures = append(failures, models.Failure{Id: id, Error: fmt.Sprintf("deleted package %s not found in dataset %s", id, datasetNodeId)})
 			}
-			store.OnTransitionPackageStateReturn(datasetIntId, okIds[0], packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: okIds[0]})
-			message := newRestoreMessage(orgId, okIds...)
-			store.OnSendRestorePackageReturn(*message)
+
 			// Not treating package not found from state transition as an error.
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
+			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...)}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
 		},
-		"unexpected package state transition error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
-			okIds := []string{"N:package:1234"}
-			expectedError := errors.New("unexpected package state transition")
-			failedIds := map[string]error{"N:package:0987": expectedError}
+		"no packages found": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
+
+			failedIdErrors := map[string]error{"N:package:0987": models.PackageNotFoundError{DatasetId: models.DatasetNodeId(datasetNodeId), OrgId: orgId}}
+			var failedIds []string
 			var failures []models.Failure
-			for id, err := range failedIds {
+			for id, err := range failedIdErrors {
+				failedIds = append(failedIds, id)
 				if pErr, ok := err.(models.PackageNotFoundError); ok {
 					pErr.Id = models.PackageNodeId(id)
 				}
 				store.OnTransitionPackageStateFail(datasetIntId, id, packageState.Deleted, packageState.Restoring, err)
-				failures = append(failures, models.Failure{Id: id, Error: fmt.Sprintf("unexpected error restoring package: %v", err)})
+				failures = append(failures, models.Failure{Id: id, Error: fmt.Sprintf("deleted package %s not found in dataset %s", id, datasetNodeId)})
 			}
-			store.OnTransitionPackageStateReturn(datasetIntId, okIds[0], packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: okIds[0]})
 
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: failures}, expectedError
+			// Not treating package not found from state transition as an error.
+			return &models.RestoreRequest{NodeIds: failedIds}, &models.RestoreResponse{Success: []string{}, Failures: failures}, nil
+		},
+		"unexpected package state transition error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
+			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
+
+			okIds := []string{"N:package:1234"}
+			for i, okId := range okIds {
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
+			}
+
+			expectedError := errors.New("unexpected package state transition")
+			failedIdErrors := map[string]error{"N:package:0987": expectedError}
+			var failedIds []string
+			for id, err := range failedIdErrors {
+				failedIds = append(failedIds, id)
+				if pErr, ok := err.(models.PackageNotFoundError); ok {
+					pErr.Id = models.PackageNodeId(id)
+				}
+				store.OnTransitionPackageStateFail(datasetIntId, id, packageState.Deleted, packageState.Restoring, err)
+			}
+
+			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...)}, nil, expectedError
 		},
 		"unexpected sqs send error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
-			packageNodeIds := []string{"N:package:1234", "N:package:0987"}
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
-			for _, p := range packageNodeIds {
-				store.OnTransitionPackageStateReturn(datasetIntId, p, packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: p})
+
+			okIds := []string{"N:package:1234", "N:package:0987"}
+			okPkgs := make([]*pgdb.Package, len(okIds))
+			for i, okId := range okIds {
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
+				okPkgs[i] = okPkg
 			}
+
 			sqsError := errors.New("unexpected sqs send error")
-			message := newRestoreMessage(orgId, packageNodeIds...)
-			store.OnSendRestorePackageFail(*message, sqsError)
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, nil, sqsError
+			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
+			store.OnSendRestorePackageFail(message, sqsError)
+			return &models.RestoreRequest{NodeIds: okIds}, nil, sqsError
 		},
 		"no errors": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
-			packageNodeIds := []string{"N:package:1234", "N:package:0987"}
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
-			for _, p := range packageNodeIds {
-				store.OnTransitionPackageStateReturn(datasetIntId, p, packageState.Deleted, packageState.Restoring, &pgdb.Package{NodeId: p})
+
+			okIds := []string{"N:package:1234", "N:package:0987"}
+			okPkgs := make([]*pgdb.Package, len(okIds))
+			for i, okId := range okIds {
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
+				okPkgs[i] = okPkg
 			}
-			message := newRestoreMessage(orgId, packageNodeIds...)
-			store.OnSendRestorePackageReturn(*message)
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: packageNodeIds}, nil
+
+			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
+			store.OnSendRestorePackageReturn(message)
+
+			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: []models.Failure{}}, nil
 		},
 	} {
 		mockStore := new(MockPackagesStore)
@@ -96,16 +141,17 @@ func TestTransitionPackageState(t *testing.T) {
 		service := newPackagesServiceWithFactory(&mockFactory, orgId).withQueueStore(mockStore)
 		t.Run(tName, func(t *testing.T) {
 			response, err := service.RestorePackages(context.Background(), datasetNodeId, *request, false)
-			mockStore.AssertExpectations(t)
-			assert.Equal(t, orgId, mockFactory.orgId)
-			assert.Equal(t, expectedError, mockFactory.txError)
-			if expectedError == nil {
-				if assert.NoError(t, err) {
-					assert.Equal(t, expectedResponse, response)
-				}
-			} else {
-				if assert.Error(t, err) {
-					assert.Equal(t, expectedError, err)
+			if mockStore.AssertExpectations(t) {
+				assert.Equal(t, orgId, mockFactory.orgId)
+				assert.Equal(t, expectedError, mockFactory.txError)
+				if expectedError == nil {
+					if assert.NoError(t, err) {
+						assert.Equal(t, expectedResponse, response)
+					}
+				} else {
+					if assert.Error(t, err) {
+						assert.Equal(t, expectedError, err)
+					}
 				}
 			}
 		})
@@ -173,9 +219,10 @@ func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store st
 	return m.txError
 }
 
-func newRestoreMessage(orgId int, ids ...string) *models.RestorePackageMessage {
-	infos := make([]string, len(ids))
-	copy(infos, ids)
-	msg := models.RestorePackageMessage{OrgId: orgId, NodeIds: infos}
-	return &msg
+func newDeletedPackage(nodeId, origName string, packageType packageType.Type) *pgdb.Package {
+	return &pgdb.Package{
+		NodeId:      nodeId,
+		PackageType: packageType,
+		Name:        fmt.Sprintf("__%s__%s_%s", packageState.Deleted, nodeId, origName),
+	}
 }

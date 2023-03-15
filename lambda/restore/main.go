@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/pennsieve/packages-service/restore/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	log "github.com/sirupsen/logrus"
@@ -29,6 +33,16 @@ func init() {
 	}
 	log.Info("connected to RDS database")
 	handler.PennsieveDB = db
+
+	// Create AWS config
+	region := os.Getenv("REGION")
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
+	if err != nil {
+		log.Fatalf("AWS configuration error: %v\n", err)
+	}
+
+	handler.S3Client = s3.NewFromConfig(cfg)
+	handler.DyDBClient = dynamodb.NewFromConfig(cfg)
 }
 
 func main() {
