@@ -91,6 +91,52 @@ func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, p
 	}
 }
 
+func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error) {
+	query := fmt.Sprintf(`WITH RECURSIVE nodes(id) AS (
+							SELECT id FROM "%[1]d".packages
+                             	WHERE parent_id = $1
+							 	AND dataset_id = $2
+								AND state = $3
+							UNION ALL
+                             SELECT o.id FROM "%[1]d".packages o
+								JOIN nodes n on n.id = o.parent_id
+								WHERE state = $3)
+				UPDATE "%[1]d".packages
+				SET state = $4
+				WHERE state = $3 AND id IN (SELECT id FROM nodes n)
+				RETURNING %s`, q.OrgId, packageColumnsString)
+	var updated []pgdb.Package
+	rows, err := q.db.QueryContext(ctx, query, parentId, datasetId, expectedState, targetState)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pkg pgdb.Package
+		if err = rows.Scan(&pkg.Id,
+			&pkg.Name,
+			&pkg.PackageType,
+			&pkg.PackageState,
+			&pkg.NodeId,
+			&pkg.ParentId,
+			&pkg.DatasetId,
+			&pkg.OwnerId,
+			&pkg.Size,
+			&pkg.ImportId,
+			&pkg.Attributes,
+			&pkg.CreatedAt,
+			&pkg.UpdatedAt); err != nil {
+			return updated, err
+		}
+		updated = append(updated, pkg)
+	}
+	if err = rows.Err(); err != nil {
+		return updated, err
+	}
+	return updated, nil
+}
+
 func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error) {
 	const datasetColumns = "id, name, state, description, updated_at, created_at, node_id, permission_bit, type, role, status, automatically_process_packages, license, tags, contributors, banner_id, readme_id, status_id, publication_status_id, size, etag, data_use_agreement_id, changelog_id"
 	var ds pgdb.Dataset
@@ -128,4 +174,5 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 type SQLStore interface {
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
+	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error)
 }

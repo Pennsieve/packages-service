@@ -20,9 +20,11 @@ type Failure struct {
 }
 
 type RestorePackageInfo struct {
-	NodeId       string `json:"nodeId"`
-	Name         string `json:"name"`
-	IsCollection bool   `json:"isCollection"`
+	NodeId   string           `json:"nodeId"`
+	Name     string           `json:"name"`
+	ParentId *int64           `json:"parentId"`
+	Type     packageType.Type `json:"type"`
+	Size     *int64           `json:"size"`
 }
 
 type RestorePackageMessage struct {
@@ -35,7 +37,15 @@ func NewRestorePackageMessage(orgId int, datasetId int64, toBeRestored ...*pgdb.
 	packages := make([]RestorePackageInfo, len(toBeRestored))
 	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, Packages: packages}
 	for i, p := range toBeRestored {
-		packages[i] = RestorePackageInfo{NodeId: p.NodeId, Name: p.Name, IsCollection: p.PackageType == packageType.Collection}
+		restoreInfo := RestorePackageInfo{NodeId: p.NodeId, Name: p.Name, Type: p.PackageType}
+		if p.ParentId.Valid {
+			restoreInfo.ParentId = &p.ParentId.Int64
+		}
+		if p.Size.Valid {
+			restoreInfo.Size = &p.Size.Int64
+		}
+		packages[i] = restoreInfo
+
 	}
 	return queueMessage
 }

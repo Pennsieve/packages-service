@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/pennsieve/packages-service/api/models"
@@ -40,7 +41,9 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			for i, okId := range okIds {
-				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				var size int64
+				size = int64((i + 7) * 1024)
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, nil, &size)
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
@@ -85,7 +88,9 @@ func TestTransitionPackageState(t *testing.T) {
 
 			okIds := []string{"N:package:1234"}
 			for i, okId := range okIds {
-				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				var parentId int64
+				parentId = int64(i + 8)
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, &parentId, nil)
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 			}
 
@@ -108,7 +113,9 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234", "N:package:0987"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			for i, okId := range okIds {
-				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				var size int64
+				size = int64((i + 7) * 1024)
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, nil, &size)
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
@@ -124,7 +131,9 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234", "N:package:0987"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			for i, okId := range okIds {
-				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text)
+				var parentId int64
+				parentId = int64(i + 19)
+				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, &parentId, nil)
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
@@ -202,6 +211,19 @@ func (m *MockPackagesStore) OnTransitionPackageStateFail(datasetId int64, packag
 	m.On("TransitionPackageState", mock.Anything, datasetId, packageId, expectedState, targetState).Return(&pgdb.Package{}, returnedError)
 }
 
+func (m *MockPackagesStore) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error) {
+	args := m.Called(ctx, datasetId, parentId, expectedState, targetState)
+	return args.Get(0).([]pgdb.Package), args.Error(1)
+}
+
+func (m *MockPackagesStore) OnTransitionDescendantPackageStateReturn(datasetId int64, parentId int64, expectedState, targetState packageState.State, returnedValue []pgdb.Package) {
+	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(returnedValue, nil)
+}
+
+func (m *MockPackagesStore) OnTransitionDescendantPackageStateFail(datasetId int64, parentId int64, expectedState, targetState packageState.State, returnedError error) {
+	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(nil, returnedError)
+}
+
 type MockFactory struct {
 	mockStore *MockPackagesStore
 	orgId     int
@@ -219,10 +241,20 @@ func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store st
 	return m.txError
 }
 
-func newDeletedPackage(nodeId, origName string, packageType packageType.Type) *pgdb.Package {
+func newDeletedPackage(nodeId, origName string, packageType packageType.Type, parentId, size *int64) *pgdb.Package {
+	var packageParentId, packageSize sql.NullInt64
+	if parentId != nil {
+		packageParentId.Valid = true
+		packageParentId.Int64 = *parentId
+	}
+	if size != nil {
+		packageSize.Valid = true
+		packageSize.Int64 = *size
+	}
 	return &pgdb.Package{
 		NodeId:      nodeId,
 		PackageType: packageType,
 		Name:        fmt.Sprintf("__%s__%s_%s", packageState.Deleted, nodeId, origName),
+		ParentId:    packageParentId,
 	}
 }

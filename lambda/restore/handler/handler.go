@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -76,31 +77,17 @@ func (h *MessageHandler) handle(ctx context.Context) error {
 
 func (h *MessageHandler) handleMessage(ctx context.Context, message models.RestorePackageMessage) error {
 	for _, p := range message.Packages {
-		if p.IsCollection {
-			if err := h.handleFolder(ctx, message.OrgId, message.DatasetId, p.NodeId); err != nil {
+		if p.Type == packageType.Collection {
+			if err := h.handleFolderPackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
 				return h.errorf("could not restore folder %s in org %d: %w", p.NodeId, message.OrgId, err)
 			}
 		} else {
-			if err := h.handlePackage(ctx, message.OrgId, message.DatasetId, p.NodeId); err != nil {
+			if err := h.handleFilePackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
 				return h.errorf("could not restore package %s in org %d: %w", p.NodeId, message.OrgId, err)
 			}
 		}
 	}
 	return nil
-}
-
-func (h *MessageHandler) handlePackage(ctx context.Context, orgId int, datasetId int64, nodeId string) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
-		return nil
-	})
-	return err
-}
-
-func (h *MessageHandler) handleFolder(ctx context.Context, orgId int, datasetId int64, nodeId string) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
-		return nil
-	})
-	return err
 }
 
 func (h *MessageHandler) logError(args ...any) {
