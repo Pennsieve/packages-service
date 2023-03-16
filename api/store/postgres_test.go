@@ -45,11 +45,14 @@ func openDB(t *testing.T) *sql.DB {
 
 func loadFromFile(t *testing.T, db *sql.DB, sqlFile string) {
 	path := filepath.Join("testdata", sqlFile)
-	sqlBytes, ioErr := os.ReadFile(path)
-	if assert.NoError(t, ioErr) {
-		sqlStr := string(sqlBytes)
-		_, err := db.Exec(sqlStr)
-		assert.NoError(t, err)
+	sqlBytes, err := os.ReadFile(path)
+	if err != nil {
+		assert.FailNowf(t, "unable to read SQL file", "%s: %v", path, err)
+	}
+	sqlStr := string(sqlBytes)
+	_, err = db.Exec(sqlStr)
+	if err != nil {
+		assert.FailNowf(t, "error executing SQL file", "%s: %v", path, err)
 	}
 }
 
@@ -148,6 +151,59 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 				}
 			}
 			return true
+		})
+	}
+}
+
+func TestQueries_UpdatePackageName(t *testing.T) {
+	db := openDB(t)
+	defer func() {
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
+	}()
+	expectedOrdId := 2
+	loadFromFile(t, db, "update-package-name-test.sql")
+	defer truncate(t, db, expectedOrdId, "packages")
+
+	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrdId)
+	store := NewQueries(db, expectedOrdId)
+
+	for name, testData := range map[string]struct {
+		packageId        int64
+		newName          string
+		expectedRowCount int64
+		expectError      bool
+	}{
+		"root no error":                  {int64(1), "update.txt", int64(1), false},
+		"root duplicate name":            {int64(1), "another-file.txt", int64(-1), true},
+		"no error":                       {int64(7), "update.csv", int64(1), false},
+		"package with id does not exist": {int64(10), "update.txt", int64(0), false},
+		"duplicate name":                 {int64(7), "another-one-file.csv", int64(-1), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			actualCount, err := store.UpdatePackageName(context.Background(), testData.packageId, testData.newName)
+			if testData.expectError {
+				assert.Error(t, err)
+				err, ok := err.(models.PackageNameUniquenessError)
+				if assert.True(t, ok) {
+					assert.Equal(t, err.Name, testData.newName)
+					assert.Equal(t, err.Id.Id, testData.packageId)
+					assert.Equal(t, err.OrgId, expectedOrdId)
+					assert.NotNil(t, err.SQLError)
+				}
+			} else {
+				if assert.NoError(t, err) {
+					assert.Equal(t, testData.expectedRowCount, actualCount)
+					if actualCount > 0 {
+						var actualNewName string
+						err := db.QueryRow(checkResultQuery, testData.packageId).Scan(&actualNewName)
+						if assert.NoError(t, err) {
+							assert.Equal(t, testData.newName, actualNewName)
+						}
+					}
+				}
+			}
 		})
 	}
 }

@@ -5,12 +5,18 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	pg "github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	"strings"
+)
+
+const (
+	uniqueViolationCode       = "23505"
+	rootPackageNameConstraint = "packages_name_dataset_id__parent_id_null_idx"
+	packageNameConstraint     = "packages_name_dataset_id_parent_id__parent_id_not_null_idx"
 )
 
 var (
@@ -72,6 +78,14 @@ func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newNam
 	query := fmt.Sprintf(`UPDATE "%d".packages SET name = $1 WHERE id = $2`, q.OrgId)
 	res, err := q.db.ExecContext(ctx, query, newName, packageId)
 	if err != nil {
+		if err, ok := err.(*pq.Error); ok && err.Code == uniqueViolationCode && (err.Constraint == rootPackageNameConstraint || err.Constraint == packageNameConstraint) {
+			return -1, models.PackageNameUniquenessError{
+				OrgId:    q.OrgId,
+				Id:       models.PackageIntId(packageId),
+				Name:     newName,
+				SQLError: err,
+			}
+		}
 		return -1, err
 	}
 	return res.RowsAffected()
