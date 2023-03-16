@@ -224,6 +224,11 @@ func (m *MockPackagesStore) OnTransitionDescendantPackageStateFail(datasetId int
 	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(nil, returnedError)
 }
 
+func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
+	args := m.Called(ctx, packageId, newName)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 type MockFactory struct {
 	mockStore *MockPackagesStore
 	orgId     int
@@ -241,6 +246,8 @@ func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store st
 	return m.txError
 }
 
+var artificialPackageId = int64(0)
+
 func newDeletedPackage(nodeId, origName string, packageType packageType.Type, parentId, size *int64) *pgdb.Package {
 	var packageParentId, packageSize sql.NullInt64
 	if parentId != nil {
@@ -251,7 +258,9 @@ func newDeletedPackage(nodeId, origName string, packageType packageType.Type, pa
 		packageSize.Valid = true
 		packageSize.Int64 = *size
 	}
+	artificialPackageId++
 	return &pgdb.Package{
+		Id:          artificialPackageId,
 		NodeId:      nodeId,
 		PackageType: packageType,
 		Name:        fmt.Sprintf("__%s__%s_%s", packageState.Deleted, nodeId, origName),

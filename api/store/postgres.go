@@ -68,6 +68,15 @@ func NewQueries(db pg.DBTX, orgId int) *Queries {
 	return &Queries{db: db, OrgId: orgId}
 }
 
+func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
+	query := fmt.Sprintf(`UPDATE "%d".packages SET name = $1 WHERE id = $2`, q.OrgId)
+	res, err := q.db.ExecContext(ctx, query, newName, packageId)
+	if err != nil {
+		return -1, err
+	}
+	return res.RowsAffected()
+}
+
 func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
 	query := fmt.Sprintf(`UPDATE "%d".packages SET state = $1 WHERE node_id = $2 AND dataset_id = $3 AND state = $4 RETURNING %s`, q.OrgId, packageColumnsString)
 	var pkg pgdb.Package
@@ -172,6 +181,7 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 }
 
 type SQLStore interface {
+	UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error)
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
 	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error)

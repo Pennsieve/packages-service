@@ -11,16 +11,24 @@ import (
 )
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
+		var pkgsInFolder []pgdb.Package
+		err := restorePackage(ctx, datasetId, restoreInfo, pkgsInFolder, store)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
+}
+
+func restorePackage(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, packagesInFolder []pgdb.Package, store store.SQLStore) error {
 	originalName, err := getOriginalName(restoreInfo.Name, restoreInfo.NodeId)
 	if err != nil {
 		return err
 	}
-	err = h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
-		var pkgsInFolder []*pgdb.Package
-		getNewName(originalName, restoreInfo, pkgsInFolder)
-		return nil
-	})
-	return err
+	getNewName(originalName, restoreInfo, packagesInFolder)
+	return nil
 }
 
 func getOriginalName(deletedName, nodeId string) (string, error) {
@@ -31,7 +39,7 @@ func getOriginalName(deletedName, nodeId string) (string, error) {
 	return deletedName[len(expectedPrefix):], nil
 }
 
-func getNewName(desiredName string, restoreInfo models.RestorePackageInfo, packagesInFolder []*pgdb.Package) string {
+func getNewName(desiredName string, restoreInfo models.RestorePackageInfo, packagesInFolder []pgdb.Package) string {
 	newName := desiredName
 	suffix := 0
 	for _, p := range packagesInFolder {

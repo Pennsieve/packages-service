@@ -14,7 +14,7 @@ import (
 )
 
 // pingUntilReady pings the db up to 10 times, stopping when
-// a ping is successful. Used because there have been problems with
+// a ping is successful. Used because there have been problems on Jenkins with
 // the test DB not being fully started and ready to make connections.
 // But there must be a better way.
 func pingUntilReady(db *sql.DB) error {
@@ -112,5 +112,42 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 	err = db.QueryRow(verifyStateQuery, expectedNodeId).Scan(&actualState)
 	if assert.NoError(t, err) {
 		assert.Equal(t, expectedState, actualState, "state modified, but should not have been")
+	}
+}
+
+func TestQueries_TransitionDescendantPackageState(t *testing.T) {
+	db := openDB(t)
+	defer func() {
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
+	}()
+	expectedOrdId := 2
+	loadFromFile(t, db, "update-desc-test.sql")
+	defer truncate(t, db, expectedOrdId, "packages")
+	expectedRestoringNames := []string{"one-file-deleted-1.csv", "one-file-deleted-2", "one-dir-deleted-1", "two-file-deleted-1.csv", "two-dir-deleted-1", "three-file-deleted-1.png"}
+	store := NewQueries(db, expectedOrdId)
+	restoring, err := store.TransitionDescendantPackageState(context.Background(), 1, 4, packageState.Deleted, packageState.Restoring)
+	if assert.NoError(t, err) {
+		assert.Len(t, restoring, len(expectedRestoringNames))
+		for _, expectedName := range expectedRestoringNames {
+			assert.Conditionf(t, func() (success bool) {
+				for _, actual := range restoring {
+					if actual.Name == expectedName {
+						success = true
+						break
+					}
+				}
+				return
+			}, "expected package name %s missing from %v", expectedName, restoring)
+		}
+		assert.Condition(t, func() bool {
+			for _, actual := range restoring {
+				if !assert.Equal(t, packageState.Restoring, actual.PackageState) {
+					return false
+				}
+			}
+			return true
+		})
 	}
 }
