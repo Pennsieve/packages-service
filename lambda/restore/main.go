@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/restore/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	log "github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ import (
 )
 
 func init() {
+	uuid.EnableRandPool()
 	log.SetFormatter(&log.JSONFormatter{})
 	if level, ok := os.LookupEnv("LOG_LEVEL"); !ok {
 		log.SetLevel(log.InfoLevel)

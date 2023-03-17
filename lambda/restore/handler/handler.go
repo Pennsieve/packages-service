@@ -25,16 +25,16 @@ func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.
 	objectStore := store.NewObjectStore(S3Client)
 	nosqlStore := store.NewNoSQLStore(DyDBClient)
 	str := Store{SQLFactory: sqlFactory, Object: objectStore, NoSQL: nosqlStore}
-	return handleBatch(ctx, event, str)
+	return handleBatches(ctx, event, &str)
 }
 
-func handleBatch(ctx context.Context, event events.SQSEvent, store Store) (events.SQSEventResponse, error) {
+func handleBatches(ctx context.Context, event events.SQSEvent, store *Store) (events.SQSEventResponse, error) {
 	response := events.SQSEventResponse{
 		BatchItemFailures: []events.SQSBatchItemFailure{},
 	}
 	for _, r := range event.Records {
 		handler := NewMessageHandler(r, store)
-		if err := handler.handle(ctx); err != nil {
+		if err := handler.handleBatch(ctx); err != nil {
 			handler.logError(err)
 			response.BatchItemFailures = append(response.BatchItemFailures, handler.newBatchItemFailure())
 		}
@@ -51,10 +51,10 @@ type Store struct {
 type MessageHandler struct {
 	Message events.SQSMessage
 	Logger  *log.Entry
-	Store   Store
+	Store   *Store
 }
 
-func NewMessageHandler(message events.SQSMessage, store Store) *MessageHandler {
+func NewMessageHandler(message events.SQSMessage, store *Store) *MessageHandler {
 	handler := MessageHandler{Message: message, Store: store}
 	logger := log.WithFields(log.Fields{
 		"messageId": handler.Message.MessageId,
@@ -64,7 +64,7 @@ func NewMessageHandler(message events.SQSMessage, store Store) *MessageHandler {
 	return &handler
 }
 
-func (h *MessageHandler) handle(ctx context.Context) error {
+func (h *MessageHandler) handleBatch(ctx context.Context) error {
 	restoreMessage := models.RestorePackageMessage{}
 	if err := json.Unmarshal([]byte(h.Message.Body), &restoreMessage); err != nil {
 		return h.errorf("could not unmarshal message [%s]: %w", h.Message.Body, err)
@@ -100,6 +100,10 @@ func (h *MessageHandler) logErrorWithFields(fields log.Fields, args ...any) {
 
 func (h *MessageHandler) logInfo(args ...any) {
 	h.Logger.Info(args...)
+}
+
+func (h *MessageHandler) logInfoWithFields(fields log.Fields, args ...any) {
+	h.Logger.WithFields(fields).Info(args...)
 }
 
 func (h *MessageHandler) newBatchItemFailure() events.SQSBatchItemFailure {

@@ -211,12 +211,12 @@ func (m *MockPackagesStore) OnTransitionPackageStateFail(datasetId int64, packag
 	m.On("TransitionPackageState", mock.Anything, datasetId, packageId, expectedState, targetState).Return(&pgdb.Package{}, returnedError)
 }
 
-func (m *MockPackagesStore) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error) {
+func (m *MockPackagesStore) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
 	args := m.Called(ctx, datasetId, parentId, expectedState, targetState)
-	return args.Get(0).([]pgdb.Package), args.Error(1)
+	return args.Get(0).([]*pgdb.Package), args.Error(1)
 }
 
-func (m *MockPackagesStore) OnTransitionDescendantPackageStateReturn(datasetId int64, parentId int64, expectedState, targetState packageState.State, returnedValue []pgdb.Package) {
+func (m *MockPackagesStore) OnTransitionDescendantPackageStateReturn(datasetId int64, parentId int64, expectedState, targetState packageState.State, returnedValue []*pgdb.Package) {
 	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(returnedValue, nil)
 }
 
@@ -227,6 +227,21 @@ func (m *MockPackagesStore) OnTransitionDescendantPackageStateFail(datasetId int
 func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
 	args := m.Called(ctx, packageId, newName)
 	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockPackagesStore) NewSavepoint(ctx context.Context, name string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *MockPackagesStore) RollbackToSavepoint(ctx context.Context, name string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *MockPackagesStore) ReleaseSavepoint(ctx context.Context, name string) error {
+	//TODO implement me
+	panic("implement me")
 }
 
 type MockFactory struct {

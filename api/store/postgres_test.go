@@ -2,75 +2,22 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/stretchr/testify/assert"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
 )
 
-// pingUntilReady pings the db up to 10 times, stopping when
-// a ping is successful. Used because there have been problems on Jenkins with
-// the test DB not being fully started and ready to make connections.
-// But there must be a better way.
-func pingUntilReady(db *sql.DB) error {
-	var err error
-	wait := 100 * time.Millisecond
-	for i := 0; i < 10; i++ {
-		if err = db.Ping(); err == nil {
-			return nil
-		}
-		time.Sleep(wait)
-		wait = 2 * wait
-
-	}
-	return err
-}
-
-func openDB(t *testing.T) *sql.DB {
-	config := PostgresConfigFromEnv()
-	db, err := config.Open()
-	if err != nil {
-		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", config, err)
-	}
-	if err = pingUntilReady(db); err != nil {
-		assert.FailNow(t, "cannot ping database", err)
-	}
-	return db
-}
-
-func loadFromFile(t *testing.T, db *sql.DB, sqlFile string) {
-	path := filepath.Join("testdata", sqlFile)
-	sqlBytes, err := os.ReadFile(path)
-	if err != nil {
-		assert.FailNowf(t, "unable to read SQL file", "%s: %v", path, err)
-	}
-	sqlStr := string(sqlBytes)
-	_, err = db.Exec(sqlStr)
-	if err != nil {
-		assert.FailNowf(t, "error executing SQL file", "%s: %v", path, err)
-	}
-}
-
-func truncate(t *testing.T, db *sql.DB, orgID int, table string) {
-	query := fmt.Sprintf("TRUNCATE TABLE \"%d\".%s CASCADE", orgID, table)
-	_, err := db.Exec(query)
-	assert.NoError(t, err)
-}
-
 func TestTransitionPackageState(t *testing.T) {
-	db := openDB(t)
+	db := OpenDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	loadFromFile(t, db, "folder-nav-test.sql")
-	defer truncate(t, db, 2, "packages")
+	ExecSQLFile(t, db, "folder-nav-test.sql")
+	defer Truncate(t, db, 2, "packages")
 
 	store := NewQueries(db, 2)
 	expectedDatasetId := int64(1)
@@ -85,15 +32,15 @@ func TestTransitionPackageState(t *testing.T) {
 }
 
 func TestTransitionPackageStateNoTransition(t *testing.T) {
-	db := openDB(t)
+	db := OpenDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
 	expectedOrdId := 2
-	loadFromFile(t, db, "folder-nav-test.sql")
-	defer truncate(t, db, expectedOrdId, "packages")
+	ExecSQLFile(t, db, "folder-nav-test.sql")
+	defer Truncate(t, db, expectedOrdId, "packages")
 
 	store := NewQueries(db, 2)
 	expectedDatasetId := int64(1)
@@ -119,15 +66,15 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 }
 
 func TestQueries_TransitionDescendantPackageState(t *testing.T) {
-	db := openDB(t)
+	db := OpenDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
 	expectedOrdId := 2
-	loadFromFile(t, db, "update-desc-test.sql")
-	defer truncate(t, db, expectedOrdId, "packages")
+	ExecSQLFile(t, db, "update-desc-test.sql")
+	defer Truncate(t, db, expectedOrdId, "packages")
 	expectedRestoringNames := []string{"one-file-deleted-1.csv", "one-file-deleted-2", "one-dir-deleted-1", "two-file-deleted-1.csv", "two-dir-deleted-1", "three-file-deleted-1.png"}
 	store := NewQueries(db, expectedOrdId)
 	restoring, err := store.TransitionDescendantPackageState(context.Background(), 1, 4, packageState.Deleted, packageState.Restoring)
@@ -156,15 +103,15 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 }
 
 func TestQueries_UpdatePackageName(t *testing.T) {
-	db := openDB(t)
+	db := OpenDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
 	expectedOrdId := 2
-	loadFromFile(t, db, "update-package-name-test.sql")
-	defer truncate(t, db, expectedOrdId, "packages")
+	ExecSQLFile(t, db, "update-package-name-test.sql")
+	defer Truncate(t, db, expectedOrdId, "packages")
 
 	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrdId)
 	store := NewQueries(db, expectedOrdId)
@@ -180,6 +127,7 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 		"no error":                       {int64(7), "update.csv", int64(1), false},
 		"package with id does not exist": {int64(10), "update.txt", int64(0), false},
 		"duplicate name":                 {int64(7), "another-one-file.csv", int64(-1), true},
+		"same name":                      {int64(7), "one-file.csv", int64(1), false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			actualCount, err := store.UpdatePackageName(context.Background(), testData.packageId, testData.newName)
