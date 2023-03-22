@@ -21,6 +21,16 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		if err != nil {
 			return err
 		}
+		deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
+		if err != nil {
+			return err
+		}
+		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
+		if !ok {
+			h.logInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
+		}
+		h.logInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+
 		return errors.New("returning error to rollback Tx during development")
 	})
 	return err

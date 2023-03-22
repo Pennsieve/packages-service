@@ -1,16 +1,114 @@
 package store
 
 import (
+	"context"
+	"fmt"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/pennsieve/packages-service/api/models"
+	log "github.com/sirupsen/logrus"
+	"math/rand"
+	"os"
+	"time"
 )
+
+const maxGetItemBatch = 100
+
+var (
+	deleteMarkerVersionProjection = "NodeId, S3Bucket, S3Key, S3ObjectVersion"
+	deleteRecordTable             string
+)
+
+func init() {
+	deleteRecordTable = os.Getenv("DELETE_RECORD_DYNAMODB_TABLE_NAME")
+}
 
 type dynamodbStore struct {
 	Client *dynamodb.Client
 }
 
-type NoSQLStore interface {
+type S3ObjectInfo struct {
+	NodeId    string `dynamobdbav:"NodeId"`
+	Bucket    string `dynamodbav:"Bucket"`
+	Key       string `dynamodbav:"Key"`
+	VersionId string `dynamodbav:"VersionId"`
 }
 
-func NewNoSQLStore(dynamodbClient *dynamodb.Client) ObjectStore {
+type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
+
+type NoSQLStore interface {
+	GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error)
+}
+
+func NewNoSQLStore(dynamodbClient *dynamodb.Client) NoSQLStore {
 	return &dynamodbStore{Client: dynamodbClient}
+}
+
+func (d *dynamodbStore) GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error) {
+	var deleteMarkerVersions GetDeleteMarkerVersionsResponse
+	for i := 0; i < len(restoring); i += maxGetItemBatch {
+		j := i + maxGetItemBatch
+		if j > len(restoring) {
+			j = len(restoring)
+		}
+		batch := restoring[i:j]
+		keys := make([]map[string]types.AttributeValue, len(batch))
+		for i, r := range batch {
+			keys[i] = map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: r.NodeId}}
+		}
+		items, err := d.getBatchItemsSingleTable(ctx, deleteRecordTable, &deleteMarkerVersionProjection, keys)
+		if err != nil {
+			return nil, fmt.Errorf("error reading delete records from %s: %w", deleteRecordTable, err)
+		}
+		for _, item := range items {
+			objectInfo := S3ObjectInfo{}
+			if err := attributevalue.UnmarshalMap(item, &objectInfo); err != nil {
+				return nil, fmt.Errorf("error unmarshalling %v: %w", item, err)
+			}
+			deleteMarkerVersions[objectInfo.NodeId] = &objectInfo
+		}
+
+	}
+	return deleteMarkerVersions, nil
+}
+
+func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName string, projectionExpression *string, keys []map[string]types.AttributeValue) ([]map[string]types.AttributeValue, error) {
+	var items []map[string]types.AttributeValue
+	makeOneRequest := func(ctx context.Context, input *dynamodb.BatchGetItemInput) (unprocessedKeys types.KeysAndAttributes, err error) {
+		var output *dynamodb.BatchGetItemOutput
+		output, err = d.Client.BatchGetItem(ctx, input)
+		if err != nil {
+			return
+		}
+		log.Infof("DynamobDB output: %v", output)
+		responses, ok := output.Responses[tableName]
+		if !ok {
+			err = fmt.Errorf("unexpected error: no responses for table %s", tableName)
+			return
+		}
+		items = append(items, responses...)
+		unprocessedKeys = output.UnprocessedKeys[tableName]
+		return
+	}
+
+	requestKeys := types.KeysAndAttributes{Keys: keys, ProjectionExpression: projectionExpression}
+	input := dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{tableName: requestKeys}}
+	unprocessed, err := makeOneRequest(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
+	retryCount := 1
+	for len(unprocessed.Keys) > 0 {
+		waitDuration := time.Duration(retryCount)*time.Second + (time.Duration(rand.Intn(1000)) * time.Millisecond)
+		time.Sleep(waitDuration)
+		log.Infof("retrying %d unprocessed items out of an original %d after a wait of %s", len(unprocessed.Keys), len(keys), waitDuration)
+		input := dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{tableName: unprocessed}}
+		unprocessed, err = makeOneRequest(ctx, &input)
+		if err != nil {
+			return nil, err
+		}
+		retryCount++
+	}
+	return items, nil
 }
