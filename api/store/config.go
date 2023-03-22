@@ -5,6 +5,7 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"os"
+	"strings"
 )
 
 func init() {
@@ -20,6 +21,15 @@ func init() {
 		}
 
 	}
+}
+
+type PostgresOption struct {
+	Name  string
+	Value string
+}
+
+func (o *PostgresOption) String() string {
+	return fmt.Sprintf("%s=%s", o.Name, o.Value)
 }
 
 type PostgresConfig struct {
@@ -49,8 +59,14 @@ func (c *PostgresConfig) LogString() string {
 		c.Host, c.Port, c.User, c.DBName, c.SSLMode)
 }
 
-func (c *PostgresConfig) Open() (*sql.DB, error) {
-	return sql.Open("postgres", c.String())
+func (c *PostgresConfig) Open(additionalOptions ...PostgresOption) (*sql.DB, error) {
+	var b strings.Builder
+	b.WriteString(c.String())
+	for _, o := range additionalOptions {
+		b.WriteString(" ")
+		b.WriteString(o.String())
+	}
+	return sql.Open("postgres", b.String())
 }
 
 func (c *PostgresConfig) OpenAtSchema(schema string) (*sql.DB, error) {

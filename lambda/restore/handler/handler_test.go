@@ -18,7 +18,7 @@ func TestNewMessageHandler(t *testing.T) {
 		MessageId: expectedMessageId,
 	}
 	sqlFactory := new(MockSQLFactory)
-	handler := NewMessageHandler(message, Store{SQLFactory: sqlFactory})
+	handler := NewMessageHandler(message, &Store{SQLFactory: sqlFactory})
 
 	assert.Equal(message, handler.Message)
 	assert.Equal(sqlFactory, handler.Store.SQLFactory)

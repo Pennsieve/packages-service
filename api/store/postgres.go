@@ -5,12 +5,18 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	pg "github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	"strings"
+)
+
+const (
+	uniqueViolationCode       = "23505"
+	rootPackageNameConstraint = "packages_name_dataset_id__parent_id_null_idx"
+	packageNameConstraint     = "packages_name_dataset_id_parent_id__parent_id_not_null_idx"
 )
 
 var (
@@ -68,6 +74,23 @@ func NewQueries(db pg.DBTX, orgId int) *Queries {
 	return &Queries{db: db, OrgId: orgId}
 }
 
+func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
+	query := fmt.Sprintf(`UPDATE "%d".packages SET name = $1 WHERE id = $2`, q.OrgId)
+	res, err := q.db.ExecContext(ctx, query, newName, packageId)
+	if err != nil {
+		if err, ok := err.(*pq.Error); ok && err.Code == uniqueViolationCode && (err.Constraint == rootPackageNameConstraint || err.Constraint == packageNameConstraint) {
+			return -1, models.PackageNameUniquenessError{
+				OrgId:    q.OrgId,
+				Id:       models.PackageIntId(packageId),
+				Name:     newName,
+				SQLError: err,
+			}
+		}
+		return -1, err
+	}
+	return res.RowsAffected()
+}
+
 func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
 	query := fmt.Sprintf(`UPDATE "%d".packages SET state = $1 WHERE node_id = $2 AND dataset_id = $3 AND state = $4 RETURNING %s`, q.OrgId, packageColumnsString)
 	var pkg pgdb.Package
@@ -91,7 +114,7 @@ func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, p
 	}
 }
 
-func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error) {
+func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
 	query := fmt.Sprintf(`WITH RECURSIVE nodes(id) AS (
 							SELECT id FROM "%[1]d".packages
                              	WHERE parent_id = $1
@@ -105,7 +128,7 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 				SET state = $4
 				WHERE state = $3 AND id IN (SELECT id FROM nodes n)
 				RETURNING %s`, q.OrgId, packageColumnsString)
-	var updated []pgdb.Package
+	var updated []*pgdb.Package
 	rows, err := q.db.QueryContext(ctx, query, parentId, datasetId, expectedState, targetState)
 	if err != nil {
 		return nil, err
@@ -129,7 +152,7 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 			&pkg.UpdatedAt); err != nil {
 			return updated, err
 		}
-		updated = append(updated, pkg)
+		updated = append(updated, &pkg)
 	}
 	if err = rows.Err(); err != nil {
 		return updated, err
@@ -171,8 +194,30 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 	}
 }
 
+func (q *Queries) NewSavepoint(ctx context.Context, name string) error {
+	stmt := fmt.Sprintf("SAVEPOINT %s", name)
+	_, err := q.db.ExecContext(ctx, stmt)
+	return err
+}
+
+func (q *Queries) RollbackToSavepoint(ctx context.Context, name string) error {
+	stmt := fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", name)
+	_, err := q.db.ExecContext(ctx, stmt)
+	return err
+}
+
+func (q *Queries) ReleaseSavepoint(ctx context.Context, name string) error {
+	stmt := fmt.Sprintf("RELEASE SAVEPOINT %s", name)
+	_, err := q.db.ExecContext(ctx, stmt)
+	return err
+}
+
 type SQLStore interface {
+	UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error)
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
-	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]pgdb.Package, error)
+	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)
+	NewSavepoint(ctx context.Context, name string) error
+	RollbackToSavepoint(ctx context.Context, name string) error
+	ReleaseSavepoint(ctx context.Context, name string) error
 }
