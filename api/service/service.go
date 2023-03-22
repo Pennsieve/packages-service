@@ -12,7 +12,7 @@ import (
 )
 
 type PackagesService interface {
-	RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error)
+	RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error)
 }
 
 type packagesService struct {
@@ -37,7 +37,7 @@ func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int) PackagesSe
 	return svc.withQueueStore(queueStore)
 }
 
-func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
+func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error) {
 	response := models.RestoreResponse{Success: []string{}, Failures: []models.Failure{}}
 	err := s.SQSStoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.SQLStore) error {
 		dataset, err := store.GetDatasetByNodeId(ctx, datasetId)
@@ -58,15 +58,6 @@ func (s *packagesService) RestorePackages(ctx context.Context, datasetId string,
 				default:
 					response.Failures = append(response.Failures, models.Failure{Id: nodeId, Error: fmt.Sprintf("unexpected error restoring package: %v", err)})
 					return err
-				}
-			}
-		}
-		// Temporarily, switch states back until sqs -> lambda is complete
-		if undo {
-			for _, p := range restoring {
-				_, err := store.TransitionPackageState(ctx, dataset.Id, p.NodeId, packageState.Restoring, packageState.Deleted)
-				if err != nil {
-					return fmt.Errorf("unable to reverse state of package %s: %w", p.NodeId, err)
 				}
 			}
 		}

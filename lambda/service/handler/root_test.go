@@ -47,7 +47,7 @@ func TestRestoreRoute(t *testing.T) {
 			NodeId: expectedDatasetID,
 			IntId:  1234,
 		}}
-	mockService.OnRestorePackagesReturn(expectedDatasetID, requestObject, true, &models.RestoreResponse{Success: []string{"N:package:1234"}})
+	mockService.OnRestorePackagesReturn(expectedDatasetID, requestObject, &models.RestoreResponse{Success: []string{"N:package:1234"}})
 	handler := NewHandler(req, &claims).WithService(mockService)
 	_, err := handler.handle(context.Background())
 	if assert.NoError(t, err) {
@@ -112,7 +112,7 @@ func TestTrashcanRouteHandledErrors(t *testing.T) {
 				IntId:  1234,
 			}}
 		if svcErr := tData.ServiceError; svcErr != nil {
-			mockService.OnRestorePackagesFail(datasetID, requestObject, true, svcErr)
+			mockService.OnRestorePackagesFail(datasetID, requestObject, svcErr)
 		}
 		handler := NewHandler(req, &claims).WithService(mockService)
 		t.Run(tName, func(t *testing.T) {
@@ -150,17 +150,17 @@ type MockPackagesService struct {
 
 // Need to statisfy service.PackagesService
 
-func (m *MockPackagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest, undo bool) (*models.RestoreResponse, error) {
-	args := m.Called(ctx, datasetId, request, undo)
+func (m *MockPackagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error) {
+	args := m.Called(ctx, datasetId, request)
 	return args.Get(0).(*models.RestoreResponse), args.Error(1)
 }
 
 // Type safe convenience methods for setting up expectations
 
-func (m *MockPackagesService) OnRestorePackagesReturn(datasetId string, request models.RestoreRequest, undo bool, returnedResponse *models.RestoreResponse) {
-	m.On("RestorePackages", mock.Anything, datasetId, request, undo).Return(returnedResponse, nil)
+func (m *MockPackagesService) OnRestorePackagesReturn(datasetId string, request models.RestoreRequest, returnedResponse *models.RestoreResponse) {
+	m.On("RestorePackages", mock.Anything, datasetId, request).Return(returnedResponse, nil)
 }
 
-func (m *MockPackagesService) OnRestorePackagesFail(datasetId string, request models.RestoreRequest, undo bool, returnedError error) {
-	m.On("RestorePackages", mock.Anything, datasetId, request, undo).Return(&models.RestoreResponse{}, returnedError)
+func (m *MockPackagesService) OnRestorePackagesFail(datasetId string, request models.RestoreRequest, returnedError error) {
+	m.On("RestorePackages", mock.Anything, datasetId, request).Return(&models.RestoreResponse{}, returnedError)
 }
