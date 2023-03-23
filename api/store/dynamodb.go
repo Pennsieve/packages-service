@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
@@ -26,8 +27,24 @@ func init() {
 	deleteRecordTable = os.Getenv("DELETE_RECORD_DYNAMODB_TABLE_NAME")
 }
 
-type dynamodbStore struct {
+type DynamoDBStore struct {
 	Client *dynamodb.Client
+}
+
+func NewDynamoDBStore(client *dynamodb.Client) *DynamoDBStore {
+	return &DynamoDBStore{Client: client}
+}
+
+func (d *DynamoDBStore) WithLogging(log *logging.Log) NoSQLStore {
+	return &dynamodbStore{
+		DynamoDBStore: d,
+		Log:           log,
+	}
+}
+
+type dynamodbStore struct {
+	*DynamoDBStore
+	*logging.Log
 }
 
 type S3ObjectInfo struct {
@@ -41,10 +58,7 @@ type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
 
 type NoSQLStore interface {
 	GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error)
-}
-
-func NewNoSQLStore(dynamodbClient *dynamodb.Client) NoSQLStore {
-	return &dynamodbStore{Client: dynamodbClient}
+	logging.Logger
 }
 
 func (d *dynamodbStore) GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error) {
@@ -88,6 +102,7 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 			err = fmt.Errorf("unexpected error: no responses for table %s", tableName)
 			return
 		}
+		d.LogInfo("")
 		items = append(items, responses...)
 		unprocessedKeys = output.UnprocessedKeys[tableName]
 		return

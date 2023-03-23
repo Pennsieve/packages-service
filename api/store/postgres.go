@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"github.com/lib/pq"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	pg "github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
+	log "github.com/sirupsen/logrus"
 	"strings"
 )
 
@@ -25,8 +27,8 @@ var (
 )
 
 type SQLStoreFactory interface {
-	NewSimpleStore(orgId int) SQLStore
-	ExecStoreTx(ctx context.Context, orgId int, fn func(store SQLStore) error) error
+	NewSimpleStore(orgId int, logger logging.Logger) SQLStore
+	ExecStoreTx(ctx context.Context, orgId int, logger logging.Logger, fn func(store SQLStore) error) error
 }
 
 func NewSQLStoreFactory(pennsieveDB *sql.DB) SQLStoreFactory {
@@ -39,21 +41,21 @@ type sqlStoreFactory struct {
 
 // NewSimpleStore returns a PackagesStore instance that
 // will run statements directly on database
-func (f *sqlStoreFactory) NewSimpleStore(orgId int) SQLStore {
-	return NewQueries(f.DB, orgId)
+func (f *sqlStoreFactory) NewSimpleStore(orgId int, logger logging.Logger) SQLStore {
+	return NewQueries(f.DB, orgId, logger)
 }
 
 // ExecStoreTx will execute the function fn, passing in a new SQLStore instance that
 // is backed by a database transaction. Any methods fn runs against the passed in SQLStore will run
 // in this transaction. If fn returns a non-nil error, the transaction will be rolled back.
 // Otherwise, the transaction will be committed.
-func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(store SQLStore) error) error {
+func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, logger logging.Logger, fn func(store SQLStore) error) error {
 	tx, err := f.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	q := NewQueries(tx, orgId)
+	q := NewQueries(tx, orgId, logger)
 	err = fn(q)
 	if err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
@@ -68,10 +70,11 @@ func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(st
 type Queries struct {
 	db    pg.DBTX
 	OrgId int
+	logging.Logger
 }
 
-func NewQueries(db pg.DBTX, orgId int) *Queries {
-	return &Queries{db: db, OrgId: orgId}
+func NewQueries(db pg.DBTX, orgId int, logger logging.Logger) *Queries {
+	return &Queries{db: db, OrgId: orgId, Logger: logger}
 }
 
 func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
@@ -133,7 +136,11 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			q.LogWarnWithFields(log.Fields{"error": closeErr}, "ignoring error while closing row in defer")
+		}
+	}()
 
 	for rows.Next() {
 		var pkg pgdb.Package
@@ -220,4 +227,5 @@ type SQLStore interface {
 	NewSavepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
+	logging.Logger
 }

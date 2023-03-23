@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -147,7 +148,7 @@ func TestTransitionPackageState(t *testing.T) {
 		mockStore := new(MockPackagesStore)
 		request, expectedResponse, expectedError := configMock(mockStore)
 		mockFactory := MockFactory{mockStore: mockStore}
-		service := newPackagesServiceWithFactory(&mockFactory, orgId).withQueueStore(mockStore)
+		service := newPackagesServiceWithFactory(&mockFactory, orgId, store.NoLogger{}).withQueueStore(mockStore)
 		t.Run(tName, func(t *testing.T) {
 			response, err := service.RestorePackages(context.Background(), datasetNodeId, *request)
 			if mockStore.AssertExpectations(t) {
@@ -170,6 +171,7 @@ func TestTransitionPackageState(t *testing.T) {
 // Use this to mock both store.SQLStore and store.QueueStore for convenience.
 type MockPackagesStore struct {
 	mock.Mock
+	store.NoLogger
 }
 
 func (m *MockPackagesStore) SendRestorePackage(ctx context.Context, restoreMessage models.RestorePackageMessage) error {
@@ -250,12 +252,12 @@ type MockFactory struct {
 	txError   error
 }
 
-func (m *MockFactory) NewSimpleStore(orgId int) store.SQLStore {
+func (m *MockFactory) NewSimpleStore(orgId int, logger logging.Logger) store.SQLStore {
 	m.orgId = orgId
 	return m.mockStore
 }
 
-func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store store.SQLStore) error) error {
+func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, logger logging.Logger, fn func(store store.SQLStore) error) error {
 	m.orgId = orgId
 	m.txError = fn(m.mockStore)
 	return m.txError

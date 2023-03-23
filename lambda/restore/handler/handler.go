@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
@@ -20,26 +21,16 @@ var PennsieveDB *sql.DB
 var S3Client *s3.Client
 var DyDBClient *dynamodb.Client
 
-func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
-	sqlFactory := store.NewSQLStoreFactory(PennsieveDB)
-	objectStore := store.NewObjectStore(S3Client)
-	nosqlStore := store.NewNoSQLStore(DyDBClient)
-	str := Store{SQLFactory: sqlFactory, Object: objectStore, NoSQL: nosqlStore}
-	return handleBatches(ctx, event, &str)
+type BaseStore struct {
+	sqlFactory store.SQLStoreFactory
+	dyDB       *store.DynamoDBStore
+	s3         *store.S3Store
 }
 
-func handleBatches(ctx context.Context, event events.SQSEvent, store *Store) (events.SQSEventResponse, error) {
-	response := events.SQSEventResponse{
-		BatchItemFailures: []events.SQSBatchItemFailure{},
-	}
-	for _, r := range event.Records {
-		handler := NewMessageHandler(r, store)
-		if err := handler.handleBatch(ctx); err != nil {
-			handler.logError(err)
-			response.BatchItemFailures = append(response.BatchItemFailures, handler.newBatchItemFailure())
-		}
-	}
-	return response, nil
+func (b *BaseStore) NewStore(log *pennsievelog.Log) *Store {
+	noSQLStore := b.dyDB.WithLogging(log)
+	objectStore := b.s3.WithLogging(log)
+	return &Store{NoSQL: noSQLStore, Object: objectStore, SQLFactory: b.sqlFactory}
 }
 
 type Store struct {
@@ -48,19 +39,46 @@ type Store struct {
 	NoSQL      store.NoSQLStore
 }
 
-type MessageHandler struct {
-	Message events.SQSMessage
-	Logger  *log.Entry
-	Store   *Store
+func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
+	sqlFactory := store.NewSQLStoreFactory(PennsieveDB)
+	objectStore := store.NewS3Store(S3Client)
+	nosqlStore := store.NewDynamoDBStore(DyDBClient)
+	base := BaseStore{dyDB: nosqlStore, s3: objectStore, sqlFactory: sqlFactory}
+	return handleBatches(ctx, event, &base)
 }
 
-func NewMessageHandler(message events.SQSMessage, store *Store) *MessageHandler {
-	handler := MessageHandler{Message: message, Store: store}
-	logger := log.WithFields(log.Fields{
-		"messageId": handler.Message.MessageId,
+func handleBatches(ctx context.Context, event events.SQSEvent, base *BaseStore) (events.SQSEventResponse, error) {
+	response := events.SQSEventResponse{
+		BatchItemFailures: []events.SQSBatchItemFailure{},
+	}
+	for _, r := range event.Records {
+		handler := NewMessageHandler(r, base)
+		if err := handler.handleBatch(ctx); err != nil {
+			handler.LogError(err)
+			response.BatchItemFailures = append(response.BatchItemFailures, handler.newBatchItemFailure())
+		}
+	}
+	return response, nil
+}
+
+type MessageHandler struct {
+	Message events.SQSMessage
+	//Logger  *log.Entry
+	Store *Store
+	*pennsievelog.Log
+}
+
+func NewMessageHandler(message events.SQSMessage, base *BaseStore) *MessageHandler {
+	plog := pennsievelog.NewLogWithFields(log.Fields{
+		"messageId": message.MessageId,
 	})
-	logger.WithFields(log.Fields{"body": handler.Message.Body}).Info("received message")
-	handler.Logger = logger
+	storeWithLogger := base.NewStore(plog)
+	handler := MessageHandler{
+		Message: message,
+		Store:   storeWithLogger,
+		Log:     plog,
+	}
+	handler.LogInfoWithFields(log.Fields{"body": message.Body}, "received message")
 	return &handler
 }
 
@@ -88,22 +106,6 @@ func (h *MessageHandler) handleMessage(ctx context.Context, message models.Resto
 		}
 	}
 	return nil
-}
-
-func (h *MessageHandler) logError(args ...any) {
-	h.Logger.Error(args...)
-}
-
-func (h *MessageHandler) logErrorWithFields(fields log.Fields, args ...any) {
-	h.Logger.WithFields(fields).Error(args...)
-}
-
-func (h *MessageHandler) logInfo(args ...any) {
-	h.Logger.Info(args...)
-}
-
-func (h *MessageHandler) logInfoWithFields(fields log.Fields, args ...any) {
-	h.Logger.WithFields(fields).Info(args...)
 }
 
 func (h *MessageHandler) newBatchItemFailure() events.SQSBatchItemFailure {

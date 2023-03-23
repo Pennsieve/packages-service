@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/service"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	log "github.com/sirupsen/logrus"
@@ -88,7 +89,7 @@ func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Clai
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
 func (h *RequestHandler) WithDefaultService() *RequestHandler {
-	svc := service.NewPackagesService(PennsieveDB, SQSClient, int(h.claims.OrgClaim.IntId))
+	svc := service.NewPackagesService(PennsieveDB, SQSClient, int(h.claims.OrgClaim.IntId), &logging.Log{Entry: h.logger})
 	h.packagesService = svc
 	return h
 }
