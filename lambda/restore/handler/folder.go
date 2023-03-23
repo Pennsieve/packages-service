@@ -16,31 +16,57 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		if err != nil {
 			return fmt.Errorf("unable to set descendants of %s (%s) to RESTORING: %w", restoreInfo.Name, restoreInfo.NodeId, err)
 		}
-		var descRestoreInfos []*models.RestorePackageInfo
-		// restore descendants
-		for _, p := range restoring {
-			descRestoreInfo := models.NewRestorePackageInfo(p)
-			err = h.restorePackage(ctx, datasetId, descRestoreInfo, store)
-			if err != nil {
-				return fmt.Errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
-			}
-			if p.PackageType != packageType.Collection {
-				descRestoreInfos = append(descRestoreInfos, &descRestoreInfo)
-			}
-		}
-		// restore self
-		err = h.restorePackage(ctx, datasetId, restoreInfo, store)
+
+		// restore name
+		err = h.restoreName(ctx, restoreInfo, store)
 		if err != nil {
 			return err
 		}
-		if len(descRestoreInfos) > 0 {
-			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, descRestoreInfos...)
+
+		var folderDescRestoreInfos []*models.RestorePackageInfo
+		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
+
+		// restore descendant names
+		for _, p := range restoring {
+			descRestoreInfo := models.NewRestorePackageInfo(p)
+			err = h.restoreName(ctx, descRestoreInfo, store)
+			if err != nil {
+				return fmt.Errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
+			}
+			if p.PackageType == packageType.Collection {
+				folderDescRestoreInfos = append(folderDescRestoreInfos, &descRestoreInfo)
+			} else {
+				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
+			}
+		}
+
+		if len(nonFolderDescRestoreInfos) > 0 {
+			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
 			if err != nil {
 				return err
 			}
-			if len(deleteMarkerResp) < len(descRestoreInfos) {
-				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(descRestoreInfos))
+			if len(deleteMarkerResp) < len(nonFolderDescRestoreInfos) {
+				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(nonFolderDescRestoreInfos))
 			}
+		}
+
+		// restore descendant state
+		for _, p := range folderDescRestoreInfos {
+			err = h.restoreState(ctx, datasetId, *p, store)
+			if err != nil {
+				return err
+			}
+		}
+		for _, p := range nonFolderDescRestoreInfos {
+			err = h.restoreState(ctx, datasetId, *p, store)
+			if err != nil {
+				return err
+			}
+		}
+		// restore own state
+		err = h.restoreState(ctx, datasetId, restoreInfo, store)
+		if err != nil {
+			return err
 		}
 		return errors.New("returning error to rollback Tx during development")
 	})

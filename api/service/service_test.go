@@ -232,18 +232,19 @@ func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int
 }
 
 func (m *MockPackagesStore) NewSavepoint(ctx context.Context, name string) error {
-	//TODO implement me
-	panic("implement me")
+	panic("mock me if you need me")
 }
 
 func (m *MockPackagesStore) RollbackToSavepoint(ctx context.Context, name string) error {
-	//TODO implement me
-	panic("implement me")
+	panic("mock me if you need me")
 }
 
 func (m *MockPackagesStore) ReleaseSavepoint(ctx context.Context, name string) error {
-	//TODO implement me
-	panic("implement me")
+	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error) {
+	panic("mock me if you need me")
 }
 
 type MockFactory struct {
