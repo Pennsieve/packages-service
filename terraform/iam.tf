@@ -175,5 +175,21 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
     ]
   }
 
+  statement {
+    sid    = "RestorePackageLambdaAccessToDynamoDB"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+    ]
+
+    resources = [
+      data.terraform_remote_state.process_jobs_service.outputs.process_jobs_table_arn,
+      "${data.terraform_remote_state.process_jobs_service.outputs.process_jobs_table_arn}/*",
+    ]
+
+  }
+
 }
 
