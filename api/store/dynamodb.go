@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	maxGetItemBatch = 100
+	maxGetItemBatch   = 100
+	maxWriteItemBatch = 25
 )
 
 var (
@@ -58,6 +59,7 @@ type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
 
 type NoSQLStore interface {
 	GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error)
+	RemoveDeleteRecords(ctx context.Context, restoring ...*models.RestorePackageInfo) error
 	logging.Logger
 }
 
@@ -102,7 +104,6 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 			err = fmt.Errorf("unexpected error: no responses for table %s", tableName)
 			return
 		}
-		d.LogInfo("")
 		items = append(items, responses...)
 		unprocessedKeys = output.UnprocessedKeys[tableName]
 		return
@@ -127,4 +128,55 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 		retryCount++
 	}
 	return items, nil
+}
+
+func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoring ...*models.RestorePackageInfo) error {
+	for i := 0; i < len(restoring); i += maxWriteItemBatch {
+		j := i + maxWriteItemBatch
+		if j > len(restoring) {
+			j = len(restoring)
+		}
+		batch := restoring[i:j]
+		keys := make([]types.WriteRequest, len(batch))
+		for i, r := range batch {
+			deleteRequest := types.DeleteRequest{Key: map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: r.NodeId}}}
+			keys[i] = types.WriteRequest{DeleteRequest: &deleteRequest}
+		}
+		err := d.deleteBatchItemsSingleTable(ctx, deleteRecordTable, keys)
+		if err != nil {
+			return fmt.Errorf("error removing delete records from %s: %w", deleteRecordTable, err)
+		}
+	}
+	return nil
+}
+
+func (d *dynamodbStore) deleteBatchItemsSingleTable(ctx context.Context, tableName string, writeRequests []types.WriteRequest) error {
+	makeOneRequest := func(ctx context.Context, input *dynamodb.BatchWriteItemInput) (unprocessedKeys []types.WriteRequest, err error) {
+		var output *dynamodb.BatchWriteItemOutput
+		output, err = d.Client.BatchWriteItem(ctx, input)
+		if err != nil {
+			return
+		}
+		unprocessedKeys = output.UnprocessedItems[tableName]
+		return
+	}
+
+	input := dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{tableName: writeRequests}}
+	unprocessed, err := makeOneRequest(ctx, &input)
+	if err != nil {
+		return err
+	}
+	retryCount := 1
+	for unprocessed != nil && len(unprocessed) > 0 {
+		waitDuration := time.Duration(retryCount)*time.Second + (time.Duration(rand.Intn(1000)) * time.Millisecond)
+		time.Sleep(waitDuration)
+		log.Infof("retrying %d unprocessed items out of an original %d after a wait of %s", len(unprocessed), len(writeRequests), waitDuration)
+		input := dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{tableName: unprocessed}}
+		unprocessed, err = makeOneRequest(ctx, &input)
+		if err != nil {
+			return err
+		}
+		retryCount++
+	}
+	return nil
 }

@@ -82,14 +82,14 @@ func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newNam
 	res, err := q.db.ExecContext(ctx, query, newName, packageId)
 	if err != nil {
 		if err, ok := err.(*pq.Error); ok && err.Code == uniqueViolationCode && (err.Constraint == rootPackageNameConstraint || err.Constraint == packageNameConstraint) {
-			return -1, models.PackageNameUniquenessError{
+			return 0, models.PackageNameUniquenessError{
 				OrgId:    q.OrgId,
 				Id:       models.PackageIntId(packageId),
 				Name:     newName,
 				SQLError: err,
 			}
 		}
-		return -1, err
+		return 0, err
 	}
 	return res.RowsAffected()
 }
@@ -201,6 +201,15 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 	}
 }
 
+func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error) {
+	query := fmt.Sprintf(`UPDATE "%d".dataset_storage SET size = COALESCE(size, 0) + $1 WHERE dataset_id = $2`, q.OrgId)
+	res, err := q.db.ExecContext(ctx, query, datasetId, sizeIncrement)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (q *Queries) NewSavepoint(ctx context.Context, name string) error {
 	stmt := fmt.Sprintf("SAVEPOINT %s", name)
 	_, err := q.db.ExecContext(ctx, stmt)
@@ -227,5 +236,6 @@ type SQLStore interface {
 	NewSavepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
+	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error)
 	logging.Logger
 }

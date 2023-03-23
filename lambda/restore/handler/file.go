@@ -17,7 +17,7 @@ var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
-		err := h.restorePackage(ctx, datasetId, restoreInfo, store)
+		err := h.restoreName(ctx, restoreInfo, store)
 		if err != nil {
 			return err
 		}
@@ -30,26 +30,12 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
 		}
 		h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
-
+		if err = h.restoreState(ctx, datasetId, restoreInfo, store); err != nil {
+			return err
+		}
 		return errors.New("returning error to rollback Tx during development")
 	})
 	return err
-}
-
-func (h *MessageHandler) restorePackage(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
-	err := h.restoreName(ctx, restoreInfo, store)
-	if err != nil {
-		return err
-	}
-	finalState := packageState.Uploaded
-	if restoreInfo.Type == packageType.Collection {
-		finalState = packageState.Ready
-	}
-	_, err = store.TransitionPackageState(ctx, datasetId, restoreInfo.NodeId, packageState.Restoring, finalState)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
@@ -76,6 +62,18 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 		return err
 	}
 	return retryCtx.Err
+}
+
+func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
+	finalState := packageState.Uploaded
+	if restoreInfo.Type == packageType.Collection {
+		finalState = packageState.Ready
+	}
+	_, err := store.TransitionPackageState(ctx, datasetId, restoreInfo.NodeId, packageState.Restoring, finalState)
+	if err != nil {
+		return fmt.Errorf("error restoring state of %s to %s: %w", restoreInfo.NodeId, finalState, err)
+	}
+	return nil
 }
 
 type RetryContex struct {
