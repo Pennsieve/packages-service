@@ -12,6 +12,7 @@ import (
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
+		// gather descendants and set to RESTORING
 		restoring, err := store.TransitionDescendantPackageState(ctx, datasetId, restoreInfo.Id, packageState.Deleted, packageState.Deleted)
 		if err != nil {
 			return fmt.Errorf("unable to set descendants of %s (%s) to RESTORING: %w", restoreInfo.Name, restoreInfo.NodeId, err)
@@ -25,7 +26,10 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		var folderDescRestoreInfos []*models.RestorePackageInfo
 		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
-
+		var restoredSize int64
+		if restoreInfo.Size != nil {
+			restoredSize = *restoreInfo.Size
+		}
 		// restore descendant names
 		for _, p := range restoring {
 			descRestoreInfo := models.NewRestorePackageInfo(p)
@@ -38,8 +42,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			} else {
 				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
 			}
+			if p.Size.Valid {
+				restoredSize += p.Size.Int64
+			}
 		}
 
+		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
 			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
 			if err != nil {
@@ -48,7 +56,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			if len(deleteMarkerResp) < len(nonFolderDescRestoreInfos) {
 				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(nonFolderDescRestoreInfos))
 			}
+
+			//TODO undelete in S3 and remove DeleteRecords from DynamoDB
 		}
+
+		//TODO update storage
+		store.LogInfo("restored size ", restoredSize)
 
 		// restore descendant state
 		for _, p := range folderDescRestoreInfos {
