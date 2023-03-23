@@ -4,17 +4,31 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/pennsieve/packages-service/api/logging"
 )
 
-type s3Store struct {
+type S3Store struct {
 	Client *s3.Client
 }
 
-type ObjectStore interface {
+func NewS3Store(s3Client *s3.Client) *S3Store {
+	return &S3Store{Client: s3Client}
 }
 
-func NewObjectStore(s3Client *s3.Client) ObjectStore {
-	return &s3Store{Client: s3Client}
+func (s *S3Store) WithLogging(log *logging.Log) ObjectStore {
+	return &s3Store{
+		S3Store: s,
+		Log:     log,
+	}
+}
+
+type s3Store struct {
+	*S3Store
+	*logging.Log
+}
+
+type ObjectStore interface {
+	logging.Logger
 }
 
 func (s *s3Store) DeleteObjectVersion(ctx context.Context, bucket, key, versionId string) error {

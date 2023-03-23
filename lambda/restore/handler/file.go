@@ -16,7 +16,7 @@ import (
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
 		err := h.restorePackage(ctx, datasetId, restoreInfo, store)
 		if err != nil {
 			return err
@@ -27,9 +27,9 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
 		if !ok {
-			h.logInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
+			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
 		}
-		h.logInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+		h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
 
 		return errors.New("returning error to rollback Tx during development")
 	})
@@ -65,12 +65,12 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 	rowCount, err := store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
 	for retryCtx = NewRetryContext(originalName, rowCount, err); retryCtx.TryAgain; retryCtx.Update(rowCount, err) {
 		newName := retryCtx.Parts.Next()
-		h.logInfoWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
+		h.LogInfoWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
 			return spErr
 		}
 		rowCount, err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
-		h.logInfoWithFields(log.Fields{"updatedRowCount": rowCount, "error": err, "newName": newName}, "retried name update")
+		h.LogInfoWithFields(log.Fields{"updatedRowCount": rowCount, "error": err, "newName": newName}, "retried name update")
 	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
 		return err

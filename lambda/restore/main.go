@@ -26,8 +26,8 @@ func init() {
 			log.SetLevel(log.InfoLevel)
 			log.Warnf("could not set log level to %q: %v", level, err)
 		}
-
 	}
+
 	// Open DB connection pool here so that it can be reused if lambda handles more than one request
 	db, err := pgdb.ConnectRDS()
 	if err != nil {

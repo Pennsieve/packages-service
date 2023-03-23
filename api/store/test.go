@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"
@@ -58,3 +59,21 @@ func Truncate(t *testing.T, db *sql.DB, orgID int, table string) {
 	_, err := db.Exec(query)
 	assert.NoError(t, err)
 }
+
+type NoLogger struct{}
+
+func (n NoLogger) LogWarn(_ ...any) {}
+
+func (n NoLogger) LogWarnWithFields(_ log.Fields, _ ...any) {}
+
+func (n NoLogger) LogDebug(_ ...any) {}
+
+func (n NoLogger) LogDebugWithFields(_ log.Fields, _ ...any) {}
+
+func (n NoLogger) LogError(_ ...any) {}
+
+func (n NoLogger) LogErrorWithFields(_ log.Fields, _ ...any) {}
+
+func (n NoLogger) LogInfo(_ ...any) {}
+
+func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}

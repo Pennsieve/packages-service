@@ -11,7 +11,7 @@ import (
 )
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
 		restoring, err := store.TransitionDescendantPackageState(ctx, datasetId, restoreInfo.Id, packageState.Deleted, packageState.Deleted)
 		if err != nil {
 			return fmt.Errorf("unable to set descendants of %s (%s) to RESTORING: %w", restoreInfo.Name, restoreInfo.NodeId, err)
@@ -39,7 +39,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				return err
 			}
 			if len(deleteMarkerResp) < len(descRestoreInfos) {
-				h.logInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(descRestoreInfos))
+				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(descRestoreInfos))
 			}
 		}
 		return errors.New("returning error to rollback Tx during development")

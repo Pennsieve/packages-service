@@ -19,7 +19,7 @@ func TestTransitionPackageState(t *testing.T) {
 	ExecSQLFile(t, db, "folder-nav-test.sql")
 	defer Truncate(t, db, 2, "packages")
 
-	store := NewQueries(db, 2)
+	store := NewQueries(db, 2, NoLogger{})
 	expectedDatasetId := int64(1)
 	expectedNodeId := "N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8"
 	expectedState := packageState.Restoring
@@ -42,7 +42,7 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 	ExecSQLFile(t, db, "folder-nav-test.sql")
 	defer Truncate(t, db, expectedOrdId, "packages")
 
-	store := NewQueries(db, 2)
+	store := NewQueries(db, 2, NoLogger{})
 	expectedDatasetId := int64(1)
 	expectedNodeId := "N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8"
 	// This package is marked as DELETED in the SQL file.
@@ -76,7 +76,7 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 	ExecSQLFile(t, db, "update-desc-test.sql")
 	defer Truncate(t, db, expectedOrdId, "packages")
 	expectedRestoringNames := []string{"one-file-deleted-1.csv", "one-file-deleted-2", "one-dir-deleted-1", "two-file-deleted-1.csv", "two-dir-deleted-1", "three-file-deleted-1.png"}
-	store := NewQueries(db, expectedOrdId)
+	store := NewQueries(db, expectedOrdId, NoLogger{})
 	restoring, err := store.TransitionDescendantPackageState(context.Background(), 1, 4, packageState.Deleted, packageState.Restoring)
 	if assert.NoError(t, err) {
 		assert.Len(t, restoring, len(expectedRestoringNames))
@@ -114,7 +114,7 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 	defer Truncate(t, db, expectedOrdId, "packages")
 
 	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrdId)
-	store := NewQueries(db, expectedOrdId)
+	store := NewQueries(db, expectedOrdId, NoLogger{})
 
 	for name, testData := range map[string]struct {
 		packageId        int64
