@@ -13,7 +13,9 @@ import (
 	"time"
 )
 
-const maxGetItemBatch = 100
+const (
+	maxGetItemBatch = 100
+)
 
 var (
 	deleteMarkerVersionProjection = "NodeId, S3Bucket, S3Key, S3ObjectVersion"
@@ -30,9 +32,9 @@ type dynamodbStore struct {
 
 type S3ObjectInfo struct {
 	NodeId    string `dynamobdbav:"NodeId"`
-	Bucket    string `dynamodbav:"Bucket"`
-	Key       string `dynamodbav:"Key"`
-	VersionId string `dynamodbav:"VersionId"`
+	Bucket    string `dynamodbav:"S3Bucket"`
+	Key       string `dynamodbav:"S3Key"`
+	VersionId string `dynamodbav:"S3ObjectVersion"`
 }
 
 type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
@@ -81,7 +83,6 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 		if err != nil {
 			return
 		}
-		log.Infof("DynamobDB output: %v", *output)
 		responses, ok := output.Responses[tableName]
 		if !ok {
 			err = fmt.Errorf("unexpected error: no responses for table %s", tableName)
