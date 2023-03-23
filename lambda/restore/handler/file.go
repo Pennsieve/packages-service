@@ -48,15 +48,15 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 		return err
 	}
 	var retryCtx *RetryContex
-	rowCount, err := store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
-	for retryCtx = NewRetryContext(originalName, rowCount, err); retryCtx.TryAgain; retryCtx.Update(rowCount, err) {
+	err = store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
+	for retryCtx = NewRetryContext(originalName, err); retryCtx.TryAgain; retryCtx.Update(err) {
 		newName := retryCtx.Parts.Next()
 		h.LogInfoWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
 			return spErr
 		}
-		rowCount, err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
-		h.LogInfoWithFields(log.Fields{"updatedRowCount": rowCount, "error": err, "newName": newName}, "retried name update")
+		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
+		h.LogInfoWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
 	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
 		return err
@@ -82,15 +82,15 @@ type RetryContex struct {
 	TryAgain bool
 }
 
-func NewRetryContext(name string, rowCount int64, err error) *RetryContex {
+func NewRetryContext(name string, err error) *RetryContex {
 	retryCtx := &RetryContex{}
-	if retryCtx = retryCtx.Update(rowCount, err); retryCtx.TryAgain {
+	if retryCtx = retryCtx.Update(err); retryCtx.TryAgain {
 		retryCtx.Parts = NewNameParts(name)
 	}
 	return retryCtx
 }
 
-func (c *RetryContex) Update(rowCount int64, err error) *RetryContex {
+func (c *RetryContex) Update(err error) *RetryContex {
 	if err != nil {
 		if checkedError, ok := err.(models.PackageNameUniquenessError); ok {
 			c.TryAgain = c.Parts == nil || c.Parts.More()
@@ -99,9 +99,6 @@ func (c *RetryContex) Update(rowCount int64, err error) *RetryContex {
 			c.TryAgain = false
 			c.Err = err
 		}
-	} else if rowCount == 0 {
-		c.TryAgain = false
-		c.Err = errors.New("package row not found during name update")
 	} else {
 		c.TryAgain = false
 		c.Err = nil

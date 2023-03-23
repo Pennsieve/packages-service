@@ -120,38 +120,78 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 		packageId        int64
 		newName          string
 		expectedRowCount int64
-		expectError      bool
+		expectedError    error
 	}{
-		"root no error":                  {int64(1), "update.txt", int64(1), false},
-		"root duplicate name":            {int64(1), "another-file.txt", int64(-1), true},
-		"no error":                       {int64(7), "update.csv", int64(1), false},
-		"package with id does not exist": {int64(10), "update.txt", int64(0), false},
-		"duplicate name":                 {int64(7), "another-one-file.csv", int64(-1), true},
-		"same name":                      {int64(7), "one-file.csv", int64(1), false},
+		"root no error":                  {int64(1), "update.txt", int64(1), nil},
+		"root duplicate name":            {int64(1), "another-file.txt", int64(-1), models.PackageNameUniquenessError{}},
+		"no error":                       {int64(7), "update.csv", int64(1), nil},
+		"package with id does not exist": {int64(10), "update.txt", int64(0), models.PackageNotFoundError{}},
+		"duplicate name":                 {int64(7), "another-one-file.csv", int64(-1), models.PackageNameUniquenessError{}},
+		"no change":                      {int64(7), "one-file.csv", int64(1), nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			actualCount, err := store.UpdatePackageName(context.Background(), testData.packageId, testData.newName)
-			if testData.expectError {
-				assert.Error(t, err)
-				err, ok := err.(models.PackageNameUniquenessError)
-				if assert.True(t, ok) {
-					assert.Equal(t, err.Name, testData.newName)
-					assert.Equal(t, err.Id.Id, testData.packageId)
-					assert.Equal(t, err.OrgId, expectedOrdId)
-					assert.NotNil(t, err.SQLError)
+			err := store.UpdatePackageName(context.Background(), testData.packageId, testData.newName)
+			if testData.expectedError == nil {
+				if assert.NoError(t, err) {
+					var actualNewName string
+					err := db.QueryRow(checkResultQuery, testData.packageId).Scan(&actualNewName)
+					if assert.NoError(t, err) {
+						assert.Equal(t, testData.newName, actualNewName)
+					}
 				}
 			} else {
-				if assert.NoError(t, err) {
-					assert.Equal(t, testData.expectedRowCount, actualCount)
-					if actualCount > 0 {
-						var actualNewName string
-						err := db.QueryRow(checkResultQuery, testData.packageId).Scan(&actualNewName)
-						if assert.NoError(t, err) {
-							assert.Equal(t, testData.newName, actualNewName)
-						}
+				if assert.IsType(t, testData.expectedError, err) {
+					switch err := err.(type) {
+					case models.PackageNameUniquenessError:
+						assert.Equal(t, testData.newName, err.Name)
+						assert.Equal(t, testData.packageId, err.Id.Id)
+						assert.Equal(t, expectedOrdId, err.OrgId)
+						assert.NotNil(t, err.SQLError)
+
+					case models.PackageNotFoundError:
+						assert.Equal(t, expectedOrdId, err.OrgId)
+						assert.Equal(t, testData.packageId, err.Id.Id)
 					}
 				}
 			}
 		})
+	}
+}
+
+func TestQueries_IncrementDatasetStorage(t *testing.T) {
+	db := OpenDB(t)
+	defer func() {
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
+	}()
+
+	expectedOrgId := 2
+	expectedDatasetId := int64(1)
+	initialSize := int64(1023)
+	insertQuery := fmt.Sprintf(`INSERT INTO "%d".dataset_storage (dataset_id, size) VALUES ($1, $2)`, expectedOrgId)
+	checkQuery := fmt.Sprintf(`SELECT size from "%d".dataset_storage WHERE dataset_id = $1`, expectedOrgId)
+
+	for name, increment := range map[string]int64{
+		"positive increment": int64(879),
+		"negative increment": int64(-435),
+	} {
+		if _, err := db.Exec(insertQuery, expectedDatasetId, initialSize); err != nil {
+			assert.FailNow(t, "error setting up dataset_storage table", err)
+		}
+		store := NewQueries(db, expectedOrgId, NoLogger{})
+
+		t.Run(name, func(t *testing.T) {
+			err := store.IncrementDatasetStorage(context.Background(), expectedDatasetId, increment)
+			if assert.NoError(t, err) {
+				var actual int64
+				err = db.QueryRow(checkQuery, expectedDatasetId).Scan(&actual)
+				if assert.NoError(t, err) {
+					assert.Equal(t, initialSize+increment, actual)
+				}
+			}
+		})
+
+		Truncate(t, db, expectedOrgId, "dataset_storage")
 	}
 }

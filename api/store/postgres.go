@@ -77,21 +77,29 @@ func NewQueries(db pg.DBTX, orgId int, logger logging.Logger) *Queries {
 	return &Queries{db: db, OrgId: orgId, Logger: logger}
 }
 
-func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
+func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newName string) error {
 	query := fmt.Sprintf(`UPDATE "%d".packages SET name = $1 WHERE id = $2`, q.OrgId)
 	res, err := q.db.ExecContext(ctx, query, newName, packageId)
 	if err != nil {
 		if err, ok := err.(*pq.Error); ok && err.Code == uniqueViolationCode && (err.Constraint == rootPackageNameConstraint || err.Constraint == packageNameConstraint) {
-			return 0, models.PackageNameUniquenessError{
+			return models.PackageNameUniquenessError{
 				OrgId:    q.OrgId,
 				Id:       models.PackageIntId(packageId),
 				Name:     newName,
 				SQLError: err,
 			}
 		}
-		return 0, err
+		return err
 	}
-	return res.RowsAffected()
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return models.PackageNotFoundError{
+			OrgId: q.OrgId,
+			Id:    models.PackageIntId(packageId),
+		}
+	}
+	return nil
 }
 
 func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
@@ -201,13 +209,21 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 	}
 }
 
-func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error) {
+func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error {
 	query := fmt.Sprintf(`UPDATE "%d".dataset_storage SET size = COALESCE(size, 0) + $1 WHERE dataset_id = $2`, q.OrgId)
-	res, err := q.db.ExecContext(ctx, query, datasetId, sizeIncrement)
+	res, err := q.db.ExecContext(ctx, query, sizeIncrement, datasetId)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return res.RowsAffected()
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return models.DatasetNotFoundError{
+			OrgId: q.OrgId,
+			Id:    models.DatasetIntId(datasetId),
+		}
+	}
+	return nil
 }
 
 func (q *Queries) NewSavepoint(ctx context.Context, name string) error {
@@ -229,13 +245,13 @@ func (q *Queries) ReleaseSavepoint(ctx context.Context, name string) error {
 }
 
 type SQLStore interface {
-	UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error)
+	UpdatePackageName(ctx context.Context, packageId int64, newName string) error
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
 	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)
 	NewSavepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
-	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error)
+	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error
 	logging.Logger
 }

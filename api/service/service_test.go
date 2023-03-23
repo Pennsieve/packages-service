@@ -226,24 +226,24 @@ func (m *MockPackagesStore) OnTransitionDescendantPackageStateFail(datasetId int
 	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(nil, returnedError)
 }
 
-func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int64, newName string) (int64, error) {
+func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int64, newName string) error {
 	args := m.Called(ctx, packageId, newName)
-	return args.Get(0).(int64), args.Error(1)
+	return args.Error(0)
 }
 
-func (m *MockPackagesStore) NewSavepoint(ctx context.Context, name string) error {
+func (m *MockPackagesStore) NewSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) RollbackToSavepoint(ctx context.Context, name string) error {
+func (m *MockPackagesStore) RollbackToSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) ReleaseSavepoint(ctx context.Context, name string) error {
+func (m *MockPackagesStore) ReleaseSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) (int64, error) {
+func (m *MockPackagesStore) IncrementDatasetStorage(_ context.Context, _ int64, _ int64) error {
 	panic("mock me if you need me")
 }
 
@@ -253,12 +253,12 @@ type MockFactory struct {
 	txError   error
 }
 
-func (m *MockFactory) NewSimpleStore(orgId int, logger logging.Logger) store.SQLStore {
+func (m *MockFactory) NewSimpleStore(orgId int, _ logging.Logger) store.SQLStore {
 	m.orgId = orgId
 	return m.mockStore
 }
 
-func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, logger logging.Logger, fn func(store store.SQLStore) error) error {
+func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, _ logging.Logger, fn func(store store.SQLStore) error) error {
 	m.orgId = orgId
 	m.txError = fn(m.mockStore)
 	return m.txError

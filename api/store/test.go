@@ -57,7 +57,9 @@ func ExecSQLFile(t *testing.T, db *sql.DB, sqlFile string) {
 func Truncate(t *testing.T, db *sql.DB, orgID int, table string) {
 	query := fmt.Sprintf("TRUNCATE TABLE \"%d\".%s CASCADE", orgID, table)
 	_, err := db.Exec(query)
-	assert.NoError(t, err)
+	if err != nil {
+		assert.FailNowf(t, "error truncating table", "orgID: %d, table: %s, error: %v", orgID, table, err)
+	}
 }
 
 type NoLogger struct{}
