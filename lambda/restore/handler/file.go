@@ -17,19 +17,31 @@ var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
+		// restore name
 		err := h.restoreName(ctx, restoreInfo, store)
 		if err != nil {
 			return err
 		}
+		// restore S3 and clean up DynamoDB
 		deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
 		if err != nil {
 			return err
 		}
+		//TODO undelete S3 and remove delete record from DynamoDB
 		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
 		if !ok {
-			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
+			h.LogWarnWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
+		} else {
+			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
 		}
-		h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+		// restore dataset storage
+		var restoredSize int64
+		if restoreInfo.Size != nil {
+			restoredSize = *restoreInfo.Size
+		}
+		store.LogInfo("restored size: ", restoredSize)
+		// TODO restore dataset storage
+		// restore state
 		if err = h.restoreState(ctx, datasetId, restoreInfo, store); err != nil {
 			return err
 		}

@@ -38,9 +38,9 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	expectedOrdId := 2
+	expectedOrgId := 2
 	ExecSQLFile(t, db, "folder-nav-test.sql")
-	defer Truncate(t, db, expectedOrdId, "packages")
+	defer Truncate(t, db, expectedOrgId, "packages")
 
 	store := NewQueries(db, 2, NoLogger{})
 	expectedDatasetId := int64(1)
@@ -55,9 +55,9 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 		assert.IsType(t, models.PackageNotFoundError{}, err)
 		assert.Equal(t, expectedNodeId, err.(models.PackageNotFoundError).Id.NodeId)
 		assert.Equal(t, expectedDatasetId, err.(models.PackageNotFoundError).DatasetId.Id)
-		assert.Equal(t, expectedOrdId, err.(models.PackageNotFoundError).OrgId)
+		assert.Equal(t, expectedOrgId, err.(models.PackageNotFoundError).OrgId)
 	}
-	verifyStateQuery := fmt.Sprintf(`SELECT state from "%d".packages WHERE node_id = $1`, expectedOrdId)
+	verifyStateQuery := fmt.Sprintf(`SELECT state from "%d".packages WHERE node_id = $1`, expectedOrgId)
 	var actualState packageState.State
 	err = db.QueryRow(verifyStateQuery, expectedNodeId).Scan(&actualState)
 	if assert.NoError(t, err) {
@@ -72,11 +72,11 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	expectedOrdId := 2
+	expectedOrgId := 2
 	ExecSQLFile(t, db, "update-desc-test.sql")
-	defer Truncate(t, db, expectedOrdId, "packages")
+	defer Truncate(t, db, expectedOrgId, "packages")
 	expectedRestoringNames := []string{"one-file-deleted-1.csv", "one-file-deleted-2", "one-dir-deleted-1", "two-file-deleted-1.csv", "two-dir-deleted-1", "three-file-deleted-1.png"}
-	store := NewQueries(db, expectedOrdId, NoLogger{})
+	store := NewQueries(db, expectedOrgId, NoLogger{})
 	restoring, err := store.TransitionDescendantPackageState(context.Background(), 1, 4, packageState.Deleted, packageState.Restoring)
 	if assert.NoError(t, err) {
 		assert.Len(t, restoring, len(expectedRestoringNames))
@@ -109,12 +109,12 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 			assert.NoError(t, db.Close())
 		}
 	}()
-	expectedOrdId := 2
+	expectedOrgId := 2
 	ExecSQLFile(t, db, "update-package-name-test.sql")
-	defer Truncate(t, db, expectedOrdId, "packages")
+	defer Truncate(t, db, expectedOrgId, "packages")
 
-	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrdId)
-	store := NewQueries(db, expectedOrdId, NoLogger{})
+	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrgId)
+	store := NewQueries(db, expectedOrgId, NoLogger{})
 
 	for name, testData := range map[string]struct {
 		packageId        int64
@@ -145,11 +145,11 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 					case models.PackageNameUniquenessError:
 						assert.Equal(t, testData.newName, err.Name)
 						assert.Equal(t, testData.packageId, err.Id.Id)
-						assert.Equal(t, expectedOrdId, err.OrgId)
+						assert.Equal(t, expectedOrgId, err.OrgId)
 						assert.NotNil(t, err.SQLError)
 
 					case models.PackageNotFoundError:
-						assert.Equal(t, expectedOrdId, err.OrgId)
+						assert.Equal(t, expectedOrgId, err.OrgId)
 						assert.Equal(t, testData.packageId, err.Id.Id)
 					}
 				}
