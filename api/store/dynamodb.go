@@ -46,7 +46,7 @@ func NewNoSQLStore(dynamodbClient *dynamodb.Client) NoSQLStore {
 }
 
 func (d *dynamodbStore) GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error) {
-	var deleteMarkerVersions GetDeleteMarkerVersionsResponse
+	deleteMarkerVersions := GetDeleteMarkerVersionsResponse{}
 	for i := 0; i < len(restoring); i += maxGetItemBatch {
 		j := i + maxGetItemBatch
 		if j > len(restoring) {
@@ -81,7 +81,7 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 		if err != nil {
 			return
 		}
-		log.Infof("DynamobDB output: %v", output)
+		log.Infof("DynamobDB output: %v", *output)
 		responses, ok := output.Responses[tableName]
 		if !ok {
 			err = fmt.Errorf("unexpected error: no responses for table %s", tableName)
