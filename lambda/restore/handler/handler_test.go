@@ -19,7 +19,7 @@ func TestNewMessageHandler(t *testing.T) {
 		MessageId: expectedMessageId,
 	}
 	sqlFactory := new(MockSQLFactory)
-	handler := NewMessageHandler(message, &BaseStore{sqlFactory: sqlFactory})
+	handler := NewMessageHandler(message, StubBaseStore{SQLStoreFactory: sqlFactory})
 
 	assert.Equal(message, handler.Message)
 	assert.Equal(sqlFactory, handler.Store.SQLFactory)
@@ -41,12 +41,20 @@ type MockSQLFactory struct {
 	mock.Mock
 }
 
-func (m *MockSQLFactory) NewSimpleStore(orgId int, _ logging.Logger) store.SQLStore {
+func (m *MockSQLFactory) NewSimpleStore(orgId int) store.SQLStore {
 	args := m.Called(orgId)
 	return args.Get(0).(store.SQLStore)
 }
 
-func (m *MockSQLFactory) ExecStoreTx(ctx context.Context, orgId int, _ logging.Logger, fn func(store store.SQLStore) error) error {
+func (m *MockSQLFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(store store.SQLStore) error) error {
 	args := m.Called(ctx, orgId, fn)
 	return args.Error(0)
+}
+
+type StubBaseStore struct {
+	SQLStoreFactory store.SQLStoreFactory
+}
+
+func (s StubBaseStore) NewStore(_ *logging.Log) *Store {
+	return &Store{SQLFactory: s.SQLStoreFactory}
 }

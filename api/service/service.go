@@ -17,14 +17,14 @@ type PackagesService interface {
 }
 
 type packagesService struct {
-	SQSStoreFactory store.SQLStoreFactory
+	SQLStoreFactory store.SQLStoreFactory
 	QueueStore      store.QueueStore
 	OrgId           int
 	logging.Logger
 }
 
 func newPackagesServiceWithFactory(factory store.SQLStoreFactory, orgId int, logger logging.Logger) *packagesService {
-	return &packagesService{SQSStoreFactory: factory, OrgId: orgId, Logger: logger}
+	return &packagesService{SQLStoreFactory: factory, OrgId: orgId, Logger: logger}
 }
 
 func (s *packagesService) withQueueStore(queueStore store.QueueStore) *packagesService {
@@ -33,7 +33,7 @@ func (s *packagesService) withQueueStore(queueStore store.QueueStore) *packagesS
 }
 
 func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int, logger logging.Logger) PackagesService {
-	str := store.NewSQLStoreFactory(db)
+	str := store.NewPostgresStoreFactory(db).WithLogging(logger)
 	svc := newPackagesServiceWithFactory(str, orgId, logger)
 	queueStore := store.NewQueueStore(sqsClient)
 	return svc.withQueueStore(queueStore)
@@ -41,7 +41,7 @@ func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int, logger log
 
 func (s *packagesService) RestorePackages(ctx context.Context, datasetId string, request models.RestoreRequest) (*models.RestoreResponse, error) {
 	response := models.RestoreResponse{Success: []string{}, Failures: []models.Failure{}}
-	err := s.SQSStoreFactory.ExecStoreTx(ctx, s.OrgId, s.Logger, func(store store.SQLStore) error {
+	err := s.SQLStoreFactory.ExecStoreTx(ctx, s.OrgId, func(store store.SQLStore) error {
 		dataset, err := store.GetDatasetByNodeId(ctx, datasetId)
 		datasetIntId := dataset.Id
 		if err != nil {

@@ -21,16 +21,25 @@ var PennsieveDB *sql.DB
 var S3Client *s3.Client
 var DyDBClient *dynamodb.Client
 
-type BaseStore struct {
-	sqlFactory store.SQLStoreFactory
+type BaseStore interface {
+	NewStore(log *pennsievelog.Log) *Store
+}
+
+type baseStore struct {
+	sqlFactory *store.PostgresStoreFactory
 	dyDB       *store.DynamoDBStore
 	s3         *store.S3Store
 }
 
-func (b *BaseStore) NewStore(log *pennsievelog.Log) *Store {
+func NewBaseStore(sqlFactory *store.PostgresStoreFactory, dyDB *store.DynamoDBStore, s3 *store.S3Store) BaseStore {
+	return &baseStore{sqlFactory: sqlFactory, dyDB: dyDB, s3: s3}
+}
+
+func (b *baseStore) NewStore(log *pennsievelog.Log) *Store {
 	noSQLStore := b.dyDB.WithLogging(log)
 	objectStore := b.s3.WithLogging(log)
-	return &Store{NoSQL: noSQLStore, Object: objectStore, SQLFactory: b.sqlFactory}
+	sqlFactory := b.sqlFactory.WithLogging(log)
+	return &Store{NoSQL: noSQLStore, Object: objectStore, SQLFactory: sqlFactory}
 }
 
 type Store struct {
@@ -40,14 +49,14 @@ type Store struct {
 }
 
 func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
-	sqlFactory := store.NewSQLStoreFactory(PennsieveDB)
+	sqlFactory := store.NewPostgresStoreFactory(PennsieveDB)
 	objectStore := store.NewS3Store(S3Client)
 	nosqlStore := store.NewDynamoDBStore(DyDBClient)
-	base := BaseStore{dyDB: nosqlStore, s3: objectStore, sqlFactory: sqlFactory}
-	return handleBatches(ctx, event, &base)
+	base := NewBaseStore(sqlFactory, nosqlStore, objectStore)
+	return handleBatches(ctx, event, base)
 }
 
-func handleBatches(ctx context.Context, event events.SQSEvent, base *BaseStore) (events.SQSEventResponse, error) {
+func handleBatches(ctx context.Context, event events.SQSEvent, base BaseStore) (events.SQSEventResponse, error) {
 	response := events.SQSEventResponse{
 		BatchItemFailures: []events.SQSBatchItemFailure{},
 	}
@@ -68,7 +77,7 @@ type MessageHandler struct {
 	*pennsievelog.Log
 }
 
-func NewMessageHandler(message events.SQSMessage, base *BaseStore) *MessageHandler {
+func NewMessageHandler(message events.SQSMessage, base BaseStore) *MessageHandler {
 	plog := pennsievelog.NewLogWithFields(log.Fields{
 		"messageId": message.MessageId,
 	})

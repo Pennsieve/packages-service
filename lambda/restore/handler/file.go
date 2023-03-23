@@ -16,7 +16,7 @@ import (
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
 		// restore name
 		err := h.restoreName(ctx, restoreInfo, store)
 		if err != nil {

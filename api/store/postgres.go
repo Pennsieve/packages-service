@@ -26,36 +26,48 @@ var (
 	packageColumnsString = strings.Join(packagesColumns, ", ")
 )
 
-type SQLStoreFactory interface {
-	NewSimpleStore(orgId int, logger logging.Logger) SQLStore
-	ExecStoreTx(ctx context.Context, orgId int, logger logging.Logger, fn func(store SQLStore) error) error
+type PostgresStoreFactory struct {
+	DB *sql.DB
 }
 
-func NewSQLStoreFactory(pennsieveDB *sql.DB) SQLStoreFactory {
-	return &sqlStoreFactory{DB: pennsieveDB}
+func NewPostgresStoreFactory(db *sql.DB) *PostgresStoreFactory {
+	return &PostgresStoreFactory{DB: db}
+}
+
+func (s *PostgresStoreFactory) WithLogging(log logging.Logger) SQLStoreFactory {
+	return &sqlStoreFactory{
+		PostgresStoreFactory: s,
+		Logger:               log,
+	}
+}
+
+type SQLStoreFactory interface {
+	NewSimpleStore(orgId int) SQLStore
+	ExecStoreTx(ctx context.Context, orgId int, fn func(store SQLStore) error) error
 }
 
 type sqlStoreFactory struct {
-	DB *sql.DB
+	*PostgresStoreFactory
+	logging.Logger
 }
 
 // NewSimpleStore returns a PackagesStore instance that
 // will run statements directly on database
-func (f *sqlStoreFactory) NewSimpleStore(orgId int, logger logging.Logger) SQLStore {
-	return NewQueries(f.DB, orgId, logger)
+func (f *sqlStoreFactory) NewSimpleStore(orgId int) SQLStore {
+	return NewQueries(f.DB, orgId, f.Logger)
 }
 
 // ExecStoreTx will execute the function fn, passing in a new SQLStore instance that
 // is backed by a database transaction. Any methods fn runs against the passed in SQLStore will run
 // in this transaction. If fn returns a non-nil error, the transaction will be rolled back.
 // Otherwise, the transaction will be committed.
-func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, logger logging.Logger, fn func(store SQLStore) error) error {
+func (f *sqlStoreFactory) ExecStoreTx(ctx context.Context, orgId int, fn func(store SQLStore) error) error {
 	tx, err := f.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 
-	q := NewQueries(tx, orgId, logger)
+	q := NewQueries(tx, orgId, f.Logger)
 	err = fn(q)
 	if err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {

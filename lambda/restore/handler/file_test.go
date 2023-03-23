@@ -110,16 +110,16 @@ func TestRestoreName(t *testing.T) {
 		"another-file-restored_1.txt",
 	}} {
 		store.ExecSQLFile(t, db, "restore-package-name-test.sql")
-		sqlFactory := store.NewSQLStoreFactory(db)
+		sqlFactory := store.NewPostgresStoreFactory(db)
 		ctx := context.Background()
-		handler := NewMessageHandler(events.SQSMessage{}, &BaseStore{sqlFactory: sqlFactory})
+		handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
 		restoreInfo := models.RestorePackageInfo{
 			Id:     d.id,
 			NodeId: d.nodeId,
 			Name:   d.name,
 		}
 		t.Run(name, func(t *testing.T) {
-			err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, handler, func(store store.SQLStore) error {
+			err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
 				return handler.restoreName(ctx, restoreInfo, store)
 			})
 			if assert.NoError(t, err) {
@@ -147,9 +147,9 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 	store.ExecSQLFile(t, db, "restore-package-name-test.sql")
 	defer store.Truncate(t, db, orgId, "packages")
 
-	sqlFactory := store.NewSQLStoreFactory(db)
+	sqlFactory := store.NewPostgresStoreFactory(db)
 	ctx := context.Background()
-	handler := NewMessageHandler(events.SQSMessage{}, &BaseStore{sqlFactory: sqlFactory})
+	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
 	restoreInfo1 := models.RestorePackageInfo{
 		Id:     5,
 		NodeId: "N:collection:180d4f48-ea2b-435c-ac69-780eeaf89745",
@@ -161,7 +161,7 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 		Name:   "__DELETED__N:collection:0f197fab-cb7b-4414-8f7c-27d7aafe7c53_root-dir",
 	}
 
-	err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, handler, func(store store.SQLStore) error {
+	err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
 		err := handler.restoreName(ctx, restoreInfo1, store)
 		if assert.NoError(t, err) {
 			err = handler.restoreName(ctx, restoreInfo2, store)

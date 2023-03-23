@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -253,12 +252,12 @@ type MockFactory struct {
 	txError   error
 }
 
-func (m *MockFactory) NewSimpleStore(orgId int, _ logging.Logger) store.SQLStore {
+func (m *MockFactory) NewSimpleStore(orgId int) store.SQLStore {
 	m.orgId = orgId
 	return m.mockStore
 }
 
-func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, _ logging.Logger, fn func(store store.SQLStore) error) error {
+func (m *MockFactory) ExecStoreTx(_ context.Context, orgId int, fn func(store store.SQLStore) error) error {
 	m.orgId = orgId
 	m.txError = fn(m.mockStore)
 	return m.txError

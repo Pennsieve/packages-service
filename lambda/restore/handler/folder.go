@@ -11,7 +11,7 @@ import (
 )
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, h, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
 		// gather descendants and set to RESTORING
 		restoring, err := store.TransitionDescendantPackageState(ctx, datasetId, restoreInfo.Id, packageState.Deleted, packageState.Deleted)
 		if err != nil {
