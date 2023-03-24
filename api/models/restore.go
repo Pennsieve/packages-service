@@ -25,7 +25,7 @@ type RestorePackageInfo struct {
 	Name     string           `json:"name"`
 	ParentId *int64           `json:"parentId"`
 	Type     packageType.Type `json:"type"`
-	Size     *int64           `json:"size"`
+	Size     int64            `json:"size"`
 }
 
 type RestorePackageMessage struct {
@@ -34,22 +34,19 @@ type RestorePackageMessage struct {
 	Packages  []RestorePackageInfo `json:"packages"`
 }
 
-func NewRestorePackageInfo(p *pgdb.Package) RestorePackageInfo {
-	restoreInfo := RestorePackageInfo{Id: p.Id, NodeId: p.NodeId, Name: p.Name, Type: p.PackageType}
+func NewRestorePackageInfo(p *pgdb.Package, size int64) RestorePackageInfo {
+	restoreInfo := RestorePackageInfo{Id: p.Id, NodeId: p.NodeId, Name: p.Name, Type: p.PackageType, Size: size}
 	if p.ParentId.Valid {
 		restoreInfo.ParentId = &p.ParentId.Int64
-	}
-	if p.Size.Valid {
-		restoreInfo.Size = &p.Size.Int64
 	}
 	return restoreInfo
 }
 
-func NewRestorePackageMessage(orgId int, datasetId int64, toBeRestored ...*pgdb.Package) RestorePackageMessage {
+func NewRestorePackageMessage(orgId int, datasetId int64, sizeByPackageId map[int64]int64, toBeRestored ...*pgdb.Package) RestorePackageMessage {
 	packages := make([]RestorePackageInfo, len(toBeRestored))
 	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, Packages: packages}
 	for i, p := range toBeRestored {
-		packages[i] = NewRestorePackageInfo(p)
+		packages[i] = NewRestorePackageInfo(p, sizeByPackageId[p.Id])
 
 	}
 	return queueMessage

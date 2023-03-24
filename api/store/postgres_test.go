@@ -195,3 +195,28 @@ func TestQueries_IncrementDatasetStorage(t *testing.T) {
 		Truncate(t, db, expectedOrgId, "dataset_storage")
 	}
 }
+
+func TestQueries_GetPackageSizes(t *testing.T) {
+	db := OpenDB(t)
+	defer func() {
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
+	}()
+
+	expectedOrgId := 2
+	ExecSQLFile(t, db, "package-sizes-test.sql")
+	defer func() {
+		Truncate(t, db, expectedOrgId, "files")
+		Truncate(t, db, expectedOrgId, "packages")
+	}()
+
+	store := NewQueries(db, expectedOrgId, NoLogger{})
+	sizeByPackageId, err := store.GetPackageSizes(context.Background(), 1, 2, 3, 15)
+	if assert.NoError(t, err) {
+		assert.Len(t, sizeByPackageId, 3)
+		assert.Equal(t, int64(72158), sizeByPackageId[1])
+		assert.Equal(t, int64(2939946+10), sizeByPackageId[2])
+		assert.Equal(t, int64(10+14+14), sizeByPackageId[3])
+	}
+}

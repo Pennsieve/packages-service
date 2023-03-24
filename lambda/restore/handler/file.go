@@ -35,10 +35,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
 		}
 		// restore dataset storage
-		var restoredSize int64
-		if restoreInfo.Size != nil {
-			restoredSize = *restoreInfo.Size
-		}
+		restoredSize := restoreInfo.Size
 		store.LogInfo("restored size: ", restoredSize)
 		// TODO restore dataset storage
 		// restore state

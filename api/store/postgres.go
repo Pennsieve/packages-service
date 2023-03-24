@@ -137,6 +137,12 @@ func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, p
 	}
 }
 
+func (q *Queries) closeRows(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		q.LogWarnWithFields(log.Fields{"error": err}, "ignoring error while closing Rows")
+	}
+}
+
 func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
 	query := fmt.Sprintf(`WITH RECURSIVE nodes(id) AS (
 							SELECT id FROM "%[1]d".packages
@@ -156,11 +162,7 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			q.LogWarnWithFields(log.Fields{"error": closeErr}, "ignoring error while closing row in defer")
-		}
-	}()
+	defer q.closeRows(rows)
 
 	for rows.Next() {
 		var pkg pgdb.Package
@@ -238,6 +240,32 @@ func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, 
 	return nil
 }
 
+func (q *Queries) GetPackageSizes(ctx context.Context, packageIds ...int64) (map[int64]int64, error) {
+	sizesByPackage := map[int64]int64{}
+	if len(packageIds) == 0 {
+		return sizesByPackage, nil
+	}
+	query := fmt.Sprintf(`SELECT package_id, SUM(size) AS total FROM "%d".files WHERE package_id = ANY($1) GROUP BY package_id`, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, pq.Int64Array(packageIds))
+	if err != nil {
+		return sizesByPackage, err
+	}
+	defer q.closeRows(rows)
+
+	for rows.Next() {
+		var packageId, size int64
+		if err = rows.Scan(&packageId, &size); err != nil {
+			return sizesByPackage, err
+		}
+		sizesByPackage[packageId] = size
+	}
+	if err = rows.Err(); err != nil {
+		return sizesByPackage, err
+	}
+
+	return sizesByPackage, nil
+}
+
 func (q *Queries) NewSavepoint(ctx context.Context, name string) error {
 	stmt := fmt.Sprintf("SAVEPOINT %s", name)
 	_, err := q.db.ExecContext(ctx, stmt)
@@ -265,5 +293,6 @@ type SQLStore interface {
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
 	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error
+	GetPackageSizes(ctx context.Context, packageIds ...int64) (map[int64]int64, error)
 	logging.Logger
 }

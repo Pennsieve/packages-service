@@ -11,29 +11,28 @@ import (
 )
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// gather descendants and set to RESTORING
-		restoring, err := store.TransitionDescendantPackageState(ctx, datasetId, restoreInfo.Id, packageState.Deleted, packageState.Deleted)
+		restoring, err := sqlStore.TransitionDescendantPackageState(ctx, datasetId, restoreInfo.Id, packageState.Deleted, packageState.Deleted)
 		if err != nil {
 			return fmt.Errorf("unable to set descendants of %s (%s) to RESTORING: %w", restoreInfo.Name, restoreInfo.NodeId, err)
 		}
 
 		// restore name
-		err = h.restoreName(ctx, restoreInfo, store)
+		err = h.restoreName(ctx, restoreInfo, sqlStore)
 		if err != nil {
 			return err
 		}
 
 		var folderDescRestoreInfos []*models.RestorePackageInfo
 		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
-		var restoredSize int64
-		if restoreInfo.Size != nil {
-			restoredSize = *restoreInfo.Size
-		}
+		nonFolderNodeIdToId := map[string]int64{}
 		// restore descendant names
 		for _, p := range restoring {
-			descRestoreInfo := models.NewRestorePackageInfo(p)
-			err = h.restoreName(ctx, descRestoreInfo, store)
+			// using fake size here because we only want to look up
+			// sizes of items we find a delete-record for below.
+			descRestoreInfo := models.NewRestorePackageInfo(p, 0)
+			err = h.restoreName(ctx, descRestoreInfo, sqlStore)
 			if err != nil {
 				return fmt.Errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
 			}
@@ -41,11 +40,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				folderDescRestoreInfos = append(folderDescRestoreInfos, &descRestoreInfo)
 			} else {
 				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
-			}
-			if p.Size.Valid {
-				restoredSize += p.Size.Int64
+				nonFolderNodeIdToId[descRestoreInfo.NodeId] = descRestoreInfo.Id
 			}
 		}
+
+		restoredSize := restoreInfo.Size
+		var s3RestoredPackageIds []int64
 
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
@@ -56,28 +56,40 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			if len(deleteMarkerResp) < len(nonFolderDescRestoreInfos) {
 				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(nonFolderDescRestoreInfos))
 			}
+			var objectInfos []store.S3ObjectInfo
+			for _, objectInfo := range deleteMarkerResp {
+				objectInfos = append(objectInfos, *objectInfo)
+			}
 
-			//TODO undelete in S3 and remove DeleteRecords from DynamoDB
+			//h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...)
+			//TODO undelete in S3 and remove DeleteRecords from DynamoDB and populate s3RestoredPackageIds from the S3 Undelete response
 		}
 
 		//TODO update storage
-		store.LogInfo("restored size ", restoredSize)
+		sizeByPackage, err := sqlStore.GetPackageSizes(ctx, s3RestoredPackageIds...)
+		if err != nil {
+			return err
+		}
+		for _, size := range sizeByPackage {
+			restoredSize += size
+		}
+		sqlStore.LogInfo("restored size ", restoredSize)
 
 		// restore descendant state
 		for _, p := range folderDescRestoreInfos {
-			err = h.restoreState(ctx, datasetId, *p, store)
+			err = h.restoreState(ctx, datasetId, *p, sqlStore)
 			if err != nil {
 				return err
 			}
 		}
 		for _, p := range nonFolderDescRestoreInfos {
-			err = h.restoreState(ctx, datasetId, *p, store)
+			err = h.restoreState(ctx, datasetId, *p, sqlStore)
 			if err != nil {
 				return err
 			}
 		}
 		// restore own state
-		err = h.restoreState(ctx, datasetId, restoreInfo, store)
+		err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore)
 		if err != nil {
 			return err
 		}
