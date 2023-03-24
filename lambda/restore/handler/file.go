@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
@@ -16,33 +15,47 @@ import (
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
-	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
+	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// restore name
-		err := h.restoreName(ctx, restoreInfo, store)
+		err := h.restoreName(ctx, restoreInfo, sqlStore)
 		if err != nil {
 			return err
 		}
+
 		// restore S3 and clean up DynamoDB
 		deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
 		if err != nil {
 			return err
 		}
-		//TODO undelete S3 and remove delete record from DynamoDB
 		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
 		if !ok {
-			h.LogWarnWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "no delete marker found")
-		} else {
-			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+			return fmt.Errorf("no delete record found for %v", restoreInfo)
 		}
+		sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+		if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, *deleteMarker); err != nil {
+			return fmt.Errorf("error restoring S3 object %s: %w", *deleteMarker, err)
+		} else if len(deleteResponse.AWSErrors) > 0 {
+			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
+			return fmt.Errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
+		}
+		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, &restoreInfo); err != nil {
+			// Don't think this should cause the whole restore to fail
+			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "error removing delete record")
+		}
+
 		// restore dataset storage
 		restoredSize := restoreInfo.Size
-		store.LogInfo("restored size: ", restoredSize)
-		// TODO restore dataset storage
+		sqlStore.LogInfo("restored size: ", restoredSize)
+		if err = sqlStore.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
+			// Don't think this should fail the whole restore
+			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update dataset_storage")
+		}
+
 		// restore state
-		if err = h.restoreState(ctx, datasetId, restoreInfo, store); err != nil {
+		if err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore); err != nil {
 			return err
 		}
-		return errors.New("returning error to rollback Tx during development")
+		return nil
 	})
 	return err
 }

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
@@ -44,7 +43,6 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			}
 		}
 
-		restoredSize := restoreInfo.Size
 		var s3RestoredPackageIds []int64
 
 		// restore S3 objects and clean up DynamoDB
@@ -61,11 +59,16 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				objectInfos = append(objectInfos, *objectInfo)
 			}
 
-			//h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...)
+			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
+				return fmt.Errorf("error restoring S3 objects: %w", err)
+			} else if len(deleteResponse.AWSErrors) > 0 {
+
+			}
 			//TODO undelete in S3 and remove DeleteRecords from DynamoDB and populate s3RestoredPackageIds from the S3 Undelete response
 		}
 
-		//TODO update storage
+		// restore dataset_storage
+		restoredSize := restoreInfo.Size
 		sizeByPackage, err := sqlStore.GetPackageSizes(ctx, s3RestoredPackageIds...)
 		if err != nil {
 			return err
@@ -74,26 +77,26 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			restoredSize += size
 		}
 		sqlStore.LogInfo("restored size ", restoredSize)
+		if err = sqlStore.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
+
+		}
 
 		// restore descendant state
 		for _, p := range folderDescRestoreInfos {
-			err = h.restoreState(ctx, datasetId, *p, sqlStore)
-			if err != nil {
+			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
 				return err
 			}
 		}
 		for _, p := range nonFolderDescRestoreInfos {
-			err = h.restoreState(ctx, datasetId, *p, sqlStore)
-			if err != nil {
+			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
 				return err
 			}
 		}
 		// restore own state
-		err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore)
-		if err != nil {
+		if err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore); err != nil {
 			return err
 		}
-		return errors.New("returning error to rollback Tx during development")
+		return nil
 	})
 	return err
 }

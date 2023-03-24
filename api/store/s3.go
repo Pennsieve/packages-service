@@ -32,15 +32,26 @@ type s3Store struct {
 }
 
 type ObjectStore interface {
-	DeleteObjectsVersion(ctx context.Context, objInfos ...S3ObjectInfo) ([]types.Error, error)
+	DeleteObjectsVersion(ctx context.Context, objInfos ...S3ObjectInfo) (DeleteObjectsVersionResponse, error)
 	logging.Logger
 }
 
-func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3ObjectInfo) ([]types.Error, error) {
+type DeletedPackage struct {
+	NodeId       string
+	DeleteMarker bool
+}
+
+type DeleteObjectsVersionResponse struct {
+	Deleted   []DeletedPackage
+	AWSErrors []types.Error
+}
+
+func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3ObjectInfo) (DeleteObjectsVersionResponse, error) {
+	response := DeleteObjectsVersionResponse{}
 	if len(objInfos) == 0 {
-		return nil, nil
+		return response, nil
 	}
-	var awsErrors []types.Error
+	bucketToKeyToNodeId := map[string]map[string]string{}
 	byBucket := map[string][][]types.ObjectIdentifier{}
 	for _, objInfo := range objInfos {
 		bucket := objInfo.Bucket
@@ -48,6 +59,7 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 			Key:       aws.String(objInfo.Key),
 			VersionId: aws.String(objInfo.VersionId),
 		}
+		bucketToKeyToNodeId[bucket][objInfo.Key] = objInfo.NodeId
 		batches := byBucket[bucket]
 		nBatches := len(batches)
 		if nBatches == 0 {
@@ -70,11 +82,19 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 				},
 			}
 			if output, err := s.Client.DeleteObjects(ctx, &input); err != nil {
-				return nil, fmt.Errorf("api/store/s3: error deleting batch %d of %d for bucket %s: %w", i, len(batches), bucket, err)
+				return response, fmt.Errorf("api/store/s3: error deleting batch %d of %d for bucket %s: %w", i, len(batches), bucket, err)
 			} else {
-				awsErrors = append(awsErrors, output.Errors...)
+				for _, success := range output.Deleted {
+					nodeId := bucketToKeyToNodeId[bucket][aws.ToString(success.Key)]
+					deletedPackage := DeletedPackage{
+						NodeId:       nodeId,
+						DeleteMarker: success.DeleteMarker,
+					}
+					response.Deleted = append(response.Deleted, deletedPackage)
+				}
+				response.AWSErrors = append(response.AWSErrors, output.Errors...)
 			}
 		}
 	}
-	return awsErrors, nil
+	return response, nil
 }
