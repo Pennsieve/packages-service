@@ -20,7 +20,7 @@ type PackageNotFoundError struct {
 }
 
 func (e PackageNotFoundError) Error() string {
-	return fmt.Sprintf("package with node id %q not found in dataset %s, workspace %d", e.Id, e.DatasetId, e.OrgId)
+	return fmt.Sprintf("package with node id %s not found in dataset %s, workspace %d", e.Id, e.DatasetId, e.OrgId)
 }
 
 type PackageNameUniquenessError struct {
