@@ -191,5 +191,21 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
 
   }
 
+  statement {
+    sid    = "RestorePackageLambdaS3Permissions"
+    effect = "Allow"
+
+    actions = [
+      "s3:DeleteObjectVersion",
+    ]
+
+    resources = [
+      data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn}/*",
+    ]
+  }
+
 }
 
