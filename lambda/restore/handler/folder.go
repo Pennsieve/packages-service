@@ -26,6 +26,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		var folderDescRestoreInfos []*models.RestorePackageInfo
 		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
 		nonFolderNodeIdToId := map[string]int64{}
+		nonFolderNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
 			// using fake size here because we only want to look up
@@ -40,10 +41,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			} else {
 				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
 				nonFolderNodeIdToId[descRestoreInfo.NodeId] = descRestoreInfo.Id
+				nonFolderNodeIdToInfos[descRestoreInfo.NodeId] = &descRestoreInfo
 			}
 		}
 
 		var s3RestoredPackageIds []int64
+		var s3RestoredInfos []*models.RestorePackageInfo
 
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
@@ -62,9 +65,18 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
 				return fmt.Errorf("error restoring S3 objects: %w", err)
 			} else if len(deleteResponse.AWSErrors) > 0 {
-
+				sqlStore.LogError("AWS errors while restoring S3 objects", deleteResponse.AWSErrors)
+				return fmt.Errorf("AWS error restoring S3 objects: %v. More errors may appear in server logs", deleteResponse.AWSErrors[0])
+			} else {
+				deletedPackages := deleteResponse.Deleted
+				for _, deletedPackage := range deletedPackages {
+					s3RestoredPackageIds = append(s3RestoredPackageIds, nonFolderNodeIdToId[deletedPackage.NodeId])
+					s3RestoredInfos = append(s3RestoredInfos, nonFolderNodeIdToInfos[deletedPackage.NodeId])
+				}
+				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, s3RestoredInfos...); err != nil {
+					sqlStore.LogError("error removing delete records from DynamoDB", err)
+				}
 			}
-			//TODO undelete in S3 and remove DeleteRecords from DynamoDB and populate s3RestoredPackageIds from the S3 Undelete response
 		}
 
 		// restore dataset_storage
