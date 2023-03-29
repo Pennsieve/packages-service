@@ -41,9 +41,31 @@ type DeletedPackage struct {
 	DeleteMarker bool
 }
 
+type AWSError struct {
+	Code      string
+	Message   string
+	Bucket    string
+	Key       string
+	VersionId string
+}
+
+func NewAWSError(bucket string, e types.Error) AWSError {
+	return AWSError{
+		Code:      aws.ToString(e.Code),
+		Message:   aws.ToString(e.Message),
+		Bucket:    bucket,
+		Key:       aws.ToString(e.Key),
+		VersionId: aws.ToString(e.VersionId),
+	}
+}
+
+func (e *AWSError) Error() string {
+	return fmt.Sprintf("AWS error: code: %s, message: %s, S3 Object: (%s, %s, %s)", e.Code, e.Message, e.Bucket, e.Key, e.VersionId)
+}
+
 type DeleteObjectsVersionResponse struct {
 	Deleted   []DeletedPackage
-	AWSErrors []types.Error
+	AWSErrors []AWSError
 }
 
 func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3ObjectInfo) (DeleteObjectsVersionResponse, error) {
@@ -97,7 +119,9 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 					}
 					response.Deleted = append(response.Deleted, deletedPackage)
 				}
-				response.AWSErrors = append(response.AWSErrors, output.Errors...)
+				for _, awsError := range output.Errors {
+					response.AWSErrors = append(response.AWSErrors, NewAWSError(bucket, awsError))
+				}
 			}
 		}
 	}
