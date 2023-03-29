@@ -49,7 +49,7 @@ type dynamodbStore struct {
 }
 
 type S3ObjectInfo struct {
-	NodeId    string `dynamobdbav:"NodeId"`
+	NodeId    string `dynamodbav:"NodeId"`
 	Bucket    string `dynamodbav:"S3Bucket"`
 	Key       string `dynamodbav:"S3Key"`
 	VersionId string `dynamodbav:"S3ObjectVersion"`
