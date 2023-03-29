@@ -59,7 +59,12 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 			Key:       aws.String(objInfo.Key),
 			VersionId: aws.String(objInfo.VersionId),
 		}
-		bucketToKeyToNodeId[bucket][objInfo.Key] = objInfo.NodeId
+		keyToNodeId, ok := bucketToKeyToNodeId[bucket]
+		if !ok {
+			keyToNodeId = make(map[string]string)
+			bucketToKeyToNodeId[bucket] = keyToNodeId
+		}
+		keyToNodeId[objInfo.Key] = objInfo.NodeId
 		batches := byBucket[bucket]
 		nBatches := len(batches)
 		if nBatches == 0 {
