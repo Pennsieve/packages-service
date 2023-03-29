@@ -99,7 +99,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				return err
 			}
 		}
-		for _, p := range nonFolderDescRestoreInfos {
+		for _, p := range s3RestoredInfos {
 			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
 				return err
 			}
