@@ -99,6 +99,15 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 			}
 			return true
 		})
+		verifyStateQuery := fmt.Sprintf(`SELECT state from "%d".packages WHERE node_id = $1`, expectedOrgId)
+
+		for _, r := range restoring {
+			var actualState packageState.State
+			err = db.QueryRow(verifyStateQuery, r.NodeId).Scan(&actualState)
+			if assert.NoError(t, err) {
+				assert.Equal(t, packageState.Restoring, actualState)
+			}
+		}
 	}
 }
 
