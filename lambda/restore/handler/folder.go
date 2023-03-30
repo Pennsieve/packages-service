@@ -49,7 +49,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		var s3RestoredPackageIds []int64
 		var s3RestoredInfos []*models.RestorePackageInfo
-
+		sizeByPackage := map[int64]int64{}
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
 			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
@@ -62,6 +62,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			var objectInfos []store.S3ObjectInfo
 			for _, objectInfo := range deleteMarkerResp {
 				objectInfos = append(objectInfos, *objectInfo)
+				sizeByPackage[nonFolderNodeIdToId[objectInfo.NodeId]] = h.parseSize(objectInfo)
 			}
 
 			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
@@ -82,11 +83,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		}
 
 		// restore dataset_storage
-		restoredSize := restoreInfo.Size
-		sizeByPackage, err := sqlStore.GetPackageSizes(ctx, s3RestoredPackageIds...)
-		if err != nil {
-			return err
-		}
+		restoredSize := int64(0)
 		for _, size := range sizeByPackage {
 			restoredSize += size
 		}

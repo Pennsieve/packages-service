@@ -44,7 +44,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 
 		// restore dataset storage
-		restoredSize := restoreInfo.Size
+		restoredSize := h.parseSize(deleteMarker)
 		sqlStore.LogInfo("restored size: ", restoredSize)
 		if err = sqlStore.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
 			// Don't think this should fail the whole restore
@@ -96,6 +96,15 @@ func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, rest
 		return fmt.Errorf("error restoring state of %s to %s: %w", restoreInfo.NodeId, finalState, err)
 	}
 	return nil
+}
+
+func (h *MessageHandler) parseSize(objInfo *store.S3ObjectInfo) int64 {
+	size, err := objInfo.GetSize()
+	if err != nil {
+		h.LogErrorWithFields(log.Fields{"nodeId": objInfo.NodeId, "error": err}, "error parsing package size; using zero")
+		size = 0
+	}
+	return size
 }
 
 type RetryContex struct {

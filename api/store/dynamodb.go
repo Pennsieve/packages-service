@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,7 +21,7 @@ const (
 )
 
 var (
-	deleteMarkerVersionProjection = "NodeId, S3Bucket, S3Key, S3ObjectVersion"
+	deleteMarkerVersionProjection = "NodeId, S3Bucket, S3Key, S3ObjectVersion, ObjectSize"
 	deleteRecordTable             string
 )
 
@@ -53,6 +54,18 @@ type S3ObjectInfo struct {
 	Bucket    string `dynamodbav:"S3Bucket"`
 	Key       string `dynamodbav:"S3Key"`
 	VersionId string `dynamodbav:"S3ObjectVersion"`
+	Size      string `dynamodbav:"ObjectSize"`
+}
+
+func (o *S3ObjectInfo) GetSize() (int64, error) {
+	if len(o.Size) == 0 {
+		return 0, nil
+	}
+	size, err := strconv.ParseInt(o.Size, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
 }
 
 type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
