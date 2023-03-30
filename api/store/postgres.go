@@ -223,47 +223,52 @@ func (q *Queries) GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgd
 	}
 }
 
-func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error {
-	query := fmt.Sprintf(`UPDATE "%d".dataset_storage SET size = COALESCE(size, 0) + $1 WHERE dataset_id = $2`, q.OrgId)
-	res, err := q.db.ExecContext(ctx, query, sizeIncrement, datasetId)
-	if err != nil {
-		return err
-	}
-	if affected, err := res.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return models.DatasetNotFoundError{
-			OrgId: q.OrgId,
-			Id:    models.DatasetIntId(datasetId),
-		}
-	}
-	return nil
+func (q *Queries) IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error {
+	query := fmt.Sprintf(`INSERT INTO "%d".package_storage as package_storage (package_id, size) VALUES ($1, $2)
+							ON CONFLICT (package_id) DO UPDATE 
+							SET size = COALESCE(package_storage.size, 0) + EXCLUDED.size`, q.OrgId)
+	_, err := q.db.ExecContext(ctx, query, packageId, sizeIncrement)
+	return err
 }
 
-func (q *Queries) GetPackageSizes(ctx context.Context, packageIds ...int64) (map[int64]int64, error) {
-	sizesByPackage := map[int64]int64{}
-	if len(packageIds) == 0 {
-		return sizesByPackage, nil
-	}
-	query := fmt.Sprintf(`SELECT package_id, SUM(size) AS total FROM "%d".files WHERE package_id = ANY($1) GROUP BY package_id`, q.OrgId)
-	rows, err := q.db.QueryContext(ctx, query, pq.Int64Array(packageIds))
-	if err != nil {
-		return sizesByPackage, err
-	}
-	defer q.closeRows(rows)
+func (q *Queries) IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error {
+	query := fmt.Sprintf(`INSERT INTO "%d".dataset_storage as dataset_storage (dataset_id, size) VALUES ($1, $2)
+							ON CONFLICT (dataset_id) DO UPDATE 
+							SET size = COALESCE(dataset_storage.size, 0) + EXCLUDED.size`, q.OrgId)
+	_, err := q.db.ExecContext(ctx, query, datasetId, sizeIncrement)
+	return err
+}
 
-	for rows.Next() {
-		var packageId, size int64
-		if err = rows.Scan(&packageId, &size); err != nil {
-			return sizesByPackage, err
-		}
-		sizesByPackage[packageId] = size
-	}
-	if err = rows.Err(); err != nil {
-		return sizesByPackage, err
-	}
+func (q *Queries) IncrementOrganizationStorage(ctx context.Context, organizationId int64, sizeIncrement int64) error {
+	query := `INSERT INTO pennsieve.organization_storage as organization_storage (organization_id, size) VALUES ($1, $2)
+							ON CONFLICT (organization_id) DO UPDATE 
+							SET size = COALESCE(organization_storage.size, 0) + EXCLUDED.size`
+	_, err := q.db.ExecContext(ctx, query, organizationId, sizeIncrement)
+	return err
+}
 
-	return sizesByPackage, nil
+// IncrementPackageStorageAncestors increases the storage associated with the parents of the provided package.
+func (q *Queries) IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error {
+
+	queryStr := fmt.Sprintf(`WITH RECURSIVE ancestors(id, parent_id) AS (
+		SELECT 
+		packages.id,
+		packages.parent_id
+		FROM "%[1]d".packages packages
+		WHERE packages.id = $1
+		UNION
+		SELECT parents.id, parents.parent_id
+		FROM "%[1]d".packages parents
+		JOIN ancestors ON ancestors.parent_id = parents.id
+		)
+		INSERT INTO "%[1]d".package_storage 
+		AS package_storage (package_id, size)
+		SELECT id, $2 FROM ancestors
+		ON CONFLICT (package_id)
+		DO UPDATE SET size = COALESCE(package_storage.size, 0) + EXCLUDED.size`, q.OrgId)
+
+	_, err := q.db.ExecContext(ctx, queryStr, parentId, size)
+	return err
 }
 
 func (q *Queries) NewSavepoint(ctx context.Context, name string) error {
@@ -292,7 +297,9 @@ type SQLStore interface {
 	NewSavepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error
+	IncrementOrganizationStorage(ctx context.Context, organizationId int64, sizeIncrement int64) error
 	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error
-	GetPackageSizes(ctx context.Context, packageIds ...int64) (map[int64]int64, error)
+	IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error
+	IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error
 	logging.Logger
 }

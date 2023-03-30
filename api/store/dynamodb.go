@@ -72,7 +72,7 @@ type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
 
 type NoSQLStore interface {
 	GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error)
-	RemoveDeleteRecords(ctx context.Context, restoring ...*models.RestorePackageInfo) error
+	RemoveDeleteRecords(ctx context.Context, restoring []*models.RestorePackageInfo) error
 	logging.Logger
 }
 
@@ -143,7 +143,7 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 	return items, nil
 }
 
-func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoring ...*models.RestorePackageInfo) error {
+func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoring []*models.RestorePackageInfo) error {
 	for i := 0; i < len(restoring); i += maxWriteItemBatch {
 		j := i + maxWriteItemBatch
 		if j > len(restoring) {

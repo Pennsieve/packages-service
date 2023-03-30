@@ -31,9 +31,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		// restore descendant names
 		for _, p := range restoring {
 			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
-			// using fake size here because we only want to look up
-			// sizes of items we find a delete-record for below.
-			descRestoreInfo := models.NewRestorePackageInfo(p, 0)
+			descRestoreInfo := models.NewRestorePackageInfo(p)
 			err = h.restoreName(ctx, descRestoreInfo, sqlStore)
 			if err != nil {
 				return fmt.Errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
@@ -47,9 +45,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			}
 		}
 
-		var s3RestoredPackageIds []int64
-		var s3RestoredInfos []*models.RestorePackageInfo
-		sizeByPackage := map[int64]int64{}
+		var s3RestoredFileInfos RestoreFileInfos
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
 			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
@@ -62,7 +58,6 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			var objectInfos []store.S3ObjectInfo
 			for _, objectInfo := range deleteMarkerResp {
 				objectInfos = append(objectInfos, *objectInfo)
-				sizeByPackage[nonFolderNodeIdToId[objectInfo.NodeId]] = h.parseSize(objectInfo)
 			}
 
 			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
@@ -73,23 +68,20 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			} else {
 				deletedPackages := deleteResponse.Deleted
 				for _, deletedPackage := range deletedPackages {
-					s3RestoredPackageIds = append(s3RestoredPackageIds, nonFolderNodeIdToId[deletedPackage.NodeId])
-					s3RestoredInfos = append(s3RestoredInfos, nonFolderNodeIdToInfos[deletedPackage.NodeId])
+					s3RestoredFileInfos = append(s3RestoredFileInfos, RestoreFileInfo{
+						RestorePackageInfo: nonFolderNodeIdToInfos[deletedPackage.NodeId],
+						S3ObjectInfo:       deleteMarkerResp[deletedPackage.NodeId],
+					})
 				}
-				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, s3RestoredInfos...); err != nil {
+				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, s3RestoredFileInfos.AsPackageInfos()); err != nil {
 					sqlStore.LogError("error removing delete records from DynamoDB", err)
 				}
 			}
 		}
 
 		// restore dataset_storage
-		restoredSize := int64(0)
-		for _, size := range sizeByPackage {
-			restoredSize += size
-		}
-		sqlStore.LogInfo("restored size ", restoredSize)
-		if err = sqlStore.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
-
+		if err = h.restoreStorages(ctx, int64(orgId), datasetId, s3RestoredFileInfos, sqlStore); err != nil {
+			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "error updating storage", err)
 		}
 
 		// restore descendant state
@@ -99,9 +91,9 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				return err
 			}
 		}
-		for _, p := range s3RestoredInfos {
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "type": p.Type}, "restoring descendant non-folder state")
-			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
+		for _, p := range s3RestoredFileInfos {
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.RestorePackageInfo.NodeId, "type": p.Type}, "restoring descendant non-folder state")
+			if err = h.restoreState(ctx, datasetId, *p.RestorePackageInfo, sqlStore); err != nil {
 				return err
 			}
 		}

@@ -62,6 +62,14 @@ func Truncate(t *testing.T, db *sql.DB, orgID int, table string) {
 	}
 }
 
+func TruncatePennsieve(t *testing.T, db *sql.DB, table string) {
+	query := fmt.Sprintf("TRUNCATE TABLE pennsieve.%s CASCADE", table)
+	_, err := db.Exec(query)
+	if err != nil {
+		assert.FailNowf(t, "error truncating table in pennsieve schema", "table: %s, error: %v", table, err)
+	}
+}
+
 type NoLogger struct{}
 
 func (n NoLogger) LogWarn(_ ...any) {}

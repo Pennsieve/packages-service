@@ -38,7 +38,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
 			return fmt.Errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
 		}
-		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, &restoreInfo); err != nil {
+		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, []*models.RestorePackageInfo{&restoreInfo}); err != nil {
 			// Don't think this should cause the whole restore to fail
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "error removing delete record")
 		}
@@ -46,9 +46,9 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		// restore dataset storage
 		restoredSize := h.parseSize(deleteMarker)
 		sqlStore.LogInfo("restored size: ", restoredSize)
-		if err = sqlStore.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
+		if err = h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, sqlStore); err != nil {
 			// Don't think this should fail the whole restore
-			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update dataset_storage")
+			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update storage")
 		}
 
 		// restore state
@@ -94,6 +94,52 @@ func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, rest
 	_, err := store.TransitionPackageState(ctx, datasetId, restoreInfo.NodeId, packageState.Restoring, finalState)
 	if err != nil {
 		return fmt.Errorf("error restoring state of %s to %s: %w", restoreInfo.NodeId, finalState, err)
+	}
+	return nil
+}
+
+func (h *MessageHandler) restoreStorage(ctx context.Context, organizationId, datasetId int64, restoreInfo models.RestorePackageInfo, restoredSize int64, store store.SQLStore) error {
+	if err := store.IncrementPackageStorage(ctx, restoreInfo.Id, restoredSize); err != nil {
+		return fmt.Errorf("error incrementing package_storage for package %d by %d: %w", restoreInfo.Id, restoredSize, err)
+	}
+	if parentId := restoreInfo.ParentId; parentId != nil {
+		if err := store.IncrementPackageStorageAncestors(ctx, *parentId, restoredSize); err != nil {
+			return fmt.Errorf("error incrementing package_storage for ancestors of package %d by %d: %w", restoreInfo.Id, restoredSize, err)
+		}
+	}
+	if err := store.IncrementDatasetStorage(ctx, datasetId, restoredSize); err != nil {
+		return fmt.Errorf("error incrementing dataset_storage for dataset %d by %d: %w", datasetId, restoredSize, err)
+	}
+	if err := store.IncrementOrganizationStorage(ctx, organizationId, restoredSize); err != nil {
+		return fmt.Errorf("error incrementing organization_storage for organization %d by %d: %w", organizationId, restoredSize, err)
+	}
+	return nil
+}
+
+func (h *MessageHandler) restoreStorages(ctx context.Context, organizationId, datasetId int64, fileInfos []RestoreFileInfo, store store.SQLStore) error {
+	var totalSize int64
+	sizeByParent := map[int64]int64{}
+	for _, f := range fileInfos {
+		size := h.parseSize(f.S3ObjectInfo)
+		totalSize += size
+		if f.ParentId != nil {
+			sizeByParent[*f.ParentId] += size
+		}
+		if err := store.IncrementPackageStorage(ctx, f.Id, size); err != nil {
+			return fmt.Errorf("error incrementing package_storage for package %d by %d: %w", f.Id, size, err)
+		}
+	}
+	store.LogInfo("restored size: ", totalSize)
+	for parentId, byParentSize := range sizeByParent {
+		if err := store.IncrementPackageStorageAncestors(ctx, parentId, byParentSize); err != nil {
+			return fmt.Errorf("error incrementing package_storage for package %d and ancestors by %d: %w", parentId, sizeByParent, err)
+		}
+	}
+	if err := store.IncrementDatasetStorage(ctx, datasetId, totalSize); err != nil {
+		return fmt.Errorf("error incrementing dataset_storage for dataset %d by %d: %w", datasetId, totalSize, err)
+	}
+	if err := store.IncrementOrganizationStorage(ctx, organizationId, totalSize); err != nil {
+		return fmt.Errorf("error incrementing organization_storage for organization %d by %d: %w", organizationId, totalSize, err)
 	}
 	return nil
 }
@@ -175,4 +221,27 @@ func (p *NameParts) Next() string {
 
 func (p *NameParts) More() bool {
 	return p.more
+}
+
+type RestoreFileInfo struct {
+	*models.RestorePackageInfo
+	*store.S3ObjectInfo
+}
+
+type RestoreFileInfos []RestoreFileInfo
+
+func (fs RestoreFileInfos) AsPackageInfos() []*models.RestorePackageInfo {
+	ps := make([]*models.RestorePackageInfo, len(fs))
+	for i, f := range fs {
+		ps[i] = f.RestorePackageInfo
+	}
+	return ps
+}
+
+func (fs RestoreFileInfos) AsS3ObjectInfos() []*store.S3ObjectInfo {
+	os := make([]*store.S3ObjectInfo, len(fs))
+	for i, f := range fs {
+		os[i] = f.S3ObjectInfo
+	}
+	return os
 }

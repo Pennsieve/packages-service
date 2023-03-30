@@ -41,16 +41,13 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			okIntIds := make([]int64, len(okIds))
-			okSizes := map[int64]int64{}
 			for i, okId := range okIds {
 				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, nil)
-				okSizes[okPkg.Id] = int64((i + 7) * 1024)
 				okIntIds[i] = okPkg.Id
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
-			store.OnGetPackageSizesReturn(okIntIds, okSizes)
-			sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okSizes, okPkgs...)
+			sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
 			store.OnSendRestorePackageReturn(sqsMessage)
 
 			failedIdErrors := map[string]error{"N:package:0987": models.PackageNotFoundError{DatasetId: models.DatasetNodeId(datasetNodeId), OrgId: orgId}}
@@ -116,17 +113,14 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234", "N:package:0987"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			okIntIds := make([]int64, len(okIds))
-			okSizes := map[int64]int64{}
 			for i, okId := range okIds {
 				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, nil)
-				okSizes[okPkg.Id] = int64((i + 7) * 1024)
 				okIntIds[i] = okPkg.Id
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
-			store.OnGetPackageSizesReturn(okIntIds, okSizes)
 			sqsError := errors.New("unexpected sqs send error")
-			message := models.NewRestorePackageMessage(orgId, datasetIntId, okSizes, okPkgs...)
+			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
 			store.OnSendRestorePackageFail(message, sqsError)
 			return &models.RestoreRequest{NodeIds: okIds}, nil, sqsError
 		},
@@ -136,20 +130,16 @@ func TestTransitionPackageState(t *testing.T) {
 			okIds := []string{"N:package:1234", "N:package:0987"}
 			okPkgs := make([]*pgdb.Package, len(okIds))
 			okIntIds := make([]int64, len(okIds))
-			okSizes := map[int64]int64{}
 			for i, okId := range okIds {
 				var parentId int64
 				parentId = int64(i + 19)
 				okPkg := newDeletedPackage(okId, fmt.Sprintf("file_%d.txt", i), packageType.Text, &parentId)
 				okIntIds[i] = okPkg.Id
-				okSizes[okPkg.Id] = int64(32 * (i + 5))
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
 
-			store.OnGetPackageSizesReturn(okIntIds, okSizes)
-
-			message := models.NewRestorePackageMessage(orgId, datasetIntId, okSizes, okPkgs...)
+			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
 			store.OnSendRestorePackageReturn(message)
 
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: []models.Failure{}}, nil
@@ -236,19 +226,6 @@ func (m *MockPackagesStore) OnTransitionDescendantPackageStateFail(datasetId int
 	m.On("TransitionDescendantPackageState", mock.Anything, datasetId, parentId, expectedState, targetState).Return(nil, returnedError)
 }
 
-func (m *MockPackagesStore) GetPackageSizes(ctx context.Context, packageIds ...int64) (map[int64]int64, error) {
-	args := m.Called(ctx, packageIds)
-	return args.Get(0).(map[int64]int64), args.Error(1)
-}
-
-func (m *MockPackagesStore) OnGetPackageSizesReturn(packageIds []int64, returnedValue map[int64]int64) {
-	m.On("GetPackageSizes", mock.Anything, packageIds).Return(returnedValue, nil)
-}
-
-func (m *MockPackagesStore) OnGetPackageSizesFail(packageIds []int64, returnedError error) {
-	m.On("GetPackageSizes", mock.Anything, packageIds).Return(map[int64]int64{}, returnedError)
-}
-
 func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int64, newName string) error {
 	args := m.Called(ctx, packageId, newName)
 	return args.Error(0)
@@ -268,6 +245,18 @@ func (m *MockPackagesStore) ReleaseSavepoint(_ context.Context, _ string) error 
 
 func (m *MockPackagesStore) IncrementDatasetStorage(_ context.Context, _ int64, _ int64) error {
 	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error {
+	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error {
+	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) IncrementOrganizationStorage(ctx context.Context, organizationId int64, sizeIncrement int64) error {
+	panic("mock me if you need")
 }
 
 type MockFactory struct {

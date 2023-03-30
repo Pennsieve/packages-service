@@ -6,6 +6,7 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/stretchr/testify/assert"
+	"math/rand"
 	"testing"
 )
 
@@ -167,6 +168,50 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 	}
 }
 
+func TestQueries_IncrementOrganizationStorage(t *testing.T) {
+	db := OpenDB(t)
+	defer func() {
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
+	}()
+
+	expectedOrgId := 2
+	expectedInitialSize := int64(1023)
+	insertQuery := `INSERT INTO pennsieve.organization_storage (organization_id, size) VALUES ($1, $2)`
+	checkQuery := `SELECT size from pennsieve.organization_storage WHERE organization_id = $1`
+
+	for name, data := range map[string]struct {
+		initialSize int64 // zero means no previous organization_storage row for the org
+		increment   int64
+	}{
+		"positive increment, existing dataset": {expectedInitialSize, int64(879)},
+		"negative increment, existing dataset": {expectedInitialSize, int64(-435)},
+		"positive increment, new dataset":      {0, int64(879)},
+		"negative increment, new dataset":      {0, int64(-435)},
+	} {
+		if data.initialSize != 0 {
+			if _, err := db.Exec(insertQuery, expectedOrgId, data.initialSize); err != nil {
+				assert.FailNow(t, "error setting up organization_storage table", err)
+			}
+		}
+		store := NewQueries(db, expectedOrgId, NoLogger{})
+
+		t.Run(name, func(t *testing.T) {
+			err := store.IncrementOrganizationStorage(context.Background(), int64(expectedOrgId), data.increment)
+			if assert.NoError(t, err) {
+				var actual int64
+				err = db.QueryRow(checkQuery, expectedOrgId).Scan(&actual)
+				if assert.NoError(t, err) {
+					assert.Equal(t, data.initialSize+data.increment, actual)
+				}
+			}
+		})
+
+		TruncatePennsieve(t, db, "organization_storage")
+	}
+}
+
 func TestQueries_IncrementDatasetStorage(t *testing.T) {
 	db := OpenDB(t)
 	defer func() {
@@ -177,26 +222,33 @@ func TestQueries_IncrementDatasetStorage(t *testing.T) {
 
 	expectedOrgId := 2
 	expectedDatasetId := int64(1)
-	initialSize := int64(1023)
+	expectedInitialSize := int64(1023)
 	insertQuery := fmt.Sprintf(`INSERT INTO "%d".dataset_storage (dataset_id, size) VALUES ($1, $2)`, expectedOrgId)
 	checkQuery := fmt.Sprintf(`SELECT size from "%d".dataset_storage WHERE dataset_id = $1`, expectedOrgId)
 
-	for name, increment := range map[string]int64{
-		"positive increment": int64(879),
-		"negative increment": int64(-435),
+	for name, data := range map[string]struct {
+		initialSize int64 // zero means no previous dataset_storage row for the dataset
+		increment   int64
+	}{
+		"positive increment, existing dataset": {expectedInitialSize, int64(879)},
+		"negative increment, existing dataset": {expectedInitialSize, int64(-435)},
+		"positive increment, new dataset":      {0, int64(879)},
+		"negative increment, new dataset":      {0, int64(-435)},
 	} {
-		if _, err := db.Exec(insertQuery, expectedDatasetId, initialSize); err != nil {
-			assert.FailNow(t, "error setting up dataset_storage table", err)
+		if data.initialSize != 0 {
+			if _, err := db.Exec(insertQuery, expectedDatasetId, data.initialSize); err != nil {
+				assert.FailNow(t, "error setting up dataset_storage table", err)
+			}
 		}
 		store := NewQueries(db, expectedOrgId, NoLogger{})
 
 		t.Run(name, func(t *testing.T) {
-			err := store.IncrementDatasetStorage(context.Background(), expectedDatasetId, increment)
+			err := store.IncrementDatasetStorage(context.Background(), expectedDatasetId, data.increment)
 			if assert.NoError(t, err) {
 				var actual int64
 				err = db.QueryRow(checkQuery, expectedDatasetId).Scan(&actual)
 				if assert.NoError(t, err) {
-					assert.Equal(t, initialSize+increment, actual)
+					assert.Equal(t, data.initialSize+data.increment, actual)
 				}
 			}
 		})
@@ -205,27 +257,99 @@ func TestQueries_IncrementDatasetStorage(t *testing.T) {
 	}
 }
 
-func TestQueries_GetPackageSizes(t *testing.T) {
+func TestQueries_IncrementPackageStorage(t *testing.T) {
 	db := OpenDB(t)
 	defer func() {
 		if db != nil {
 			assert.NoError(t, db.Close())
 		}
 	}()
-
 	expectedOrgId := 2
-	ExecSQLFile(t, db, "package-sizes-test.sql")
+
+	ExecSQLFile(t, db, "increment-package-storage-test.sql")
+	defer Truncate(t, db, expectedOrgId, "packages")
+
+	expectedPackageId := int64(1)
+	expectedInitialSize := int64(1023)
+
+	insertQuery := fmt.Sprintf(`INSERT INTO "%d".package_storage (package_id, size) VALUES ($1, $2)`, expectedOrgId)
+	checkQuery := fmt.Sprintf(`SELECT size from "%d".package_storage WHERE package_id = $1`, expectedOrgId)
+
+	for name, data := range map[string]struct {
+		initialSize int64 // zero means no previous package_storage row for the package
+		increment   int64
+	}{
+		"positive increment, existing package": {expectedInitialSize, int64(879)},
+		"negative increment, existing package": {expectedInitialSize, int64(-435)},
+		"positive increment, new package":      {0, int64(879)},
+		"negative increment, new package":      {0, int64(-435)},
+	} {
+		if data.initialSize != 0 {
+			if _, err := db.Exec(insertQuery, expectedPackageId, data.initialSize); err != nil {
+				assert.FailNow(t, "error setting up package_storage table", err)
+			}
+		}
+		store := NewQueries(db, expectedOrgId, NoLogger{})
+
+		t.Run(name, func(t *testing.T) {
+			err := store.IncrementPackageStorage(context.Background(), expectedPackageId, data.increment)
+			if assert.NoError(t, err) {
+				var actual int64
+				err = db.QueryRow(checkQuery, expectedPackageId).Scan(&actual)
+				if assert.NoError(t, err) {
+					assert.Equal(t, data.initialSize+data.increment, actual)
+				}
+			}
+		})
+
+		Truncate(t, db, expectedOrgId, "package_storage")
+	}
+}
+
+func TestQueries_IncrementPackageStorageAncestors(t *testing.T) {
+	db := OpenDB(t)
 	defer func() {
-		Truncate(t, db, expectedOrgId, "files")
-		Truncate(t, db, expectedOrgId, "packages")
+		if db != nil {
+			assert.NoError(t, db.Close())
+		}
 	}()
+	expectedOrgId := 2
+	ExecSQLFile(t, db, "folder-nav-test.sql")
+	defer Truncate(t, db, expectedOrgId, "packages")
+	defer Truncate(t, db, expectedOrgId, "package_storage")
+
+	// These are the ancestors of package with id == 43, starting with its parent.
+	expectedAncestorIds := []int64{35, 24, 12, 6}
+	insertQuery := fmt.Sprintf(`INSERT INTO "%d".package_storage (package_id, size) VALUES ($1, $2)`, expectedOrgId)
+	ancestorIdToInitialSize := map[int64]int64{}
+	for _, id := range expectedAncestorIds {
+		initialSize := rand.Int63()
+		ancestorIdToInitialSize[id] = initialSize
+		if _, err := db.Exec(insertQuery, id, initialSize); err != nil {
+			assert.FailNow(t, "error setting up package_storage table", err)
+		}
+	}
 
 	store := NewQueries(db, expectedOrgId, NoLogger{})
-	sizeByPackageId, err := store.GetPackageSizes(context.Background(), 1, 2, 3, 15)
+	increment := int64(92)
+	err := store.IncrementPackageStorageAncestors(context.Background(), expectedAncestorIds[0], increment)
 	if assert.NoError(t, err) {
-		assert.Len(t, sizeByPackageId, 3)
-		assert.Equal(t, int64(72158), sizeByPackageId[1])
-		assert.Equal(t, int64(2939946+10), sizeByPackageId[2])
-		assert.Equal(t, int64(10+14+14), sizeByPackageId[3])
+		checkQuery := fmt.Sprintf(`SELECT package_id, size from "%d".package_storage`, expectedOrgId)
+		var rowCount int
+		rows, err := db.Query(checkQuery)
+		if assert.NoError(t, err) {
+			defer rows.Close()
+			for rows.Next() {
+				rowCount++
+				var ancestorId, actualSize int64
+				err = rows.Scan(&ancestorId, &actualSize)
+				if assert.NoError(t, err) {
+					expectedInitial := ancestorIdToInitialSize[ancestorId]
+					assert.Equal(t, expectedInitial+increment, actualSize)
+				}
+			}
+			assert.Equal(t, len(expectedAncestorIds), rowCount)
+			assert.NoError(t, rows.Err())
+		}
 	}
 }
