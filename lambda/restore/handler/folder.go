@@ -7,6 +7,7 @@ import (
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
+	log "github.com/sirupsen/logrus"
 )
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
@@ -29,6 +30,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		nonFolderNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
 			// using fake size here because we only want to look up
 			// sizes of items we find a delete-record for below.
 			descRestoreInfo := models.NewRestorePackageInfo(p, 0)
@@ -95,11 +97,13 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		// restore descendant state
 		for _, p := range folderDescRestoreInfos {
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "type": p.Type}, "restoring descendant folder state")
 			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
 				return err
 			}
 		}
 		for _, p := range s3RestoredInfos {
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "type": p.Type}, "restoring descendant non-folder state")
 			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
 				return err
 			}
