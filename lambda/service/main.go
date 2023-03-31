@@ -16,6 +16,9 @@ func init() {
 	// Create connection pool to Postgres DB
 	db, err := pgdb.ConnectRDS()
 	if err != nil {
+		panic(fmt.Sprintf("unable to open connection pool to RDS database: %s", err))
+	}
+	if err := db.Ping(); err != nil {
 		panic(fmt.Sprintf("unable to connect to RDS database: %s", err))
 	}
 	log.Info("connected to RDS database")

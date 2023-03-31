@@ -9,6 +9,7 @@ import (
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	pg "github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	log "github.com/sirupsen/logrus"
@@ -143,7 +144,7 @@ func (q *Queries) closeRows(rows *sql.Rows) {
 	}
 }
 
-func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
+func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetId, packageId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
 	query := fmt.Sprintf(`WITH RECURSIVE nodes(id) AS (
 							SELECT id FROM "%[1]d".packages
                              	WHERE parent_id = $1
@@ -158,7 +159,54 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 				WHERE state = $3 AND id IN (SELECT id FROM nodes n)
 				RETURNING %s`, q.OrgId, packageColumnsString)
 	var updated []*pgdb.Package
-	rows, err := q.db.QueryContext(ctx, query, parentId, datasetId, expectedState, targetState)
+	rows, err := q.db.QueryContext(ctx, query, packageId, datasetId, expectedState, targetState)
+	if err != nil {
+		return nil, err
+	}
+	defer q.closeRows(rows)
+
+	for rows.Next() {
+		var pkg pgdb.Package
+		if err = rows.Scan(&pkg.Id,
+			&pkg.Name,
+			&pkg.PackageType,
+			&pkg.PackageState,
+			&pkg.NodeId,
+			&pkg.ParentId,
+			&pkg.DatasetId,
+			&pkg.OwnerId,
+			&pkg.Size,
+			&pkg.ImportId,
+			&pkg.Attributes,
+			&pkg.CreatedAt,
+			&pkg.UpdatedAt); err != nil {
+			return updated, err
+		}
+		updated = append(updated, &pkg)
+	}
+	if err = rows.Err(); err != nil {
+		return updated, err
+	}
+	return updated, nil
+}
+
+func (q *Queries) TransitionAncestorPackageState(ctx context.Context, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
+	query := fmt.Sprintf(`WITH RECURSIVE ancestors(id, parent_id) AS (
+							SELECT id, parent_id FROM "%[1]d".packages
+                             	WHERE type = $1
+							 	AND id = $2
+								AND state = $3
+							UNION ALL
+                             SELECT parents.id, parents.parent_id FROM "%[1]d".packages parents
+								JOIN ancestors on ancestors.parent_id = parents.id
+								WHERE type = $1 
+								AND state = $3)
+				UPDATE "%[1]d".packages
+				SET state = $4
+				WHERE type = $1 and state = $3 AND id IN (SELECT id FROM ancestors)
+				RETURNING %s`, q.OrgId, packageColumnsString)
+	var updated []*pgdb.Package
+	rows, err := q.db.QueryContext(ctx, query, packageType.Collection, parentId, expectedState, targetState)
 	if err != nil {
 		return nil, err
 	}
@@ -292,8 +340,14 @@ func (q *Queries) ReleaseSavepoint(ctx context.Context, name string) error {
 type SQLStore interface {
 	UpdatePackageName(ctx context.Context, packageId int64, newName string) error
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
+	// TransitionPackageState updates the state of the given package from expectedState to targetState and returns the resulting package.
+	// If the package is not already in expectedState, then models.PackageNotFoundError is returned.
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
-	TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)
+	// TransitionDescendantPackageState updates the state of any descendants of the given package which have state == expectedState to targetState and returns the updated packages.
+	// It does not update the state of the package with id packageId, only its descendants if any.
+	TransitionDescendantPackageState(ctx context.Context, datasetId, packageId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)
+	// TransitionAncestorPackageState updates the state of any ancestors of the package with the given parentId which have state == expectedState to targetState and returns the updated packages.
+	TransitionAncestorPackageState(ctx context.Context, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)
 	NewSavepoint(ctx context.Context, name string) error
 	RollbackToSavepoint(ctx context.Context, name string) error
 	ReleaseSavepoint(ctx context.Context, name string) error

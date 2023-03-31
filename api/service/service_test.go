@@ -213,8 +213,8 @@ func (m *MockPackagesStore) OnTransitionPackageStateFail(datasetId int64, packag
 	m.On("TransitionPackageState", mock.Anything, datasetId, packageId, expectedState, targetState).Return(&pgdb.Package{}, returnedError)
 }
 
-func (m *MockPackagesStore) TransitionDescendantPackageState(ctx context.Context, datasetId int64, parentId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
-	args := m.Called(ctx, datasetId, parentId, expectedState, targetState)
+func (m *MockPackagesStore) TransitionDescendantPackageState(ctx context.Context, datasetId, packageId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error) {
+	args := m.Called(ctx, datasetId, packageId, expectedState, targetState)
 	return args.Get(0).([]*pgdb.Package), args.Error(1)
 }
 
@@ -247,16 +247,20 @@ func (m *MockPackagesStore) IncrementDatasetStorage(_ context.Context, _ int64, 
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error {
+func (m *MockPackagesStore) IncrementPackageStorage(_ context.Context, _ int64, _ int64) error {
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error {
+func (m *MockPackagesStore) IncrementPackageStorageAncestors(_ context.Context, _ int64, _ int64) error {
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) IncrementOrganizationStorage(ctx context.Context, organizationId int64, sizeIncrement int64) error {
+func (m *MockPackagesStore) IncrementOrganizationStorage(_ context.Context, _ int64, _ int64) error {
 	panic("mock me if you need")
+}
+
+func (m *MockPackagesStore) TransitionAncestorPackageState(_ context.Context, _ int64, _, _ packageState.State) ([]*pgdb.Package, error) {
+	panic("mock me if you need me")
 }
 
 type MockFactory struct {

@@ -87,11 +87,7 @@ func TestNameParts_Limit(t *testing.T) {
 
 func TestRestoreName(t *testing.T) {
 	db := store.OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	orgId := 2
 	for name, d := range map[string]struct {
 		id             int64
@@ -109,8 +105,8 @@ func TestRestoreName(t *testing.T) {
 		"__DELETED__N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8_another-file.txt",
 		"another-file-restored_1.txt",
 	}} {
-		store.ExecSQLFile(t, db, "restore-package-name-test.sql")
-		sqlFactory := store.NewPostgresStoreFactory(db)
+		db.ExecSQLFile("restore-package-name-test.sql")
+		sqlFactory := store.NewPostgresStoreFactory(db.DB)
 		ctx := context.Background()
 		handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
 		restoreInfo := models.RestorePackageInfo{
@@ -131,23 +127,19 @@ func TestRestoreName(t *testing.T) {
 				}
 			}
 		})
-		store.Truncate(t, db, orgId, "packages")
+		db.Truncate(orgId, "packages")
 
 	}
 }
 
 func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 	db := store.OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	orgId := 2
-	store.ExecSQLFile(t, db, "restore-package-name-test.sql")
-	defer store.Truncate(t, db, orgId, "packages")
+	db.ExecSQLFile("restore-package-name-test.sql")
+	defer db.Truncate(orgId, "packages")
 
-	sqlFactory := store.NewPostgresStoreFactory(db)
+	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	ctx := context.Background()
 	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
 	restoreInfo1 := models.RestorePackageInfo{

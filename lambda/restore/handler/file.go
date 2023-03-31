@@ -16,27 +16,38 @@ var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
+		// mark any deleted ancestors as restoring
+		var ancestors []models.RestorePackageInfo
+		if restoreInfo.ParentId != nil {
+			if a, err := sqlStore.TransitionAncestorPackageState(ctx, *restoreInfo.ParentId, packageState.Deleted, packageState.Restoring); err != nil {
+				return h.errorf("error updating ancestors of %s to RESTORING: %w", restoreInfo.NodeId, err)
+			} else {
+				for _, p := range a {
+					ancestors = append(ancestors, models.NewRestorePackageInfo(p))
+				}
+			}
+		}
 		// restore name
 		err := h.restoreName(ctx, restoreInfo, sqlStore)
 		if err != nil {
-			return err
+			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
 		}
 
 		// restore S3 and clean up DynamoDB
 		deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
 		if err != nil {
-			return err
+			return h.errorf("error getting delete record of %s: %w", restoreInfo.NodeId, err)
 		}
 		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
 		if !ok {
-			return fmt.Errorf("no delete record found for %v", restoreInfo)
+			return h.errorf("no delete record found for %v", restoreInfo)
 		}
 		sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
 		if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, *deleteMarker); err != nil {
-			return fmt.Errorf("error restoring S3 object %s: %w", *deleteMarker, err)
+			return h.errorf("error restoring S3 object %s: %w", *deleteMarker, err)
 		} else if len(deleteResponse.AWSErrors) > 0 {
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
-			return fmt.Errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
+			return h.errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
 		}
 		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, []*models.RestorePackageInfo{&restoreInfo}); err != nil {
 			// Don't think this should cause the whole restore to fail
@@ -50,10 +61,15 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			// Don't think this should fail the whole restore
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update storage")
 		}
-
+		// restore ancestor state
+		for _, a := range ancestors {
+			if err := h.restoreState(ctx, datasetId, a, sqlStore); err != nil {
+				return h.errorf("error restoring state of %s, ancestor of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			}
+		}
 		// restore state
 		if err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore); err != nil {
-			return err
+			return h.errorf("error restoring state of %s: %w", restoreInfo.NodeId, err)
 		}
 		return nil
 	})

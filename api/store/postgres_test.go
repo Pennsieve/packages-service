@@ -12,13 +12,9 @@ import (
 
 func TestTransitionPackageState(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
-	ExecSQLFile(t, db, "folder-nav-test.sql")
-	defer Truncate(t, db, 2, "packages")
+	defer db.Close()
+	db.ExecSQLFile("folder-nav-test.sql")
+	defer db.Truncate(2, "packages")
 
 	store := NewQueries(db, 2, NoLogger{})
 	expectedDatasetId := int64(1)
@@ -34,14 +30,10 @@ func TestTransitionPackageState(t *testing.T) {
 
 func TestTransitionPackageStateNoTransition(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	expectedOrgId := 2
-	ExecSQLFile(t, db, "folder-nav-test.sql")
-	defer Truncate(t, db, expectedOrgId, "packages")
+	db.ExecSQLFile("folder-nav-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
 
 	store := NewQueries(db, 2, NoLogger{})
 	expectedDatasetId := int64(1)
@@ -68,14 +60,10 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 
 func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	expectedOrgId := 2
-	ExecSQLFile(t, db, "update-desc-test.sql")
-	defer Truncate(t, db, expectedOrgId, "packages")
+	db.ExecSQLFile("update-desc-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
 	expectedRestoringNames := []string{"one-file-deleted-1.csv", "one-file-deleted-2", "one-dir-deleted-1", "two-file-deleted-1.csv", "two-dir-deleted-1", "three-file-deleted-1.png"}
 	store := NewQueries(db, expectedOrgId, NoLogger{})
 	restoring, err := store.TransitionDescendantPackageState(context.Background(), 1, 4, packageState.Deleted, packageState.Restoring)
@@ -114,14 +102,10 @@ func TestQueries_TransitionDescendantPackageState(t *testing.T) {
 
 func TestQueries_UpdatePackageName(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	expectedOrgId := 2
-	ExecSQLFile(t, db, "update-package-name-test.sql")
-	defer Truncate(t, db, expectedOrgId, "packages")
+	db.ExecSQLFile("update-package-name-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
 
 	checkResultQuery := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, expectedOrgId)
 	store := NewQueries(db, expectedOrgId, NoLogger{})
@@ -170,11 +154,7 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 
 func TestQueries_IncrementOrganizationStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 
 	expectedOrgId := 2
 	expectedInitialSize := int64(1023)
@@ -208,17 +188,13 @@ func TestQueries_IncrementOrganizationStorage(t *testing.T) {
 			}
 		})
 
-		TruncatePennsieve(t, db, "organization_storage")
+		db.TruncatePennsieve("organization_storage")
 	}
 }
 
 func TestQueries_IncrementDatasetStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 
 	expectedOrgId := 2
 	expectedDatasetId := int64(1)
@@ -253,21 +229,17 @@ func TestQueries_IncrementDatasetStorage(t *testing.T) {
 			}
 		})
 
-		Truncate(t, db, expectedOrgId, "dataset_storage")
+		db.Truncate(expectedOrgId, "dataset_storage")
 	}
 }
 
 func TestQueries_IncrementPackageStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	expectedOrgId := 2
 
-	ExecSQLFile(t, db, "increment-package-storage-test.sql")
-	defer Truncate(t, db, expectedOrgId, "packages")
+	db.ExecSQLFile("increment-package-storage-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
 
 	expectedPackageId := int64(1)
 	expectedInitialSize := int64(1023)
@@ -302,21 +274,17 @@ func TestQueries_IncrementPackageStorage(t *testing.T) {
 			}
 		})
 
-		Truncate(t, db, expectedOrgId, "package_storage")
+		db.Truncate(expectedOrgId, "package_storage")
 	}
 }
 
 func TestQueries_IncrementPackageStorageAncestors(t *testing.T) {
 	db := OpenDB(t)
-	defer func() {
-		if db != nil {
-			assert.NoError(t, db.Close())
-		}
-	}()
+	defer db.Close()
 	expectedOrgId := 2
-	ExecSQLFile(t, db, "folder-nav-test.sql")
-	defer Truncate(t, db, expectedOrgId, "packages")
-	defer Truncate(t, db, expectedOrgId, "package_storage")
+	db.ExecSQLFile("folder-nav-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
+	defer db.Truncate(expectedOrgId, "package_storage")
 
 	// These are the ancestors of package with id == 43, starting with its parent.
 	expectedAncestorIds := []int64{35, 24, 12, 6}
@@ -338,7 +306,7 @@ func TestQueries_IncrementPackageStorageAncestors(t *testing.T) {
 		var rowCount int
 		rows, err := db.Query(checkQuery)
 		if assert.NoError(t, err) {
-			defer rows.Close()
+			defer db.CloseRows(rows)
 			for rows.Next() {
 				rowCount++
 				var ancestorId, actualSize int64
@@ -351,5 +319,31 @@ func TestQueries_IncrementPackageStorageAncestors(t *testing.T) {
 			assert.Equal(t, len(expectedAncestorIds), rowCount)
 			assert.NoError(t, rows.Err())
 		}
+	}
+}
+
+func TestQueries_TransitionAncestorPackageState(t *testing.T) {
+	db := OpenDB(t)
+	defer db.Close()
+	expectedOrgId := 2
+
+	for name, expectedAncestorIds := range map[string][]int64{
+		// package 26 is marked as DELETED and has two ancestors, each of which is marked as DELETED
+		"all ancestors should change": {26, 15, 4},
+		// package 22 is marked as DELETED and has two ancestors, none of which is marked as DELETED
+		"not all ancestors should change": {22},
+	} {
+		db.ExecSQLFile("folder-nav-test.sql")
+		store := NewQueries(db, expectedOrgId, NoLogger{})
+		t.Run(name, func(t *testing.T) {
+			ps, err := store.TransitionAncestorPackageState(context.Background(), expectedAncestorIds[0], packageState.Deleted, packageState.Restoring)
+			if assert.NoError(t, err) {
+				assert.Len(t, ps, len(expectedAncestorIds))
+				for _, p := range ps {
+					assert.Equal(t, packageState.Restoring, p.PackageState)
+				}
+			}
+		})
+		db.Truncate(expectedOrgId, "packages")
 	}
 }

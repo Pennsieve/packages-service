@@ -66,10 +66,6 @@ func (s *packagesService) RestorePackages(ctx context.Context, datasetId string,
 		if len(restoring) == 0 {
 			return nil
 		}
-		restoringIds := make([]int64, len(restoring))
-		for i, r := range restoring {
-			restoringIds[i] = r.Id
-		}
 		queueMessage := models.NewRestorePackageMessage(s.OrgId, datasetIntId, restoring...)
 		if err = s.QueueStore.SendRestorePackage(ctx, queueMessage); err != nil {
 			// This will roll back Tx even though it's not a DB action.
