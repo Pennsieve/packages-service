@@ -125,10 +125,6 @@ type PackageStateTransition struct {
 	Target packageState.State
 }
 
-func (t PackageStateTransition) AsValue() string {
-	return fmt.Sprintf("(%s, %s, %s)", t.NodeId, t.Expected, t.Target)
-}
-
 func (t PackageStateTransition) insertAt(insertionIndex int, s []any) (nextIndex int) {
 	nextIndex = insertionIndex
 	s[nextIndex] = t.NodeId
