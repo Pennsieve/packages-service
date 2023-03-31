@@ -47,8 +47,10 @@ func TestTransitionPackageState(t *testing.T) {
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
-			sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
-			store.OnSendRestorePackageReturn(sqsMessage)
+			for _, okPkg := range okPkgs {
+				sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				store.OnSendRestorePackageReturn(sqsMessage)
+			}
 
 			failedIdErrors := map[string]error{"N:package:0987": models.PackageNotFoundError{DatasetId: models.DatasetNodeId(datasetNodeId), OrgId: orgId}}
 			var failedIds []string
@@ -120,8 +122,15 @@ func TestTransitionPackageState(t *testing.T) {
 				okPkgs[i] = okPkg
 			}
 			sqsError := errors.New("unexpected sqs send error")
-			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
-			store.OnSendRestorePackageFail(message, sqsError)
+			for i, okPkg := range okPkgs {
+				message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				// Only fail on last SQS call
+				if i < len(okPkgs)-1 {
+					store.OnSendRestorePackageReturn(message)
+				} else {
+					store.OnSendRestorePackageFail(message, sqsError)
+				}
+			}
 			return &models.RestoreRequest{NodeIds: okIds}, nil, sqsError
 		},
 		"no errors": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
@@ -138,10 +147,10 @@ func TestTransitionPackageState(t *testing.T) {
 				store.OnTransitionPackageStateReturn(datasetIntId, okPkg.NodeId, packageState.Deleted, packageState.Restoring, okPkg)
 				okPkgs[i] = okPkg
 			}
-
-			message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkgs...)
-			store.OnSendRestorePackageReturn(message)
-
+			for _, okPkg := range okPkgs {
+				message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				store.OnSendRestorePackageReturn(message)
+			}
 			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: []models.Failure{}}, nil
 		},
 	} {
@@ -260,6 +269,10 @@ func (m *MockPackagesStore) IncrementOrganizationStorage(_ context.Context, _ in
 }
 
 func (m *MockPackagesStore) TransitionAncestorPackageState(_ context.Context, _ int64, _, _ packageState.State) ([]*pgdb.Package, error) {
+	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) TransitionPackageStateBulk(_ context.Context, _ int64, _ []store.PackageStateTransition) ([]*pgdb.Package, error) {
 	panic("mock me if you need me")
 }
 

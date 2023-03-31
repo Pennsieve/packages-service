@@ -28,9 +28,9 @@ type RestorePackageInfo struct {
 }
 
 type RestorePackageMessage struct {
-	OrgId     int                  `json:"orgId"`
-	DatasetId int64                `json:"datasetId"`
-	Packages  []RestorePackageInfo `json:"packages"`
+	OrgId     int                `json:"orgId"`
+	DatasetId int64              `json:"datasetId"`
+	Package   RestorePackageInfo `json:"package"`
 }
 
 func NewRestorePackageInfo(p *pgdb.Package) RestorePackageInfo {
@@ -41,11 +41,8 @@ func NewRestorePackageInfo(p *pgdb.Package) RestorePackageInfo {
 	return restoreInfo
 }
 
-func NewRestorePackageMessage(orgId int, datasetId int64, toBeRestored ...*pgdb.Package) RestorePackageMessage {
-	packages := make([]RestorePackageInfo, len(toBeRestored))
-	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, Packages: packages}
-	for i, p := range toBeRestored {
-		packages[i] = NewRestorePackageInfo(p)
-	}
+func NewRestorePackageMessage(orgId int, datasetId int64, toBeRestored *pgdb.Package) RestorePackageMessage {
+	restoreInfo := NewRestorePackageInfo(toBeRestored)
+	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, Package: restoreInfo}
 	return queueMessage
 }

@@ -20,7 +20,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		var ancestors []models.RestorePackageInfo
 		if restoreInfo.ParentId != nil {
 			if a, err := sqlStore.TransitionAncestorPackageState(ctx, *restoreInfo.ParentId, packageState.Deleted, packageState.Restoring); err != nil {
-				return h.errorf("error updating ancestors of %s to RESTORING: %w", restoreInfo.NodeId, err)
+				return h.errorf("error updating ancestors of %s to %s: %w", restoreInfo.NodeId, packageState.Restoring, err)
 			} else {
 				for _, p := range a {
 					ancestors = append(ancestors, models.NewRestorePackageInfo(p))
@@ -66,15 +66,15 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			// Don't think this should fail the whole restore
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update storage")
 		}
-		// restore ancestor state
-		for _, a := range ancestors {
-			if err := h.restoreState(ctx, datasetId, a, sqlStore); err != nil {
-				return h.errorf("error restoring state of %s, ancestor of %s: %w", a.NodeId, restoreInfo.NodeId, err)
-			}
+
+		// restore states
+		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+1)
+		stateRestores[0] = &restoreInfo
+		for i, a := range ancestors {
+			stateRestores[i+1] = &a
 		}
-		// restore state
-		if err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore); err != nil {
-			return h.errorf("error restoring state of %s: %w", restoreInfo.NodeId, err)
+		if err = h.restoreStates(ctx, datasetId, stateRestores, sqlStore); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -115,6 +115,25 @@ func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, rest
 	_, err := store.TransitionPackageState(ctx, datasetId, restoreInfo.NodeId, packageState.Restoring, finalState)
 	if err != nil {
 		return fmt.Errorf("error restoring state of %s to %s: %w", restoreInfo.NodeId, finalState, err)
+	}
+	return nil
+}
+
+func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, restoreInfos []*models.RestorePackageInfo, sqlStore store.SQLStore) error {
+	if len(restoreInfos) == 0 {
+		return nil
+	}
+	transitions := make([]store.PackageStateTransition, len(restoreInfos))
+	for i, r := range restoreInfos {
+		finalState := packageState.Uploaded
+		if r.Type == packageType.Collection {
+			finalState = packageState.Ready
+		}
+		transitions[i] = store.PackageStateTransition{NodeId: r.NodeId, Expected: packageState.Restoring, Target: finalState}
+	}
+	_, err := sqlStore.TransitionPackageStateBulk(ctx, datasetId, transitions)
+	if err != nil {
+		return h.errorf("error restoring states: %w", err)
 	}
 	return nil
 }

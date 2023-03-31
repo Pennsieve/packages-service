@@ -99,28 +99,27 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		if err = h.restoreStorages(ctx, int64(orgId), datasetId, s3RestoredFileInfos, sqlStore); err != nil {
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "error updating storage", err)
 		}
-		// restore ancestor state
+		// restore states
+		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+len(folderDescRestoreInfos)+len(s3RestoredFileInfos)+1)
+		// add self
+		stateRestores[0] = &restoreInfo
+		i := 1
+		// add ancestors
 		for _, a := range ancestors {
-			if err := h.restoreState(ctx, datasetId, a, sqlStore); err != nil {
-				return h.errorf("error restoring state of %s, ancestor of %s: %w", a.NodeId, restoreInfo.NodeId, err)
-			}
+			stateRestores[i] = &a
+			i++
 		}
-		// restore descendant state
+		// add descendants
 		for _, p := range folderDescRestoreInfos {
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "type": p.Type}, "restoring descendant folder state")
-			if err = h.restoreState(ctx, datasetId, *p, sqlStore); err != nil {
-				return h.errorf("error restoring state of %s, folder descendant of %s: %w", p.NodeId, restoreInfo.NodeId, err)
-			}
+			stateRestores[i] = p
+			i++
 		}
 		for _, p := range s3RestoredFileInfos {
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.RestorePackageInfo.NodeId, "type": p.Type}, "restoring descendant non-folder state")
-			if err = h.restoreState(ctx, datasetId, *p.RestorePackageInfo, sqlStore); err != nil {
-				return h.errorf("error restoring state of %s, non-folder descendant of %s: %w", p.RestorePackageInfo.NodeId, restoreInfo.NodeId, err)
-			}
+			stateRestores[i] = p.RestorePackageInfo
+			i++
 		}
-		// restore own state
-		if err = h.restoreState(ctx, datasetId, restoreInfo, sqlStore); err != nil {
-			return h.errorf("error restoring state of %s: %w", restoreInfo.NodeId, err)
+		if err = h.restoreStates(ctx, datasetId, stateRestores, sqlStore); err != nil {
+			return err
 		}
 		return nil
 	})

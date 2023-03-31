@@ -103,15 +103,14 @@ func (h *MessageHandler) handleBatch(ctx context.Context) error {
 }
 
 func (h *MessageHandler) handleMessage(ctx context.Context, message models.RestorePackageMessage) error {
-	for _, p := range message.Packages {
-		if p.Type == packageType.Collection {
-			if err := h.handleFolderPackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
-				return h.errorf("could not restore folder %s in org %d: %w", p.NodeId, message.OrgId, err)
-			}
-		} else {
-			if err := h.handleFilePackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
-				return h.errorf("could not restore package %s in org %d: %w", p.NodeId, message.OrgId, err)
-			}
+	p := message.Package
+	if p.Type == packageType.Collection {
+		if err := h.handleFolderPackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
+			return h.errorf("could not restore folder %s in org %d: %w", p.NodeId, message.OrgId, err)
+		}
+	} else {
+		if err := h.handleFilePackage(ctx, message.OrgId, message.DatasetId, p); err != nil {
+			return h.errorf("could not restore package %s in org %d: %w", p.NodeId, message.OrgId, err)
 		}
 	}
 	return nil
