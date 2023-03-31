@@ -27,9 +27,14 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 				}
 			}
 		}
+		// restore ancestors names
+		for _, a := range ancestors {
+			if err := h.restoreName(ctx, a, sqlStore); err != nil {
+				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			}
+		}
 		// restore name
-		err := h.restoreName(ctx, restoreInfo, sqlStore)
-		if err != nil {
+		if err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
 		}
 

@@ -28,6 +28,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			return h.errorf("unable to set descendants of %s (%s) to RESTORING: %w", restoreInfo.Name, restoreInfo.NodeId, err)
 		}
 
+		// restore ancestors names
+		for _, a := range ancestors {
+			if err := h.restoreName(ctx, a, sqlStore); err != nil {
+				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			}
+		}
 		// restore name
 		err = h.restoreName(ctx, restoreInfo, sqlStore)
 		if err != nil {
