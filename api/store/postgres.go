@@ -23,8 +23,9 @@ const (
 )
 
 var (
-	packagesColumns      = []string{"id", "name", "type", "state", "node_id", "parent_id", "dataset_id", "owner_id", "size", "import_id", "attributes", "created_at", "updated_at"}
-	packageColumnsString = strings.Join(packagesColumns, ", ")
+	packagesColumns               = []string{"id", "name", "type", "state", "node_id", "parent_id", "dataset_id", "owner_id", "size", "import_id", "attributes", "created_at", "updated_at"}
+	packageColumnsString          = strings.Join(packagesColumns, ", ")
+	qualifiedPackageColumnsString = qualifyPackageColumns("packages")
 )
 
 type PostgresStoreFactory struct {
@@ -113,6 +114,86 @@ func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newNam
 		}
 	}
 	return nil
+}
+
+type PackageStateTransition struct {
+	// NodeId: package node id
+	NodeId string
+	// Expected: expected current state of package
+	Expected packageState.State
+	// Target: desired state of package
+	Target packageState.State
+}
+
+func (t PackageStateTransition) insertAt(insertionIndex int, s []any) (nextIndex int) {
+	nextIndex = insertionIndex
+	s[nextIndex] = t.NodeId
+	nextIndex++
+	s[nextIndex] = t.Expected
+	nextIndex++
+	s[nextIndex] = t.Target
+	nextIndex++
+	return
+}
+
+func (t PackageStateTransition) insertPlaceHolderAt(insertionIndex int, placeHolder int, s []string) (nextPlaceHolder int) {
+	nextPlaceHolder = placeHolder
+	s[insertionIndex] = fmt.Sprintf("($%d, $%d ,$%d)", placeHolder, placeHolder+1, placeHolder+2)
+	nextPlaceHolder += 3
+	return
+}
+
+func (q *Queries) TransitionPackageStateBulk(ctx context.Context, datasetId int64, transitions []PackageStateTransition) ([]*pgdb.Package, error) {
+	var updated []*pgdb.Package
+	if len(transitions) == 0 {
+		return updated, nil
+	}
+	queryParams := make([]any, 3*len(transitions)+1)
+	queryParams[0] = datasetId
+	qi := 1
+	valuePlaceHolders := make([]string, len(transitions))
+	// datasetId is $1`
+	parameterMarkerIndex := 2
+	for i, t := range transitions {
+		qi = t.insertAt(qi, queryParams)
+		parameterMarkerIndex = t.insertPlaceHolderAt(i, parameterMarkerIndex, valuePlaceHolders)
+	}
+	query := fmt.Sprintf(`UPDATE "%d".packages AS packages
+							SET state = state_changes.target_state
+							FROM (VALUES %s)
+         					AS state_changes(node_id, expected_state, target_state)
+							WHERE state_changes.node_id = packages.node_id
+  							AND state_changes.expected_state = packages.state
+  							AND packages.dataset_id = $1 RETURNING %s`, q.OrgId, strings.Join(valuePlaceHolders, ","), qualifiedPackageColumnsString)
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer q.closeRows(rows)
+
+	for rows.Next() {
+		var pkg pgdb.Package
+		if err = rows.Scan(&pkg.Id,
+			&pkg.Name,
+			&pkg.PackageType,
+			&pkg.PackageState,
+			&pkg.NodeId,
+			&pkg.ParentId,
+			&pkg.DatasetId,
+			&pkg.OwnerId,
+			&pkg.Size,
+			&pkg.ImportId,
+			&pkg.Attributes,
+			&pkg.CreatedAt,
+			&pkg.UpdatedAt); err != nil {
+			return updated, err
+		}
+		updated = append(updated, &pkg)
+	}
+	if err = rows.Err(); err != nil {
+		return updated, err
+	}
+	return updated, nil
 }
 
 func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
@@ -337,12 +418,22 @@ func (q *Queries) ReleaseSavepoint(ctx context.Context, name string) error {
 	return err
 }
 
+func qualifyPackageColumns(qualifier string) string {
+	q := make([]string, len(packagesColumns))
+	for i, c := range packagesColumns {
+		q[i] = fmt.Sprintf("%s.%s", qualifier, c)
+	}
+	return strings.Join(q, ", ")
+}
+
 type SQLStore interface {
 	UpdatePackageName(ctx context.Context, packageId int64, newName string) error
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
 	// TransitionPackageState updates the state of the given package from expectedState to targetState and returns the resulting package.
 	// If the package is not already in expectedState, then models.PackageNotFoundError is returned.
 	TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error)
+	// TransitionPackageStateBulk updates the state of the given packages from expectedStates to targetStates and returns the resulting packages.
+	TransitionPackageStateBulk(ctx context.Context, datasetId int64, transitions []PackageStateTransition) ([]*pgdb.Package, error)
 	// TransitionDescendantPackageState updates the state of any descendants of the given package which have state == expectedState to targetState and returns the updated packages.
 	// It does not update the state of the package with id packageId, only its descendants if any.
 	TransitionDescendantPackageState(ctx context.Context, datasetId, packageId int64, expectedState, targetState packageState.State) ([]*pgdb.Package, error)

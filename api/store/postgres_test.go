@@ -39,7 +39,7 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 	expectedDatasetId := int64(1)
 	expectedNodeId := "N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8"
 	// This package is marked as DELETED in the SQL file.
-	expectedState := packageState.Deleted
+	currentState := packageState.Deleted
 	// But this test will try to move it from UPLOADED to RESTORING incorrectly
 	incorrectCurrentState := packageState.Uploaded
 	requestedFinalState := packageState.Restoring
@@ -54,7 +54,61 @@ func TestTransitionPackageStateNoTransition(t *testing.T) {
 	var actualState packageState.State
 	err = db.QueryRow(verifyStateQuery, expectedNodeId).Scan(&actualState)
 	if assert.NoError(t, err) {
-		assert.Equal(t, expectedState, actualState, "state modified, but should not have been")
+		assert.Equal(t, currentState, actualState, "state modified, but should not have been")
+	}
+}
+
+func TestTransitionPackageStateBulk(t *testing.T) {
+	db := OpenDB(t)
+	defer db.Close()
+	db.ExecSQLFile("folder-nav-test.sql")
+	defer db.Truncate(2, "packages")
+
+	store := NewQueries(db, 2, NoLogger{})
+	expectedDatasetId := int64(1)
+	expectedNodeId := "N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8"
+	expectedState := packageState.Deleted
+	targetState := packageState.Restoring
+	transition := PackageStateTransition{
+		NodeId:   expectedNodeId,
+		Expected: expectedState,
+		Target:   targetState,
+	}
+	actual, err := store.TransitionPackageStateBulk(context.Background(), expectedDatasetId, []PackageStateTransition{transition})
+	if assert.NoError(t, err) {
+		assert.Len(t, actual, 1)
+		actualPkg := actual[0]
+		assert.Equal(t, expectedNodeId, actualPkg.NodeId)
+		assert.Equal(t, int(expectedDatasetId), actualPkg.DatasetId)
+		assert.Equal(t, targetState, actualPkg.PackageState)
+	}
+}
+
+func TestTransitionPackageStateBulkNoTransition(t *testing.T) {
+	db := OpenDB(t)
+	defer db.Close()
+	expectedOrgId := 2
+	db.ExecSQLFile("folder-nav-test.sql")
+	defer db.Truncate(expectedOrgId, "packages")
+
+	store := NewQueries(db, 2, NoLogger{})
+	expectedDatasetId := int64(1)
+	expectedNodeId := "N:package:5ff98fab-d0d6-4cac-9f11-4b6ff50788e8"
+	// This package is marked as DELETED in the SQL file.
+	currentState := packageState.Deleted
+	// But this test will try to move it from UPLOADED to RESTORING incorrectly
+	incorrectCurrentState := packageState.Uploaded
+	requestedFinalState := packageState.Restoring
+	transition := PackageStateTransition{NodeId: expectedNodeId, Expected: incorrectCurrentState, Target: requestedFinalState}
+	actual, err := store.TransitionPackageStateBulk(context.Background(), expectedDatasetId, []PackageStateTransition{transition})
+	if assert.NoError(t, err) {
+		assert.Empty(t, actual)
+		verifyStateQuery := fmt.Sprintf(`SELECT state from "%d".packages WHERE node_id = $1`, expectedOrgId)
+		var actualState packageState.State
+		err = db.QueryRow(verifyStateQuery, expectedNodeId).Scan(&actualState)
+		if assert.NoError(t, err) {
+			assert.Equal(t, currentState, actualState, "state modified, but should not have been")
+		}
 	}
 }
 
