@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -71,17 +72,16 @@ func TestHandleMessage(t *testing.T) {
 	s3Client := s3.NewFromConfig(awsConfig)
 	dyClient := dynamodb.NewFromConfig(awsConfig)
 
+	nodeId := "N:package:1234"
 	bucketName := "test-bucket"
 	key := "test-folder/test-object"
-	s3Fixture := store.NewS3Fixture(
-		t,
-		s3Client,
-		&s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: true}).WithObjects(
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: true}).WithObjects(
 		&s3.PutObjectInput{Bucket: aws.String(bucketName), Key: aws.String(key), Body: strings.NewReader("object content")})
 	defer s3Fixture.Teardown()
 
 	ctx := context.Background()
-	if _, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: aws.String(key)}); err != nil {
+	deleteObjectOutput, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: aws.String(key)})
+	if err != nil {
 		assert.FailNow(t, "error setting up deleted object", err)
 	}
 
@@ -100,7 +100,12 @@ func TestHandleMessage(t *testing.T) {
 			},
 		},
 		BillingMode: types.BillingModePayPerRequest}
-	if _, err := dyClient.CreateTable(ctx, &createTableInput); err != nil {
-		assert.FailNow(t, "error creating test table", err)
+	deleteRecord := store.S3ObjectInfo{Bucket: bucketName, Key: key, NodeId: nodeId, Size: "1024", VersionId: aws.ToString(deleteObjectOutput.VersionId)}
+	deleteRecordItem, err := attributevalue.MarshalMap(deleteRecord)
+	if err != nil {
+		assert.FailNow(t, "error setting up item in delete record table", err)
 	}
+	deleteRecordInput := dynamodb.PutItemInput{TableName: aws.String(tableName), Item: deleteRecordItem}
+	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(&deleteRecordInput)
+	defer dyFixture.Teardown()
 }

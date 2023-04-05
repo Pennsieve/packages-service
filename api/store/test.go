@@ -216,3 +216,48 @@ func (f *S3Fixture) Teardown() {
 		}
 	}
 }
+
+type DynamoDBFixture struct {
+	Fixture
+	Client *dynamodb.Client
+	// Tables is a set of table names
+	Tables map[string]bool
+}
+
+func NewDynamoDBFixture(t *testing.T, client *dynamodb.Client, inputs ...*dynamodb.CreateTableInput) *DynamoDBFixture {
+	f := DynamoDBFixture{
+		Fixture: Fixture{T: t},
+		Client:  client,
+		Tables:  map[string]bool{},
+	}
+	ctx := context.Background()
+	for _, input := range inputs {
+		tableName := aws.ToString(input.TableName)
+		if _, err := f.Client.CreateTable(ctx, input); err != nil {
+			assert.FailNow(f.T, "error creating test table", "table: %s, error: %v", tableName, err)
+		}
+		f.Tables[tableName] = true
+	}
+	return &f
+}
+
+func (f *DynamoDBFixture) WithItems(inputs ...*dynamodb.PutItemInput) *DynamoDBFixture {
+	ctx := context.Background()
+	for _, input := range inputs {
+		if _, err := f.Client.PutItem(ctx, input); err != nil {
+			assert.FailNow(f.T, "error adding item test table", "table: %s, item: %v, error: %v", aws.ToString(input.TableName), input.Item, err)
+		}
+	}
+	return f
+}
+
+func (f *DynamoDBFixture) Teardown() {
+	ctx := context.Background()
+	for name := range f.Tables {
+		input := dynamodb.DeleteTableInput{TableName: aws.String(name)}
+		if _, err := f.Client.DeleteTable(ctx, &input); err != nil {
+			assert.FailNow(f.T, "error deleting test table", "table: %s, error: %v", name, err)
+
+		}
+	}
+}
