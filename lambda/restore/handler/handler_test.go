@@ -18,7 +18,7 @@ import (
 )
 
 func TestNewMessageHandler(t *testing.T) {
-	assert := assert.New(t)
+	a := assert.New(t)
 	expectedMessageId := "new-message-handler-message-id"
 	message := events.SQSMessage{
 		MessageId: expectedMessageId,
@@ -26,19 +26,19 @@ func TestNewMessageHandler(t *testing.T) {
 	sqlFactory := new(MockSQLFactory)
 	handler := NewMessageHandler(message, StubBaseStore{SQLStoreFactory: sqlFactory})
 
-	assert.Equal(message, handler.Message)
-	assert.Equal(sqlFactory, handler.Store.SQLFactory)
-	assert.NotNil(handler.Logger)
+	a.Equal(message, handler.Message)
+	a.Equal(sqlFactory, handler.Store.SQLFactory)
+	a.NotNil(handler.Logger)
 
-	assert.Equal(expectedMessageId, handler.newBatchItemFailure().ItemIdentifier)
+	a.Equal(expectedMessageId, handler.newBatchItemFailure().ItemIdentifier)
 
 	wrappedError := errors.New("inner error")
 	err := handler.errorf("had a problem with %d: %w", 4, wrappedError)
-	assert.True(errors.Is(err, wrappedError))
-	assert.Equal(wrappedError, errors.Unwrap(err))
-	assert.True(strings.HasPrefix(err.Error(), m))
-	assert.Contains(err.Error(), "had a problem with 4")
-	assert.Contains(err.Error(), wrappedError.Error())
+	a.True(errors.Is(err, wrappedError))
+	a.Equal(wrappedError, errors.Unwrap(err))
+	a.True(strings.HasPrefix(err.Error(), m))
+	a.Contains(err.Error(), "had a problem with 4")
+	a.Contains(err.Error(), wrappedError.Error())
 
 }
 
@@ -72,10 +72,19 @@ func TestHandleMessage(t *testing.T) {
 	dyClient := dynamodb.NewFromConfig(awsConfig)
 
 	bucketName := "test-bucket"
-	createBucketInput := s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: true}
-	if _, err := s3Client.CreateBucket(context.Background(), &createBucketInput); err != nil {
-		assert.FailNow(t, "error creating test bucket", err)
+	key := "test-folder/test-object"
+	s3Fixture := store.NewS3Fixture(
+		t,
+		s3Client,
+		&s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: true}).WithObjects(
+		&s3.PutObjectInput{Bucket: aws.String(bucketName), Key: aws.String(key), Body: strings.NewReader("object content")})
+	defer s3Fixture.Teardown()
+
+	ctx := context.Background()
+	if _, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: aws.String(key)}); err != nil {
+		assert.FailNow(t, "error setting up deleted object", err)
 	}
+
 	tableName := os.Getenv(store.DeleteRecordTableNameEnvKey)
 	createTableInput := dynamodb.CreateTableInput{TableName: aws.String(tableName),
 		AttributeDefinitions: []types.AttributeDefinition{
@@ -91,7 +100,7 @@ func TestHandleMessage(t *testing.T) {
 			},
 		},
 		BillingMode: types.BillingModePayPerRequest}
-	if _, err := dyClient.CreateTable(context.Background(), &createTableInput); err != nil {
+	if _, err := dyClient.CreateTable(ctx, &createTableInput); err != nil {
 		assert.FailNow(t, "error creating test table", err)
 	}
 }

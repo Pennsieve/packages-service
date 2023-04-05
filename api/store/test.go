@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"os"
@@ -135,4 +136,83 @@ func GetTestAWSConfig(t *testing.T) aws.Config {
 		assert.FailNow(t, "error creating AWS config", err)
 	}
 	return awsConfig
+}
+
+type Fixture struct {
+	T *testing.T
+}
+
+type S3Fixture struct {
+	Fixture
+	Client *s3.Client
+	// Buckets is a set of bucket names
+	Buckets map[string]bool
+}
+
+func NewS3Fixture(t *testing.T, client *s3.Client, inputs ...*s3.CreateBucketInput) *S3Fixture {
+	f := S3Fixture{
+		Fixture: Fixture{T: t},
+		Client:  client,
+		Buckets: map[string]bool{},
+	}
+	ctx := context.Background()
+	for _, input := range inputs {
+		bucketName := aws.ToString(input.Bucket)
+		if _, err := f.Client.CreateBucket(ctx, input); err != nil {
+			assert.FailNow(f.T, "error creating test bucket", "bucket: %s, error: %v", bucketName, err)
+		}
+		f.Buckets[bucketName] = true
+	}
+	return &f
+}
+
+func (f *S3Fixture) WithObjects(objectInputs ...*s3.PutObjectInput) *S3Fixture {
+	ctx := context.Background()
+	for _, input := range objectInputs {
+		if _, err := f.Client.PutObject(ctx, input); err != nil {
+			assert.FailNow(f.T, "error putting test object", "bucket: %s, key: %s, error: %v", aws.ToString(input.Bucket), aws.ToString(input.Key), err)
+		}
+	}
+	return f
+}
+
+func (f *S3Fixture) Teardown() {
+	ctx := context.Background()
+	for name := range f.Buckets {
+		listInput := s3.ListObjectVersionsInput{Bucket: aws.String(name)}
+		listOutput, err := f.Client.ListObjectVersions(ctx, &listInput)
+		if err != nil {
+			assert.FailNow(f.T, "error listing test objects", "bucket: %s, error: %v", name, err)
+		}
+		if listOutput.IsTruncated {
+			assert.FailNow(f.T, "test object list is truncated; handling truncated object list is not yet implemented", "bucket: %s, error: %v", name, err)
+		}
+		if len(listOutput.DeleteMarkers)+len(listOutput.Versions) > 0 {
+			objectIds := make([]types.ObjectIdentifier, len(listOutput.DeleteMarkers)+len(listOutput.Versions))
+			i := 0
+			for _, dm := range listOutput.DeleteMarkers {
+				objectIds[i] = types.ObjectIdentifier{Key: dm.Key, VersionId: dm.VersionId}
+				i++
+			}
+			for _, obj := range listOutput.Versions {
+				objectIds[i] = types.ObjectIdentifier{Key: obj.Key, VersionId: obj.VersionId}
+				i++
+			}
+			deleteObjectsInput := s3.DeleteObjectsInput{Bucket: aws.String(name), Delete: &types.Delete{Objects: objectIds}}
+			if deleteObjectsOutput, err := f.Client.DeleteObjects(ctx, &deleteObjectsInput); err != nil {
+				assert.FailNow(f.T, "error deleting test objects", "bucket: %s, error: %v", name, err)
+			} else if len(deleteObjectsOutput.Errors) > 0 {
+				// Convert to AWSErrors so that all the pointers AWS uses become de-referenced and readable in the output
+				errs := make([]AWSError, len(deleteObjectsOutput.Errors))
+				for i, err := range deleteObjectsOutput.Errors {
+					errs[i] = NewAWSError(name, err)
+				}
+				assert.FailNow(f.T, "errors deleting test objects", "bucket: %s, errors: %v", name, errs)
+			}
+		}
+		deleteBucketInput := s3.DeleteBucketInput{Bucket: aws.String(name)}
+		if _, err := f.Client.DeleteBucket(ctx, &deleteBucketInput); err != nil {
+			assert.FailNow(f.T, "error deleting test bucket", "bucket: %s, error: %v", name, err)
+		}
+	}
 }
