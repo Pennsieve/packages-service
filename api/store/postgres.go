@@ -148,15 +148,17 @@ func (q *Queries) TransitionPackageStateBulk(ctx context.Context, datasetId int6
 	if len(transitions) == 0 {
 		return updated, nil
 	}
-	queryParams := make([]any, 3*len(transitions)+1)
+	// queryParams holds the values that will substitute for $1, $2, $3, etc. in the query
+	// $1 is datasetId and the remainder are triples of nodeId, expected state, and target state for each transition.
+	queryParams := make([]any, 1+3*len(transitions))
 	queryParams[0] = datasetId
 	qi := 1
 	valuePlaceHolders := make([]string, len(transitions))
-	// datasetId is $1`
-	parameterMarkerIndex := 2
+	// datasetId is $1
+	parameterMarkerNumber := 2
 	for i, t := range transitions {
 		qi = t.insertAt(qi, queryParams)
-		parameterMarkerIndex = t.insertPlaceHolderAt(i, parameterMarkerIndex, valuePlaceHolders)
+		parameterMarkerNumber = t.insertPlaceHolderAt(i, parameterMarkerNumber, valuePlaceHolders)
 	}
 	query := fmt.Sprintf(`UPDATE "%d".packages AS packages
 							SET state = state_changes.target_state

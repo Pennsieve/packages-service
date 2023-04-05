@@ -30,7 +30,7 @@ help:
 # Start the local versions of docker services
 local-services:
 	docker-compose -f docker-compose.test.yml down --remove-orphans
-	docker-compose -f docker-compose.test.yml up -d pennsievedb
+	docker-compose -f docker-compose.test.yml up -d pennsievedb minio dynamodb
 
 # Run tests locally
 test: local-services

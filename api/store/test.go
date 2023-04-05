@@ -1,8 +1,14 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"os"
@@ -35,10 +41,10 @@ func (tdb *TestDB) PingUntilReady() error {
 }
 
 func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
-	config := PostgresConfigFromEnv()
-	db, err := config.Open(additionalOptions...)
+	pgConfig := PostgresConfigFromEnv()
+	db, err := pgConfig.Open(additionalOptions...)
 	if err != nil {
-		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", config, err)
+		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", pgConfig, err)
 	}
 	testDB := TestDB{
 		DB: db,
@@ -108,3 +114,25 @@ func (n NoLogger) LogErrorWithFields(_ log.Fields, _ ...any) {}
 func (n NoLogger) LogInfo(_ ...any) {}
 
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
+
+func GetTestAWSConfig(t *testing.T) aws.Config {
+	awsKey := "awstestkey"
+	awsSecret := "awstestsecret"
+	minioURL := os.Getenv("MINIO_URL")
+	dynamodbURL := os.Getenv("DYNAMODB_URL")
+	awsConfig, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion("us-east-1"),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(awsKey, awsSecret, "")),
+		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			if service == s3.ServiceID {
+				return aws.Endpoint{URL: minioURL, HostnameImmutable: true}, nil
+			} else if service == dynamodb.ServiceID {
+				return aws.Endpoint{URL: dynamodbURL}, nil
+			}
+			return aws.Endpoint{}, fmt.Errorf("unknown test endpoint requested for service: %s", service)
+		})))
+	if err != nil {
+		assert.FailNow(t, "error creating AWS config", err)
+	}
+	return awsConfig
+}
