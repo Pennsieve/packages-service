@@ -94,12 +94,12 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 	err = store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
 	for retryCtx = NewRetryContext(originalName, err); retryCtx.TryAgain; retryCtx.Update(err) {
 		newName := retryCtx.Parts.Next()
-		h.LogInfoWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
+		h.LogDebugWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
 			return spErr
 		}
 		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
-		h.LogInfoWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
+		h.LogDebugWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
 	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
 		return err

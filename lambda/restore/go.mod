@@ -6,7 +6,9 @@ replace github.com/pennsieve/packages-service/api => ../../api
 
 require (
 	github.com/aws/aws-lambda-go v1.38.0
+	github.com/aws/aws-sdk-go-v2 v1.17.5
 	github.com/aws/aws-sdk-go-v2/config v1.18.14
+	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.10.14
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.18.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.30.4
 	github.com/google/uuid v1.3.0
@@ -17,10 +19,8 @@ require (
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.17.5 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.10 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.14 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.10.14 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.23 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.2.7 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.29 // indirect
