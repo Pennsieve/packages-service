@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	maxGetItemBatch   = 100
-	maxWriteItemBatch = 25
+	maxGetItemBatch             = 100
+	maxWriteItemBatch           = 25
+	DeleteRecordTableNameEnvKey = "DELETE_RECORD_DYNAMODB_TABLE_NAME"
 )
 
 var (
@@ -26,7 +27,7 @@ var (
 )
 
 func init() {
-	deleteRecordTable = os.Getenv("DELETE_RECORD_DYNAMODB_TABLE_NAME")
+	deleteRecordTable = os.Getenv(DeleteRecordTableNameEnvKey)
 }
 
 type DynamoDBStore struct {

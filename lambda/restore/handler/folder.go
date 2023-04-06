@@ -69,7 +69,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				return h.errorf("error getting delete records for descendants %s: %w", restoreInfo.NodeId, err)
 			}
 			if len(deleteMarkerResp) < len(nonFolderDescRestoreInfos) {
-				h.LogInfo("fewer delete markers found than expected:", len(deleteMarkerResp), len(nonFolderDescRestoreInfos))
+				return h.errorf("fewer delete records found than expected: %d expected, %d found", len(deleteMarkerResp), len(nonFolderDescRestoreInfos))
 			}
 			var objectInfos []store.S3ObjectInfo
 			for _, objectInfo := range deleteMarkerResp {

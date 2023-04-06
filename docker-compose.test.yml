@@ -1,7 +1,7 @@
 version: '3'
 
 networks:
-  api-tests:
+  packages-tests:
     driver: bridge
 
 services:
@@ -14,12 +14,16 @@ services:
       - dockertest.env
     depends_on:
       - pennsievedb-ci
+      - minio-ci
+      - dynamodb-ci
     environment:
       - POSTGRES_HOST=pennsievedb-ci
+      - MINIO_URL=http://minio-ci:9000
+      - DYNAMODB_URL=http://dynamodb-ci:8000
     volumes:
       - $PWD:/go/src/github.com/pennsieve/packages-service
     networks:
-      - api-tests
+      - packages-tests
 
   pennsievedb:
     image: pennsieve/pennsievedb:V20230315145959-seed
@@ -27,10 +31,45 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - api-tests
+      - packages-tests
 
   pennsievedb-ci:
     image: pennsieve/pennsievedb:V20230315145959-seed
     restart: always
     networks:
-      - api-tests
+      - packages-tests
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=awstestkey
+      - MINIO_ROOT_PASSWORD=awstestsecret
+    command: server --console-address ":9001" /data
+    networks:
+      - packages-tests
+
+  minio-ci:
+    image: minio/minio
+    environment:
+      - MINIO_ROOT_USER=awstestkey
+      - MINIO_ROOT_PASSWORD=awstestsecret
+    command: server --console-address ":9001" /data
+    networks:
+      - packages-tests
+
+  dynamodb:
+    image: amazon/dynamodb-local
+    restart: always
+    ports:
+      - "8000:8000"
+    networks:
+      - packages-tests
+
+  dynamodb-ci:
+    image: amazon/dynamodb-local
+    restart: always
+    networks:
+      - packages-tests
