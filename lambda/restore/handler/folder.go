@@ -46,7 +46,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		nonFolderNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
+			sqlStore.LogDebugWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
 			descRestoreInfo := models.NewRestorePackageInfo(p)
 			err = h.restoreName(ctx, descRestoreInfo, sqlStore)
 			if err != nil {

@@ -12,6 +12,7 @@ services:
       dockerfile: Dockerfile.test
     env_file:
       - dockertest.env
+      - .env
     depends_on:
       - pennsievedb-ci
       - minio-ci
@@ -45,8 +46,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=awstestkey
-      - MINIO_ROOT_PASSWORD=awstestsecret
+      - MINIO_ROOT_USER=${TEST_AWS_KEY}
+      - MINIO_ROOT_PASSWORD=${TEST_AWS_SECRET}
     command: server --console-address ":9001" /data
     networks:
       - packages-tests
@@ -54,8 +55,8 @@ services:
   minio-ci:
     image: minio/minio
     environment:
-      - MINIO_ROOT_USER=awstestkey
-      - MINIO_ROOT_PASSWORD=awstestsecret
+      - MINIO_ROOT_USER=${TEST_AWS_KEY}
+      - MINIO_ROOT_PASSWORD=${TEST_AWS_SECRET}
     command: server --console-address ":9001" /data
     networks:
       - packages-tests

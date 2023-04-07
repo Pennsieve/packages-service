@@ -34,7 +34,7 @@ local-services:
 
 # Run tests locally
 test: local-services
-	./run-tests.sh localtest.env
+	./run-tests.sh localtest.env .env
 	docker-compose -f docker-compose.test.yml down --remove-orphans
 	make clean
 

@@ -63,7 +63,7 @@ func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
 		t:  t,
 	}
 	if err = testDB.PingUntilReady(); err != nil {
-		assert.FailNow(testDB.t, "cannot ping database", err)
+		assert.FailNow(testDB.t, "cannot ping database", "config: %s, err: %v", pgConfig, err)
 	}
 	return testDB
 }
@@ -128,8 +128,8 @@ func (n NoLogger) LogInfo(_ ...any) {}
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
 
 func GetTestAWSConfig(t *testing.T) aws.Config {
-	awsKey := "awstestkey"
-	awsSecret := "awstestsecret"
+	awsKey := os.Getenv("TEST_AWS_KEY")
+	awsSecret := os.Getenv("TEST_AWS_SECRET")
 	minioURL := os.Getenv("MINIO_URL")
 	dynamodbURL := os.Getenv("DYNAMODB_URL")
 	awsConfig, err := config.LoadDefaultConfig(context.Background(),

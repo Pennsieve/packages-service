@@ -1,9 +1,13 @@
 #!/usr/bin/env sh
 
-if [ -n "$1" ]; then
-  env_file=$1
-  export $(grep -v '^#' "$env_file" | xargs)
-fi
+for env_file in "$@"; do
+    if [ -f "$env_file" ]; then
+        set -o allexport && . "$env_file" && set +o allexport
+    else
+        echo "environment file $env_file is missing"
+        exit 1
+    fi
+done
 
 root_dir=$(pwd)
 
