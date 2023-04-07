@@ -16,6 +16,7 @@ import (
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"math/rand"
@@ -98,7 +99,9 @@ func TestHandleMessage(t *testing.T) {
 		WithType(packageType.Collection).
 		Restoring().
 		Insert(ctx, db, orgId)
-
+	untouchedPackages := []*pgdb.Package{rootCollectionPkg}
+	var restoringFilePackages []*pgdb.Package
+	restoringCollectionPackages := []*pgdb.Package{restoringCollection}
 	// Insert the packages inside restoringCollection and prepare the S3 put requests.
 	bucketName := "test-bucket"
 	putObjectInputByNodeId := map[string]*s3.PutObjectInput{}
@@ -106,7 +109,6 @@ func TestHandleMessage(t *testing.T) {
 		pkg := store.NewTestPackage(i, 1, 1).
 			WithParentId(restoringCollection.Id).
 			Deleted().
-			WithType(packageType.CSV).
 			Insert(ctx, db, orgId)
 		if pkg.PackageType != packageType.Collection {
 			s3Key := fmt.Sprintf("%s/%s", uuid.NewString(), uuid.NewString())
@@ -114,6 +116,10 @@ func TestHandleMessage(t *testing.T) {
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(s3Key),
 				Body:   strings.NewReader(fmt.Sprintf("object %d content", i))}
+			restoringFilePackages = append(restoringFilePackages, pkg)
+
+		} else {
+			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
 		}
 	}
 
@@ -127,7 +133,7 @@ func TestHandleMessage(t *testing.T) {
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
 	deleteRecordTableName := os.Getenv(store.DeleteRecordTableNameEnvKey)
-	var deleteRecordInputs []*dynamodb.PutItemInput
+	putItemInputByNodeId := map[string]*dynamodb.PutItemInput{}
 	for nodeId, putObject := range putObjectInputByNodeId {
 		// Delete the object from S3
 		deleteObjectOutput, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: putObject.Key})
@@ -141,9 +147,13 @@ func TestHandleMessage(t *testing.T) {
 		if err != nil {
 			assert.FailNow(t, "error setting up item in delete record table", err)
 		}
-		deleteRecordInputs = append(deleteRecordInputs, &dynamodb.PutItemInput{TableName: aws.String(deleteRecordTableName), Item: deleteRecordItem})
+		putItemInputByNodeId[nodeId] = &dynamodb.PutItemInput{TableName: aws.String(deleteRecordTableName), Item: deleteRecordItem}
 	}
 
+	putItemInputs := make([]*dynamodb.PutItemInput, 0, len(putItemInputByNodeId))
+	for _, input := range putItemInputByNodeId {
+		putItemInputs = append(putItemInputs, input)
+	}
 	createTableInput := dynamodb.CreateTableInput{TableName: aws.String(deleteRecordTableName),
 		AttributeDefinitions: []types.AttributeDefinition{
 			{
@@ -159,7 +169,7 @@ func TestHandleMessage(t *testing.T) {
 		},
 		BillingMode: types.BillingModePayPerRequest}
 
-	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(deleteRecordInputs...)
+	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
 	defer dyFixture.Teardown()
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
@@ -182,29 +192,49 @@ func TestHandleMessage(t *testing.T) {
 			Type:     restoringCollection.PackageType},
 	})
 	if assert.NoError(t, err) {
-		verifyQuery := fmt.Sprintf(`SELECT id, name, node_id, state from "%d".packages`, orgId)
-		rows, err := db.QueryContext(ctx, verifyQuery)
-		if assert.NoError(t, err) {
-			defer db.CloseRows(rows)
-			for rows.Next() {
-				var id int64
-				var name, nodeId string
-				var state packageState.State
-				err = rows.Scan(&id, &name, &nodeId, &state)
-				if assert.NoError(t, err) {
-					if id == rootCollectionPkg.Id {
-						assert.Equal(t, rootCollectionPkg.Name, name)
-						assert.Equal(t, rootCollectionPkg.PackageState, state)
-					} else {
-						assert.NotEqual(t, packageState.Restoring, state)
-						assert.NotEqual(t, packageState.Deleted, state)
-						assert.NotContains(t, name, fmt.Sprintf("__%s__%s", packageState.Deleted, nodeId))
-					}
-				}
+		v := db.Queries(orgId)
+		for _, untouched := range untouchedPackages {
+			actual, err := v.GetPackageByNodeId(ctx, untouched.NodeId)
+			if assert.NoError(t, err) {
+				assertUntouchedPackage(t, untouched, actual)
 			}
-			assert.NoError(t, rows.Err())
+		}
+		for _, restoring := range restoringCollectionPackages {
+			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
+			if assert.NoError(t, err) {
+				assertRestoredPackage(t, CollectionRestoredState, restoring, actual)
+			}
+		}
+		for _, restoring := range restoringFilePackages {
+			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
+			if assert.NoError(t, err) {
+				assertRestoredPackage(t, FileRestoredState, restoring, actual)
+			}
 		}
 
+		listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
+		if assert.NoError(t, err) {
+			// No more delete markers and the number of versions is the same.
+			assert.Empty(t, listOut.DeleteMarkers)
+			assert.Len(t, listOut.Versions, len(putObjectInputs))
+		}
+		scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
+		if assert.NoError(t, err) {
+			// All delete records have been removed
+			assert.Zero(t, scanOut.ScannedCount)
+			assert.Empty(t, scanOut.Items)
+		}
 	}
 
+}
+
+func assertUntouchedPackage(t *testing.T, initial, current *pgdb.Package) {
+	assert.Equal(t, initial, current)
+}
+
+func assertRestoredPackage(t *testing.T, expectedState packageState.State, initial, current *pgdb.Package) {
+	assert.Equal(t, expectedState, current.PackageState)
+	deletedNamePrefix := DeletedNamePrefix(initial.NodeId)
+	assert.False(t, strings.HasPrefix(current.Name, deletedNamePrefix))
+	assert.Equal(t, initial.Name[len(deletedNamePrefix):], current.Name)
 }

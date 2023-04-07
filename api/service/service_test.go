@@ -276,6 +276,10 @@ func (m *MockPackagesStore) TransitionPackageStateBulk(_ context.Context, _ int6
 	panic("mock me if you need me")
 }
 
+func (m *MockPackagesStore) GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error) {
+	panic("mock me if you need me")
+}
+
 type MockFactory struct {
 	mockStore *MockPackagesStore
 	orgId     int

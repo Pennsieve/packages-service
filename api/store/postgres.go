@@ -23,9 +23,8 @@ const (
 )
 
 var (
-	packagesColumns               = []string{"id", "name", "type", "state", "node_id", "parent_id", "dataset_id", "owner_id", "size", "import_id", "attributes", "created_at", "updated_at"}
-	packageColumnsString          = strings.Join(packagesColumns, ", ")
-	qualifiedPackageColumnsString = qualifyPackageColumns("packages")
+	packagesColumns = []string{"id", "name", "type", "state", "node_id", "parent_id", "dataset_id", "owner_id", "size", "import_id", "attributes", "created_at", "updated_at"}
+	packageScanner  = NewPackageScanner(packagesColumns)
 )
 
 type PostgresStoreFactory struct {
@@ -166,7 +165,7 @@ func (q *Queries) TransitionPackageStateBulk(ctx context.Context, datasetId int6
          					AS state_changes(node_id, expected_state, target_state)
 							WHERE state_changes.node_id = packages.node_id
   							AND state_changes.expected_state = packages.state
-  							AND packages.dataset_id = $1 RETURNING %s`, q.OrgId, strings.Join(valuePlaceHolders, ","), qualifiedPackageColumnsString)
+  							AND packages.dataset_id = $1 RETURNING %s`, q.OrgId, strings.Join(valuePlaceHolders, ","), packageScanner.QualifiedColumnNamesString)
 	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
@@ -175,19 +174,7 @@ func (q *Queries) TransitionPackageStateBulk(ctx context.Context, datasetId int6
 
 	for rows.Next() {
 		var pkg pgdb.Package
-		if err = rows.Scan(&pkg.Id,
-			&pkg.Name,
-			&pkg.PackageType,
-			&pkg.PackageState,
-			&pkg.NodeId,
-			&pkg.ParentId,
-			&pkg.DatasetId,
-			&pkg.OwnerId,
-			&pkg.Size,
-			&pkg.ImportId,
-			&pkg.Attributes,
-			&pkg.CreatedAt,
-			&pkg.UpdatedAt); err != nil {
+		if err = packageScanner.Scan(rows, &pkg); err != nil {
 			return updated, err
 		}
 		updated = append(updated, &pkg)
@@ -199,23 +186,21 @@ func (q *Queries) TransitionPackageStateBulk(ctx context.Context, datasetId int6
 }
 
 func (q *Queries) TransitionPackageState(ctx context.Context, datasetId int64, packageId string, expectedState, targetState packageState.State) (*pgdb.Package, error) {
-	query := fmt.Sprintf(`UPDATE "%d".packages SET state = $1 WHERE node_id = $2 AND dataset_id = $3 AND state = $4 RETURNING %s`, q.OrgId, packageColumnsString)
+	query := fmt.Sprintf(`UPDATE "%d".packages SET state = $1 WHERE node_id = $2 AND dataset_id = $3 AND state = $4 RETURNING %s`, q.OrgId, packageScanner.ColumnNamesString)
 	var pkg pgdb.Package
-	if err := q.db.QueryRowContext(ctx, query, targetState, packageId, datasetId, expectedState).Scan(
-		&pkg.Id,
-		&pkg.Name,
-		&pkg.PackageType,
-		&pkg.PackageState,
-		&pkg.NodeId,
-		&pkg.ParentId,
-		&pkg.DatasetId,
-		&pkg.OwnerId,
-		&pkg.Size,
-		&pkg.ImportId,
-		&pkg.Attributes,
-		&pkg.CreatedAt,
-		&pkg.UpdatedAt); errors.Is(err, sql.ErrNoRows) {
+	if err := packageScanner.Scan(q.db.QueryRowContext(ctx, query, targetState, packageId, datasetId, expectedState), &pkg); errors.Is(err, sql.ErrNoRows) {
 		return &pkg, models.PackageNotFoundError{Id: models.PackageNodeId(packageId), OrgId: q.OrgId, DatasetId: models.DatasetIntId(datasetId)}
+	} else {
+		return &pkg, err
+	}
+}
+
+func (q *Queries) GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error) {
+	query := fmt.Sprintf(`SELECT %s FROM "%d".packages WHERE node_id = $1`, packageScanner.ColumnNamesString, q.OrgId)
+	var pkg pgdb.Package
+	row := q.db.QueryRowContext(ctx, query, packageId)
+	if err := packageScanner.Scan(row, &pkg); errors.Is(err, sql.ErrNoRows) {
+		return &pkg, models.PackageNotFoundError{Id: models.PackageNodeId(packageId), OrgId: q.OrgId}
 	} else {
 		return &pkg, err
 	}
@@ -240,7 +225,7 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 				UPDATE "%[1]d".packages
 				SET state = $4
 				WHERE state = $3 AND id IN (SELECT id FROM nodes n)
-				RETURNING %s`, q.OrgId, packageColumnsString)
+				RETURNING %s`, q.OrgId, packageScanner.ColumnNamesString)
 	var updated []*pgdb.Package
 	rows, err := q.db.QueryContext(ctx, query, packageId, datasetId, expectedState, targetState)
 	if err != nil {
@@ -250,19 +235,7 @@ func (q *Queries) TransitionDescendantPackageState(ctx context.Context, datasetI
 
 	for rows.Next() {
 		var pkg pgdb.Package
-		if err = rows.Scan(&pkg.Id,
-			&pkg.Name,
-			&pkg.PackageType,
-			&pkg.PackageState,
-			&pkg.NodeId,
-			&pkg.ParentId,
-			&pkg.DatasetId,
-			&pkg.OwnerId,
-			&pkg.Size,
-			&pkg.ImportId,
-			&pkg.Attributes,
-			&pkg.CreatedAt,
-			&pkg.UpdatedAt); err != nil {
+		if err = packageScanner.Scan(rows, &pkg); err != nil {
 			return updated, err
 		}
 		updated = append(updated, &pkg)
@@ -287,7 +260,7 @@ func (q *Queries) TransitionAncestorPackageState(ctx context.Context, parentId i
 				UPDATE "%[1]d".packages
 				SET state = $4
 				WHERE type = $1 and state = $3 AND id IN (SELECT id FROM ancestors)
-				RETURNING %s`, q.OrgId, packageColumnsString)
+				RETURNING %s`, q.OrgId, packageScanner.ColumnNamesString)
 	var updated []*pgdb.Package
 	rows, err := q.db.QueryContext(ctx, query, packageType.Collection, parentId, expectedState, targetState)
 	if err != nil {
@@ -297,19 +270,7 @@ func (q *Queries) TransitionAncestorPackageState(ctx context.Context, parentId i
 
 	for rows.Next() {
 		var pkg pgdb.Package
-		if err = rows.Scan(&pkg.Id,
-			&pkg.Name,
-			&pkg.PackageType,
-			&pkg.PackageState,
-			&pkg.NodeId,
-			&pkg.ParentId,
-			&pkg.DatasetId,
-			&pkg.OwnerId,
-			&pkg.Size,
-			&pkg.ImportId,
-			&pkg.Attributes,
-			&pkg.CreatedAt,
-			&pkg.UpdatedAt); err != nil {
+		if err = packageScanner.Scan(rows, &pkg); err != nil {
 			return updated, err
 		}
 		updated = append(updated, &pkg)
@@ -420,14 +381,6 @@ func (q *Queries) ReleaseSavepoint(ctx context.Context, name string) error {
 	return err
 }
 
-func qualifyPackageColumns(qualifier string) string {
-	q := make([]string, len(packagesColumns))
-	for i, c := range packagesColumns {
-		q[i] = fmt.Sprintf("%s.%s", qualifier, c)
-	}
-	return strings.Join(q, ", ")
-}
-
 type SQLStore interface {
 	UpdatePackageName(ctx context.Context, packageId int64, newName string) error
 	GetDatasetByNodeId(ctx context.Context, dsNodeId string) (*pgdb.Dataset, error)
@@ -448,5 +401,6 @@ type SQLStore interface {
 	IncrementDatasetStorage(ctx context.Context, datasetId int64, sizeIncrement int64) error
 	IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error
 	IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error
+	GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error)
 	logging.Logger
 }

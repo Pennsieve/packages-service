@@ -109,6 +109,14 @@ func (tdb *TestDB) CloseRows(rows *sql.Rows) {
 	}
 }
 
+func (tdb *TestDB) Queries(orgId int) *Queries {
+	return &Queries{
+		db:     tdb.DB,
+		OrgId:  orgId,
+		Logger: NoLogger{},
+	}
+}
+
 type NoLogger struct{}
 
 func (n NoLogger) LogWarn(_ ...any) {}
@@ -383,7 +391,7 @@ type TestPackage struct {
 }
 
 func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
-	pt := NewTestPackageType()
+	pt := RandPackageType()
 	nodeId := NewTestPackageNodeId(pt)
 	size := sql.NullInt64{}
 	if pt != packageType.Collection {
@@ -394,7 +402,7 @@ func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
 		Id:           id,
 		Name:         RandString(37),
 		PackageType:  pt,
-		PackageState: NewTestPackageState(),
+		PackageState: RandPackageState(),
 		NodeId:       nodeId,
 		ParentId:     sql.NullInt64{},
 		DatasetId:    datasetId,
@@ -453,7 +461,7 @@ func (p *TestPackage) Insert(ctx context.Context, db TestDB, orgId int) *pgdb.Pa
 	var pkg pgdb.Package
 	query := fmt.Sprintf(`INSERT INTO "%d".packages (%[2]s)
 						  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-						  RETURNING %[2]s`, orgId, packageColumnsString)
+						  RETURNING %[2]s`, orgId, packageScanner.ColumnNamesString)
 	if err := db.QueryRowContext(ctx, query,
 		p.Id,
 		p.Name,
@@ -496,8 +504,8 @@ func NewTestPackageNodeId(pt packageType.Type) string {
 	return fmt.Sprintf("N:%s:%s", typeString, uuid.NewString())
 }
 
-func NewTestPackageType() packageType.Type {
-	types := []packageType.Type{packageType.Image,
+func RandPackageType() packageType.Type {
+	pTypes := []packageType.Type{packageType.Image,
 		packageType.MRI,
 		packageType.Slide,
 		packageType.ExternalFile,
@@ -513,10 +521,10 @@ func NewTestPackageType() packageType.Type {
 		packageType.Unsupported,
 		packageType.HDF5,
 		packageType.ZIP}
-	return types[rand.Intn(len(types))]
+	return pTypes[rand.Intn(len(pTypes))]
 }
 
-func NewTestPackageState() packageState.State {
+func RandPackageState() packageState.State {
 	states := []packageState.State{packageState.Unavailable,
 		packageState.Uploaded,
 		packageState.Deleting,

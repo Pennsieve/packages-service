@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+const (
+	CollectionRestoredState = packageState.Ready
+	FileRestoredState       = packageState.Ready
+)
+
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
@@ -125,9 +130,9 @@ func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, res
 	}
 	transitions := make([]store.PackageStateTransition, len(restoreInfos))
 	for i, r := range restoreInfos {
-		finalState := packageState.Uploaded
+		finalState := FileRestoredState
 		if r.Type == packageType.Collection {
-			finalState = packageState.Ready
+			finalState = CollectionRestoredState
 		}
 		transitions[i] = store.PackageStateTransition{NodeId: r.NodeId, Expected: packageState.Restoring, Target: finalState}
 	}
@@ -223,8 +228,12 @@ func (c *RetryContex) Update(err error) *RetryContex {
 	return c
 }
 
+func DeletedNamePrefix(nodeId string) string {
+	return fmt.Sprintf("__%s__%s_", packageState.Deleted, nodeId)
+}
+
 func GetOriginalName(deletedName, nodeId string) (string, error) {
-	expectedPrefix := fmt.Sprintf("__%s__%s_", packageState.Deleted, nodeId)
+	expectedPrefix := DeletedNamePrefix(nodeId)
 	if !strings.HasPrefix(deletedName, expectedPrefix) {
 		return "", fmt.Errorf("name: %s does not start with expected prefix: %s", deletedName, expectedPrefix)
 	}
