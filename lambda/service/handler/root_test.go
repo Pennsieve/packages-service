@@ -7,6 +7,7 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/dataset"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/dataset/role"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"net/http"
@@ -43,7 +44,7 @@ func TestRestoreRoute(t *testing.T) {
 
 	claims := authorizer.Claims{
 		DatasetClaim: dataset.Claim{
-			Role:   dataset.Editor,
+			Role:   role.Editor,
 			NodeId: expectedDatasetID,
 			IntId:  1234,
 		}}
@@ -71,7 +72,7 @@ func TestRestoreRouteUnauthorized(t *testing.T) {
 
 	claims := authorizer.Claims{
 		DatasetClaim: dataset.Claim{
-			Role:   dataset.Viewer,
+			Role:   role.Viewer,
 			NodeId: expectedDatasetID,
 			IntId:  1234,
 		}}
@@ -107,7 +108,7 @@ func TestTrashcanRouteHandledErrors(t *testing.T) {
 		mockService := new(MockPackagesService)
 		claims := authorizer.Claims{
 			DatasetClaim: dataset.Claim{
-				Role:   dataset.Editor,
+				Role:   role.Editor,
 				NodeId: datasetID,
 				IntId:  1234,
 			}}
