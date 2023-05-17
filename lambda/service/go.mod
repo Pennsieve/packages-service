@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.14
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.7
 	github.com/pennsieve/packages-service/api v0.0.0
-	github.com/pennsieve/pennsieve-go-core v1.4.7
+	github.com/pennsieve/pennsieve-go-core v1.4.8
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 )
