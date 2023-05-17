@@ -7,22 +7,22 @@ replace github.com/pennsieve/packages-service/api => ../../api
 require (
 	github.com/aws/aws-lambda-go v1.34.1
 	github.com/aws/aws-sdk-go-v2/config v1.18.14
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.4
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.7
 	github.com/pennsieve/packages-service/api v0.0.0
-	github.com/pennsieve/pennsieve-go-core v1.2.3
+	github.com/pennsieve/pennsieve-go-core v1.4.7
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.17.5 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.17.8 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.10 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.14 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.10.14 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.23 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/rds/auth v1.2.7 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.29 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.23 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.32 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.26 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.3.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.21 // indirect
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.18.4 // indirect
