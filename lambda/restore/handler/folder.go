@@ -30,12 +30,12 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		// restore ancestors names
 		for _, a := range ancestors {
-			if err := h.restoreName(ctx, a, sqlStore); err != nil {
+			if _, err := h.restoreName(ctx, a, sqlStore); err != nil {
 				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
 			}
 		}
 		// restore name
-		err = h.restoreName(ctx, restoreInfo, sqlStore)
+		_, err = h.restoreName(ctx, restoreInfo, sqlStore)
 		if err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
 		}
@@ -48,7 +48,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		for _, p := range restoring {
 			sqlStore.LogDebugWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
 			descRestoreInfo := models.NewRestorePackageInfo(p)
-			err = h.restoreName(ctx, descRestoreInfo, sqlStore)
+			_, err = h.restoreName(ctx, descRestoreInfo, sqlStore)
 			if err != nil {
 				return h.errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
 			}

@@ -108,15 +108,21 @@ func TestRestoreName(t *testing.T) {
 		db.ExecSQLFile("restore-package-name-test.sql")
 		sqlFactory := store.NewPostgresStoreFactory(db.DB)
 		ctx := context.Background()
-		handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
+		messageHandler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
 		restoreInfo := models.RestorePackageInfo{
 			Id:     d.id,
 			NodeId: d.nodeId,
 			Name:   d.name,
 		}
+		orginalName, err := GetOriginalName(d.name, d.nodeId)
+		if err != nil {
+			assert.FailNow(t, "test case does not use correct deleted file name format", err)
+		}
 		t.Run(name, func(t *testing.T) {
-			err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
-				return handler.restoreName(ctx, restoreInfo, store)
+			var restoredName *RestoredName
+			err := messageHandler.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) (restoreNameError error) {
+				restoredName, restoreNameError = messageHandler.restoreName(ctx, restoreInfo, store)
+				return
 			})
 			if assert.NoError(t, err) {
 				query := fmt.Sprintf(`SELECT name from "%d".packages where id = $1`, orgId)
@@ -124,6 +130,12 @@ func TestRestoreName(t *testing.T) {
 				err = db.QueryRow(query, restoreInfo.Id).Scan(&actualName)
 				if assert.NoError(t, err) {
 					assert.Equal(t, d.expectedResult, actualName)
+					assert.Equal(t, d.expectedResult, restoredName.Value)
+					if actualName == orginalName {
+						assert.Empty(t, restoredName.OriginalName)
+					} else {
+						assert.Equal(t, orginalName, restoredName.OriginalName)
+					}
 				}
 			}
 		})
@@ -142,22 +154,28 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	ctx := context.Background()
 	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
+	originalName := "root-dir"
 	restoreInfo1 := models.RestorePackageInfo{
 		Id:     5,
 		NodeId: "N:collection:180d4f48-ea2b-435c-ac69-780eeaf89745",
-		Name:   "__DELETED__N:collection:180d4f48-ea2b-435c-ac69-780eeaf89745_root-dir",
+		Name:   fmt.Sprintf("__DELETED__N:collection:180d4f48-ea2b-435c-ac69-780eeaf89745_%s", originalName),
 	}
+	expectedName2 := "root-dir-restored_1"
 	restoreInfo2 := models.RestorePackageInfo{
 		Id:     6,
 		NodeId: "N:collection:0f197fab-cb7b-4414-8f7c-27d7aafe7c53",
-		Name:   "__DELETED__N:collection:0f197fab-cb7b-4414-8f7c-27d7aafe7c53_root-dir",
+		Name:   fmt.Sprintf("__DELETED__N:collection:0f197fab-cb7b-4414-8f7c-27d7aafe7c53_%s", originalName),
 	}
 
 	err := handler.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(store store.SQLStore) error {
-		err := handler.restoreName(ctx, restoreInfo1, store)
+		restoredName1, err := handler.restoreName(ctx, restoreInfo1, store)
 		if assert.NoError(t, err) {
-			err = handler.restoreName(ctx, restoreInfo2, store)
+			assert.Equal(t, originalName, restoredName1.Value)
+			assert.Empty(t, restoredName1.OriginalName)
+			restoredName2, err := handler.restoreName(ctx, restoreInfo2, store)
 			assert.NoError(t, err)
+			assert.Equal(t, expectedName2, restoredName2.Value)
+			assert.Equal(t, originalName, restoredName2.OriginalName)
 		}
 		return nil
 	})
@@ -167,13 +185,13 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 		var actualName1 string
 		err = db.QueryRow(query, restoreInfo1.Id).Scan(&actualName1)
 		if assert.NoError(t, err) {
-			assert.Equal(t, "root-dir", actualName1)
+			assert.Equal(t, originalName, actualName1)
 		}
 
 		var actualName2 string
 		err = db.QueryRow(query, restoreInfo2.Id).Scan(&actualName2)
 		if assert.NoError(t, err) {
-			assert.Equal(t, "root-dir-restored_1", actualName2)
+			assert.Equal(t, expectedName2, actualName2)
 		}
 	}
 

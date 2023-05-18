@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+type RestoredName struct {
+	Value        string
+	OriginalName string
+}
+
 const (
 	CollectionRestoredState = packageState.Ready
 	FileRestoredState       = packageState.Ready
@@ -34,12 +39,12 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		// restore ancestors names
 		for _, a := range ancestors {
-			if err := h.restoreName(ctx, a, sqlStore); err != nil {
+			if _, err := h.restoreName(ctx, a, sqlStore); err != nil {
 				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
 			}
 		}
 		// restore name
-		if err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
+		if _, err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
 		}
 
@@ -86,30 +91,38 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 	return err
 }
 
-func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
+func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) (*RestoredName, error) {
 	originalName, err := GetOriginalName(restoreInfo.Name, restoreInfo.NodeId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	savepoint := fmt.Sprintf("%s_svpt", savepointReplacer.Replace(restoreInfo.NodeId))
 	if err = store.NewSavepoint(ctx, savepoint); err != nil {
-		return err
+		return nil, err
 	}
 	var retryCtx *RetryContex
+	newName := originalName
 	err = store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
 	for retryCtx = NewRetryContext(originalName, err); retryCtx.TryAgain; retryCtx.Update(err) {
-		newName := retryCtx.Parts.Next()
+		newName = retryCtx.Parts.Next()
 		h.LogDebugWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
-			return spErr
+			return nil, spErr
 		}
 		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
 		h.LogDebugWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
 	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
-		return err
+		return nil, err
 	}
-	return retryCtx.Err
+	if retryCtx.Err != nil {
+		return nil, retryCtx.Err
+	}
+	restoredName := RestoredName{Value: newName}
+	if newName != originalName {
+		restoredName.OriginalName = originalName
+	}
+	return &restoredName, nil
 }
 
 func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
