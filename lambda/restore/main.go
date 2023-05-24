@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/restore/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
@@ -48,6 +49,7 @@ func init() {
 
 	handler.S3Client = s3.NewFromConfig(cfg)
 	handler.DyDBClient = dynamodb.NewFromConfig(cfg)
+	handler.SQSClient = sqs.NewFromConfig(cfg)
 }
 
 func main() {

@@ -6,11 +6,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
 	"strings"
 )
+
+type RestoredName struct {
+	Value        string
+	OriginalName string
+}
 
 const (
 	CollectionRestoredState = packageState.Ready
@@ -19,7 +25,8 @@ const (
 
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
-func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
+func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
+	var changelogEvents []changelog.PackageRestoreEvent
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// mark any deleted ancestors as restoring
 		var ancestors []models.RestorePackageInfo
@@ -34,13 +41,25 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		// restore ancestors names
 		for _, a := range ancestors {
-			if err := h.restoreName(ctx, a, sqlStore); err != nil {
+			if restoredName, err := h.restoreName(ctx, a, sqlStore); err != nil {
 				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			} else {
+				changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+					Id:           a.Id,
+					Name:         restoredName.Value,
+					OriginalName: restoredName.OriginalName,
+					NodeId:       a.NodeId})
 			}
 		}
 		// restore name
-		if err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
+		if restoredName, err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
+		} else {
+			changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+				Id:           restoreInfo.Id,
+				Name:         restoredName.Value,
+				OriginalName: restoredName.OriginalName,
+				NodeId:       restoreInfo.NodeId})
 		}
 
 		// restore S3 and clean up DynamoDB
@@ -83,33 +102,41 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		return nil
 	})
-	return err
+	return changelogEvents, err
 }
 
-func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
+func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) (*RestoredName, error) {
 	originalName, err := GetOriginalName(restoreInfo.Name, restoreInfo.NodeId)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	savepoint := fmt.Sprintf("%s_svpt", savepointReplacer.Replace(restoreInfo.NodeId))
 	if err = store.NewSavepoint(ctx, savepoint); err != nil {
-		return err
+		return nil, err
 	}
 	var retryCtx *RetryContex
+	newName := originalName
 	err = store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
 	for retryCtx = NewRetryContext(originalName, err); retryCtx.TryAgain; retryCtx.Update(err) {
-		newName := retryCtx.Parts.Next()
+		newName = retryCtx.Parts.Next()
 		h.LogDebugWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
-			return spErr
+			return nil, spErr
 		}
 		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
 		h.LogDebugWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
 	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
-		return err
+		return nil, err
 	}
-	return retryCtx.Err
+	if retryCtx.Err != nil {
+		return nil, retryCtx.Err
+	}
+	restoredName := RestoredName{Value: newName}
+	if newName != originalName {
+		restoredName.OriginalName = originalName
+	}
+	return &restoredName, nil
 }
 
 func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {

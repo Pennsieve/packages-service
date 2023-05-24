@@ -21,6 +21,7 @@ func TestTransitionPackageState(t *testing.T) {
 	orgId := 7
 	datasetNodeId := "N:dataset:9492034"
 	datasetIntId := int64(13)
+	userId := "N:user:add123"
 	for tName, configMock := range map[string]configMockFunction{
 		"dataset not found error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			err := models.DatasetNotFoundError{
@@ -28,12 +29,12 @@ func TestTransitionPackageState(t *testing.T) {
 				OrgId: 7,
 			}
 			store.OnGetDatasetByNodeIdFail(datasetNodeId, err)
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, nil, err
+			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}, UserId: userId}, nil, err
 		},
 		"unexpected get dataset error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			err := errors.New("unexpected get dataset error")
 			store.OnGetDatasetByNodeIdFail(datasetNodeId, err)
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, nil, err
+			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}, UserId: userId}, nil, err
 		},
 		"package not found error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
@@ -48,7 +49,7 @@ func TestTransitionPackageState(t *testing.T) {
 				okPkgs[i] = okPkg
 			}
 			for _, okPkg := range okPkgs {
-				sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				sqsMessage := models.NewRestorePackageMessage(orgId, datasetIntId, userId, okPkg)
 				store.OnSendRestorePackageReturn(sqsMessage)
 			}
 
@@ -65,7 +66,7 @@ func TestTransitionPackageState(t *testing.T) {
 			}
 
 			// Not treating package not found from state transition as an error.
-			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...)}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
+			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...), UserId: userId}, &models.RestoreResponse{Success: okIds, Failures: failures}, nil
 		},
 		"no packages found": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
@@ -83,7 +84,7 @@ func TestTransitionPackageState(t *testing.T) {
 			}
 
 			// Not treating package not found from state transition as an error.
-			return &models.RestoreRequest{NodeIds: failedIds}, &models.RestoreResponse{Success: []string{}, Failures: failures}, nil
+			return &models.RestoreRequest{NodeIds: failedIds, UserId: userId}, &models.RestoreResponse{Success: []string{}, Failures: failures}, nil
 		},
 		"unexpected package state transition error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
@@ -107,7 +108,7 @@ func TestTransitionPackageState(t *testing.T) {
 				store.OnTransitionPackageStateFail(datasetIntId, id, packageState.Deleted, packageState.Restoring, err)
 			}
 
-			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...)}, nil, expectedError
+			return &models.RestoreRequest{NodeIds: append(okIds, failedIds...), UserId: userId}, nil, expectedError
 		},
 		"unexpected sqs send error": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
@@ -123,7 +124,7 @@ func TestTransitionPackageState(t *testing.T) {
 			}
 			sqsError := errors.New("unexpected sqs send error")
 			for i, okPkg := range okPkgs {
-				message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				message := models.NewRestorePackageMessage(orgId, datasetIntId, userId, okPkg)
 				// Only fail on last SQS call
 				if i < len(okPkgs)-1 {
 					store.OnSendRestorePackageReturn(message)
@@ -131,7 +132,7 @@ func TestTransitionPackageState(t *testing.T) {
 					store.OnSendRestorePackageFail(message, sqsError)
 				}
 			}
-			return &models.RestoreRequest{NodeIds: okIds}, nil, sqsError
+			return &models.RestoreRequest{NodeIds: okIds, UserId: userId}, nil, sqsError
 		},
 		"no errors": func(store *MockPackagesStore) (*models.RestoreRequest, *models.RestoreResponse, error) {
 			store.OnGetDatasetByNodeIdReturn(datasetNodeId, &pgdb.Dataset{Id: datasetIntId})
@@ -148,10 +149,10 @@ func TestTransitionPackageState(t *testing.T) {
 				okPkgs[i] = okPkg
 			}
 			for _, okPkg := range okPkgs {
-				message := models.NewRestorePackageMessage(orgId, datasetIntId, okPkg)
+				message := models.NewRestorePackageMessage(orgId, datasetIntId, userId, okPkg)
 				store.OnSendRestorePackageReturn(message)
 			}
-			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}}, &models.RestoreResponse{Success: okIds, Failures: []models.Failure{}}, nil
+			return &models.RestoreRequest{NodeIds: []string{"N:package:1234", "N:package:0987"}, UserId: userId}, &models.RestoreResponse{Success: okIds, Failures: []models.Failure{}}, nil
 		},
 	} {
 		mockStore := new(MockPackagesStore)
