@@ -71,3 +71,15 @@ data "terraform_remote_state" "process_jobs_service" {
     profile = var.aws_account
   }
 }
+
+# Import Upload service for v2 bucket
+data "terraform_remote_state" "upload_service" {
+  backend = "s3"
+
+  config = {
+    bucket  = "${var.aws_account}-terraform-state"
+    key     = "aws/${data.aws_region.current_region.name}/${var.vpc_name}/${var.environment_name}/upload-service-v2/terraform.tfstate"
+    region  = "us-east-1"
+    profile = var.aws_account
+  }
+}
