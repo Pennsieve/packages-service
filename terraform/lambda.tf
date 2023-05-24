@@ -31,7 +31,7 @@ resource "aws_lambda_function" "restore_package_lambda" {
   handler       = "restore_package"
   runtime       = "go1.x"
   role          = aws_iam_role.restore_package_lambda_role.arn
-  timeout       = 300
+  timeout       = 900
   memory_size   = 128
   s3_bucket     = var.lambda_bucket
   s3_key        = "${var.service_name}/restore-package-${var.image_tag}.zip"
