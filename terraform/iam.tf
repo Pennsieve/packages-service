@@ -223,5 +223,20 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
     ]
   }
 
+  // Access Jobs Queue KMS key
+  statement {
+    sid    = "KMSDecryptMessages"
+    effect = "Allow"
+
+    actions = [
+      "kms:Decrypt",
+      "kms:GenerateDataKey",
+    ]
+
+    resources = [
+      data.terraform_remote_state.platform_infrastructure.outputs.jobs_kms_key_arn,
+    ]
+  }
+
 }
 
