@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
@@ -24,7 +25,8 @@ const (
 
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
-func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
+func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
+	var changelogEvents []changelog.PackageRestoreEvent
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// mark any deleted ancestors as restoring
 		var ancestors []models.RestorePackageInfo
@@ -39,13 +41,25 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		// restore ancestors names
 		for _, a := range ancestors {
-			if _, err := h.restoreName(ctx, a, sqlStore); err != nil {
+			if restoredName, err := h.restoreName(ctx, a, sqlStore); err != nil {
 				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			} else {
+				changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+					Id:           a.Id,
+					Name:         restoredName.Value,
+					OriginalName: restoredName.OriginalName,
+					NodeId:       a.NodeId})
 			}
 		}
 		// restore name
-		if _, err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
+		if restoredName, err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
+		} else {
+			changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+				Id:           restoreInfo.Id,
+				Name:         restoredName.Value,
+				OriginalName: restoredName.OriginalName,
+				NodeId:       restoreInfo.NodeId})
 		}
 
 		// restore S3 and clean up DynamoDB
@@ -88,7 +102,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		return nil
 	})
-	return err
+	return changelogEvents, err
 }
 
 func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) (*RestoredName, error) {

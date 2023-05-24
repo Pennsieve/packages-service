@@ -10,16 +10,20 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/packages-service/api/store/restore"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
@@ -77,10 +81,16 @@ func TestHandleMessage(t *testing.T) {
 	ctx := context.Background()
 
 	orgId := 2
-	awsConfig := store.GetTestAWSConfig(t)
+	mockSQSServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
+		fmt.Println("TODO: verify expectations", r)
+	}))
+	defer mockSQSServer.Close()
+
+	awsConfig := store.GetTestAWSConfig(t, mockSQSServer.URL)
 
 	s3Client := s3.NewFromConfig(awsConfig)
 	dyClient := dynamodb.NewFromConfig(awsConfig)
+	sqsClient := sqs.NewFromConfig(awsConfig)
 
 	db := store.OpenDB(t)
 	defer db.Close()
@@ -175,7 +185,8 @@ func TestHandleMessage(t *testing.T) {
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	objectStore := store.NewS3Store(s3Client)
 	nosqlStore := store.NewDynamoDBStore(dyClient)
-	base := NewBaseStore(sqlFactory, nosqlStore, objectStore)
+	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient)
+	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore)
 	expectedMessageId := "handle-message-message-id"
 	message := events.SQSMessage{
 		MessageId: expectedMessageId,

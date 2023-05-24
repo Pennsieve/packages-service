@@ -38,6 +38,7 @@ func (h *RestoreHandler) post(ctx context.Context) (*events.APIGatewayV2HTTPResp
 		msg := fmt.Sprintf("unable to unmarshall request body [%s] as RestoreRequest: %v", h.body, err)
 		return h.logAndBuildError(msg, http.StatusBadRequest), nil
 	}
+	request.UserId = h.claims.UserClaim.NodeId
 	response, err := h.packagesService.RestorePackages(ctx, datasetId, request)
 	if err == nil {
 		h.logger.Info("Returning OK")

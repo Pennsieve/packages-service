@@ -7,6 +7,7 @@ import (
 
 type RestoreRequest struct {
 	NodeIds []string `json:"nodeIds"`
+	UserId  string   `json:"userId"`
 }
 
 type RestoreResponse struct {
@@ -30,6 +31,7 @@ type RestorePackageInfo struct {
 type RestorePackageMessage struct {
 	OrgId     int                `json:"orgId"`
 	DatasetId int64              `json:"datasetId"`
+	UserId    string             `json:"userId"`
 	Package   RestorePackageInfo `json:"package"`
 }
 
@@ -41,8 +43,8 @@ func NewRestorePackageInfo(p *pgdb.Package) RestorePackageInfo {
 	return restoreInfo
 }
 
-func NewRestorePackageMessage(orgId int, datasetId int64, toBeRestored *pgdb.Package) RestorePackageMessage {
+func NewRestorePackageMessage(orgId int, datasetId int64, userId string, toBeRestored *pgdb.Package) RestorePackageMessage {
 	restoreInfo := NewRestorePackageInfo(toBeRestored)
-	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, Package: restoreInfo}
+	queueMessage := RestorePackageMessage{OrgId: orgId, DatasetId: datasetId, UserId: userId, Package: restoreInfo}
 	return queueMessage
 }

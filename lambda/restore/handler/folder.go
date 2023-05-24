@@ -4,12 +4,14 @@ import (
 	"context"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
 )
 
-func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) error {
+func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
+	var changelogEvents []changelog.PackageRestoreEvent
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// gather ancestors and set to RESTORING
 		var ancestors []models.RestorePackageInfo
@@ -30,14 +32,27 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		// restore ancestors names
 		for _, a := range ancestors {
-			if _, err := h.restoreName(ctx, a, sqlStore); err != nil {
+			if restoredName, err := h.restoreName(ctx, a, sqlStore); err != nil {
 				return h.errorf("error restoring name of ancestor %s of %s: %w", a.NodeId, restoreInfo.NodeId, err)
+			} else {
+				changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+					Id:           a.Id,
+					Name:         restoredName.Value,
+					OriginalName: restoredName.OriginalName,
+					NodeId:       a.NodeId,
+				})
 			}
 		}
 		// restore name
-		_, err = h.restoreName(ctx, restoreInfo, sqlStore)
-		if err != nil {
+		if restoredName, err := h.restoreName(ctx, restoreInfo, sqlStore); err != nil {
 			return h.errorf("error restoring name of %s: %w", restoreInfo.NodeId, err)
+		} else {
+			changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+				Id:           restoreInfo.Id,
+				Name:         restoredName.Value,
+				OriginalName: restoredName.OriginalName,
+				NodeId:       restoreInfo.NodeId,
+			})
 		}
 
 		var folderDescRestoreInfos []*models.RestorePackageInfo
@@ -48,9 +63,15 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		for _, p := range restoring {
 			sqlStore.LogDebugWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
 			descRestoreInfo := models.NewRestorePackageInfo(p)
-			_, err = h.restoreName(ctx, descRestoreInfo, sqlStore)
-			if err != nil {
+			if restoredName, err := h.restoreName(ctx, descRestoreInfo, sqlStore); err != nil {
 				return h.errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
+			} else {
+				changelogEvents = append(changelogEvents, changelog.PackageRestoreEvent{
+					Id:           p.Id,
+					Name:         restoredName.Value,
+					OriginalName: restoredName.OriginalName,
+					NodeId:       p.NodeId,
+				})
 			}
 			if p.PackageType == packageType.Collection {
 				folderDescRestoreInfos = append(folderDescRestoreInfos, &descRestoreInfo)
@@ -123,5 +144,5 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		}
 		return nil
 	})
-	return err
+	return changelogEvents, err
 }

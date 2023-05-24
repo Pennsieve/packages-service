@@ -108,7 +108,7 @@ func TestRestoreName(t *testing.T) {
 		db.ExecSQLFile("restore-package-name-test.sql")
 		sqlFactory := store.NewPostgresStoreFactory(db.DB)
 		ctx := context.Background()
-		messageHandler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
+		messageHandler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil))
 		restoreInfo := models.RestorePackageInfo{
 			Id:     d.id,
 			NodeId: d.nodeId,
@@ -153,7 +153,7 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	ctx := context.Background()
-	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil))
+	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil))
 	originalName := "root-dir"
 	restoreInfo1 := models.RestorePackageInfo{
 		Id:     5,

@@ -49,6 +49,7 @@ resource "aws_lambda_function" "restore_package_lambda" {
       RDS_PROXY_ENDPOINT                = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
       RESTORE_PACKAGE_QUEUE_URL         = aws_sqs_queue.restore_package_queue.url
       DELETE_RECORD_DYNAMODB_TABLE_NAME = data.terraform_remote_state.process_jobs_service.outputs.process_jobs_table_name
+      JOBS_QUEUE_ID                     = data.terraform_remote_state.platform_infrastructure.outputs.jobs_queue_id,
     }
   }
 }

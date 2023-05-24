@@ -207,5 +207,19 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
     ]
   }
 
+  statement {
+    sid    = "PostChangeLogMessages"
+    effect = "Allow"
+
+    actions = [
+      "sqs:SendMessage",
+    ]
+
+    resources = [
+      data.terraform_remote_state.platform_infrastructure.outputs.jobs_queue_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.jobs_queue_arn}/*",
+    ]
+  }
+
 }
 

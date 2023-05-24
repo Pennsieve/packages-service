@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -135,7 +136,7 @@ func (n NoLogger) LogInfo(_ ...any) {}
 
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
 
-func GetTestAWSConfig(t *testing.T) aws.Config {
+func GetTestAWSConfig(t *testing.T, mockSqsUrl string) aws.Config {
 	awsKey := os.Getenv("TEST_AWS_KEY")
 	awsSecret := os.Getenv("TEST_AWS_SECRET")
 	minioURL := os.Getenv("MINIO_URL")
@@ -148,6 +149,8 @@ func GetTestAWSConfig(t *testing.T) aws.Config {
 				return aws.Endpoint{URL: minioURL, HostnameImmutable: true}, nil
 			} else if service == dynamodb.ServiceID {
 				return aws.Endpoint{URL: dynamodbURL}, nil
+			} else if service == sqs.ServiceID {
+				return aws.Endpoint{URL: mockSqsUrl}, nil
 			}
 			return aws.Endpoint{}, fmt.Errorf("unknown test endpoint requested for service: %s", service)
 		})))
