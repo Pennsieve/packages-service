@@ -29,24 +29,24 @@ help:
 
 # Start the local versions of docker services
 local-services:
-	docker-compose -f docker-compose.test.yml down --remove-orphans
-	docker-compose -f docker-compose.test.yml up -d pennsievedb minio dynamodb
+	docker compose -f docker-compose.test.yml down --remove-orphans
+	docker compose -f docker-compose.test.yml up -d pennsievedb minio dynamodb
 
 # Run tests locally
 test: local-services
 	./run-tests.sh localtest.env .env
-	docker-compose -f docker-compose.test.yml down --remove-orphans
+	docker compose -f docker-compose.test.yml down --remove-orphans
 	make clean
 
 # Run test coverage locally
 test-coverage: local-services
 	./run-test-coverage.sh localtest.env
-	docker-compose -f docker-compose.test.yml down --remove-orphans
+	docker compose -f docker-compose.test.yml down --remove-orphans
 	make clean
 
 # Run dockerized tests (used on Jenkins)
 test-ci:
-	docker-compose -f docker-compose.test.yml down --remove-orphans
+	docker compose -f docker-compose.test.yml down --remove-orphans
 	@IMAGE_TAG=$(IMAGE_TAG) docker-compose -f docker-compose.test.yml up --exit-code-from=ci-tests ci-tests
 
 clean: docker-clean
@@ -54,7 +54,7 @@ clean: docker-clean
 
 # Spin down active docker containers.
 docker-clean:
-	docker-compose -f docker-compose.test.yml down
+	docker compose -f docker-compose.test.yml down
 
 # Build lambda and create ZIP file
 package:
@@ -78,8 +78,7 @@ package:
 			zip -r $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) .
 
 # Copy Service lambda to S3 location
-publish:
-	@make package
+publish: package
 	@echo ""
 	@echo "******************************************"
 	@echo "*   Publishing packages-service lambda   *"

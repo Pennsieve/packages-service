@@ -1,6 +1,8 @@
 module github.com/pennsieve/packages-service/service
 
-go 1.18
+go 1.22
+
+toolchain go1.23.4
 
 replace github.com/pennsieve/packages-service/api => ../../api
 
@@ -9,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.14
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.7
 	github.com/pennsieve/packages-service/api v0.0.0
-	github.com/pennsieve/pennsieve-go-core v1.4.8
+	github.com/pennsieve/pennsieve-go-core v1.13.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 )
@@ -38,11 +40,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.4 // indirect
 	github.com/aws/smithy-go v1.13.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/lib/pq v1.10.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

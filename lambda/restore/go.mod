@@ -1,6 +1,8 @@
 module github.com/pennsieve/packages-service/restore
 
-go 1.18
+go 1.22
+
+toolchain go1.23.4
 
 replace github.com/pennsieve/packages-service/api => ../../api
 
@@ -11,9 +13,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.10.14
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.18.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.30.4
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.7
 	github.com/google/uuid v1.3.0
 	github.com/pennsieve/packages-service/api v0.0.0-00010101000000-000000000000
-	github.com/pennsieve/pennsieve-go-core v1.4.8
+	github.com/pennsieve/pennsieve-go-core v1.13.0
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 )
@@ -33,7 +36,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.7.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.13.23 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.20.7 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.12.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.14.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.4 // indirect
@@ -43,6 +45,6 @@ require (
 	github.com/lib/pq v1.10.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

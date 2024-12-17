@@ -7,7 +7,8 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/dataset"
-	"github.com/pennsieve/pennsieve-go-core/pkg/models/dataset/role"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/role"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/user"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"net/http"
@@ -18,9 +19,10 @@ type queryParamMap map[string]string
 
 // restoreRequestBody takes an array of package node ids and returns a pair consisting of
 // a models.RestoreRequest with those node ids and the same request marshalled as a string.
-func restoreRequestBody(t *testing.T, packageIds ...string) (models.RestoreRequest, string) {
+func restoreRequestBody(t *testing.T, userId string, packageIds ...string) (models.RestoreRequest, string) {
 	requestObject := models.RestoreRequest{
 		NodeIds: packageIds,
+		UserId:  userId,
 	}
 	requestBody, err := json.Marshal(requestObject)
 	if err != nil {
@@ -31,10 +33,11 @@ func restoreRequestBody(t *testing.T, packageIds ...string) (models.RestoreReque
 
 func TestRestoreRoute(t *testing.T) {
 	expectedDatasetID := "N:Dataset:1234"
+	expectedUserID := "N:user:101"
 	expectedQueryParams := map[string]string{
 		"dataset_id": expectedDatasetID,
 	}
-	requestObject, requestBody := restoreRequestBody(t, "N:package:1234")
+	requestObject, requestBody := restoreRequestBody(t, expectedUserID, "N:package:1234")
 	req := newTestRequest("POST",
 		"/packages/restore",
 		"restorePackagesID",
@@ -43,7 +46,12 @@ func TestRestoreRoute(t *testing.T) {
 	mockService := new(MockPackagesService)
 
 	claims := authorizer.Claims{
-		DatasetClaim: dataset.Claim{
+		UserClaim: &user.Claim{
+			Id:           101,
+			NodeId:       expectedUserID,
+			IsSuperAdmin: false,
+		},
+		DatasetClaim: &dataset.Claim{
 			Role:   role.Editor,
 			NodeId: expectedDatasetID,
 			IntId:  1234,
@@ -59,10 +67,11 @@ func TestRestoreRoute(t *testing.T) {
 
 func TestRestoreRouteUnauthorized(t *testing.T) {
 	expectedDatasetID := "N:Dataset:1234"
+	expectedUserID := "N:user:101"
 	expectedQueryParams := map[string]string{
 		"dataset_id": expectedDatasetID,
 	}
-	_, requestBody := restoreRequestBody(t, "N:package:1234")
+	_, requestBody := restoreRequestBody(t, expectedUserID, "N:package:1234")
 	req := newTestRequest("POST",
 		"/packages/restore",
 		"restorePackagesID",
@@ -71,7 +80,12 @@ func TestRestoreRouteUnauthorized(t *testing.T) {
 	mockService := new(MockPackagesService)
 
 	claims := authorizer.Claims{
-		DatasetClaim: dataset.Claim{
+		UserClaim: &user.Claim{
+			Id:           101,
+			NodeId:       expectedUserID,
+			IsSuperAdmin: false,
+		},
+		DatasetClaim: &dataset.Claim{
 			Role:   role.Viewer,
 			NodeId: expectedDatasetID,
 			IntId:  1234,
@@ -86,9 +100,10 @@ func TestRestoreRouteUnauthorized(t *testing.T) {
 }
 
 func TestTrashcanRouteHandledErrors(t *testing.T) {
+	userID := "N:user:101"
 	datasetID := "N:Dataset:1234"
 	packageID := "N:collection:abcd"
-	requestObject, requestBody := restoreRequestBody(t, packageID)
+	requestObject, requestBody := restoreRequestBody(t, userID, packageID)
 	for tName, tData := range map[string]struct {
 		ServiceError        error
 		ExpectedStatus      int
@@ -107,7 +122,12 @@ func TestTrashcanRouteHandledErrors(t *testing.T) {
 			requestBody)
 		mockService := new(MockPackagesService)
 		claims := authorizer.Claims{
-			DatasetClaim: dataset.Claim{
+			UserClaim: &user.Claim{
+				Id:           101,
+				NodeId:       userID,
+				IsSuperAdmin: false,
+			},
+			DatasetClaim: &dataset.Claim{
 				Role:   role.Editor,
 				NodeId: datasetID,
 				IntId:  1234,
