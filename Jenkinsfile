@@ -21,6 +21,14 @@ ansiColor('xterm') {
       }
     }
 
+    stage("Package") {
+      try {
+        sh "IMAGE_TAG=${imageTag} make package"
+      } finally {
+        sh "make clean"
+      }
+    }
+
     if(isMain) {
       stage ('Build and Push') {
         sh "IMAGE_TAG=${imageTag} make publish"
