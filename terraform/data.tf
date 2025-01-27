@@ -83,3 +83,14 @@ data "terraform_remote_state" "upload_service" {
     profile = var.aws_account
   }
 }
+
+# AFS-1 Region
+data "terraform_remote_state" "africa_south_region" {
+  backend = "s3"
+
+  config = {
+    bucket = "${var.aws_account}-terraform-state"
+    key    = "aws/af-south-1/terraform.tfstate"
+    region = "af-south-1"
+  }
+}
