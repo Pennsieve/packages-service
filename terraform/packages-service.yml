@@ -65,13 +65,11 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
-
-
 components:
   x-amazon-apigateway-integrations:
-    collections-service:
+    packages-service:
       type: aws_proxy
-      uri: ${collections_service_lambda_arn}
+      uri: ${packages_service_lambda_arn}
       httpMethod: POST
       passthroughBehavior: when_no_match
       contentHandling: CONVERT_TO_TEXT
@@ -156,6 +154,31 @@ components:
               errorId:
                 type: string
   schemas:
-
+    restoreRequest:
+      type: object
+      properties:
+        nodeIds:
+          type: array
+          items:
+            type: string
+          description: the node ids of the items to restore
+    restoreResponse:
+      type: object
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+          description: the node ids for which restore has started
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              error:
+                type: string
+          description: any restore failures grouped by node id
 
 
