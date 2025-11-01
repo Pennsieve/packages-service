@@ -12,6 +12,9 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 	case "/restore":
 		restoreHandler := RestoreHandler{RequestHandler: *h}
 		return restoreHandler.handle(ctx)
+	case "/s3/proxy":
+		s3ProxyHandler := S3ProxyHandler{RequestHandler: *h}
+		return s3ProxyHandler.handle(ctx)
 	default:
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}

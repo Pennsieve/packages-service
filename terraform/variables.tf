@@ -18,6 +18,7 @@ variable "lambda_bucket" {
 
 variable "api_domain_name" {}
 
+
 locals {
   common_tags = {
     aws_account      = var.aws_account

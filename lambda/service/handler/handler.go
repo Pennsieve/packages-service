@@ -17,6 +17,7 @@ import (
 
 var PennsieveDB *sql.DB
 var SQSClient *sqs.Client
+var ViewerAssetsBucket string
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -29,6 +30,14 @@ func init() {
 			log.SetLevel(log.InfoLevel)
 			log.Warnf("could not set log level to %q: %v", level, err)
 		}
+	}
+	
+	// Initialize ViewerAssetsBucket from environment variable
+	if bucket, ok := os.LookupEnv("VIEWER_ASSETS_BUCKET"); ok {
+		ViewerAssetsBucket = bucket
+		log.Infof("ViewerAssetsBucket initialized: %s", ViewerAssetsBucket)
+	} else {
+		log.Warn("VIEWER_ASSETS_BUCKET environment variable not set")
 	}
 }
 
