@@ -1,0 +1,161 @@
+#file: noinspection MaybeTerraformTemplateInspection
+openapi: 3.0.1
+info:
+  version: "3.0"
+  title: Package Service
+  description: |
+    The Package Service handles package related requests
+  termsOfService: https://docs.pennsieve.io/page/pennsieve-terms-of-use
+  contact:
+    name: Pennsieve Support
+    email: support@pennsieve.net
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: https://api2.pennsieve.io/packages
+    description: Production server
+  - url: https://api2.pennsieve.net/packages
+    description: Development server
+externalDocs:
+  description: Find more info here
+  url: https://docs.pennsieve.io
+tags:
+  - name: Packages Service
+    description: Management of dataset packages
+    externalDocs:
+      url: https://docs.pennsieve.io/reference
+
+paths:
+  /restore:
+    post:
+      summary: Restore deleted items
+      description: |
+        Starts restore process for the given deleted items
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: restoreItems
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Packages Service
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      requestBody:
+        description: node ids of the items to restore
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/restoreRequest'
+      responses:
+        '200':
+          description: The result of starting the restore process.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/restoreResponse'
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+
+
+
+components:
+  x-amazon-apigateway-integrations:
+    collections-service:
+      type: aws_proxy
+      uri: ${collections_service_lambda_arn}
+      httpMethod: POST
+      passthroughBehavior: when_no_match
+      contentHandling: CONVERT_TO_TEXT
+      payloadFormatVersion: 2.0
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+    BasicAuth:
+      type: http
+      scheme: basic
+
+    token_auth:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authorizer:
+        identitySource: "$request.header.Authorization"
+        authorizerUri: ${authorize_lambda_invoke_uri}
+        authorizerPayloadFormatVersion: "2.0"
+        authorizerResultTtlInSeconds: 300
+        type: "request"
+        enableSimpleResponses: true
+        authorizerCredentials: ${gateway_authorizer_role}
+
+  responses:
+    Unauthorized:
+      description: Incorrect authentication or user has incorrect permissions.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              errorId:
+                type: string
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              errorId:
+                type: string
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              errorId:
+                type: string
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              errorId:
+                type: string
+    Error:
+      description: Server Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              errorId:
+                type: string
+  schemas:
+
+
+
