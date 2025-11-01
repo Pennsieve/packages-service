@@ -75,21 +75,12 @@ components:
       contentHandling: CONVERT_TO_TEXT
       payloadFormatVersion: 2.0
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-
-    BasicAuth:
-      type: http
-      scheme: basic
-
-    token_auth:
+    token_dataset_auth:
       type: "apiKey"
-      name: "Authorization"
+      name: "Unused"
       in: "header"
       x-amazon-apigateway-authorizer:
-        identitySource: "$request.header.Authorization"
+        identitySource: "$request.header.Authorization,$request.querystring.dataset_id"
         authorizerUri: ${authorize_lambda_invoke_uri}
         authorizerPayloadFormatVersion: "2.0"
         authorizerResultTtlInSeconds: 300
