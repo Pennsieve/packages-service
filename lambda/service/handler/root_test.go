@@ -39,7 +39,7 @@ func TestRestoreRoute(t *testing.T) {
 	}
 	requestObject, requestBody := restoreRequestBody(t, expectedUserID, "N:package:1234")
 	req := newTestRequest("POST",
-		"/packages/restore",
+		"/restore",
 		"restorePackagesID",
 		expectedQueryParams,
 		requestBody)
@@ -73,7 +73,7 @@ func TestRestoreRouteUnauthorized(t *testing.T) {
 	}
 	_, requestBody := restoreRequestBody(t, expectedUserID, "N:package:1234")
 	req := newTestRequest("POST",
-		"/packages/restore",
+		"/restore",
 		"restorePackagesID",
 		expectedQueryParams,
 		requestBody)
@@ -116,7 +116,7 @@ func TestTrashcanRouteHandledErrors(t *testing.T) {
 		},
 	} {
 		req := newTestRequest("POST",
-			"/packages/restore",
+			"/restore",
 			"restorePackagesRequestID",
 			queryParamMap{"dataset_id": datasetID},
 			requestBody)
