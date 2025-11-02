@@ -18,6 +18,11 @@ variable "lambda_bucket" {
 
 variable "api_domain_name" {}
 
+variable "proxy_allowed_buckets" {
+  description = "Comma-separated list of S3 bucket names allowed for the unauthenticated proxy endpoint. Leave empty to allow all buckets."
+  type        = string
+  default     = ""
+}
 
 locals {
   common_tags = {

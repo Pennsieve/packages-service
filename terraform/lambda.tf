@@ -22,6 +22,7 @@ resource "aws_lambda_function" "service_lambda" {
       RDS_PROXY_ENDPOINT        = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
       RESTORE_PACKAGE_QUEUE_URL = aws_sqs_queue.restore_package_queue.url
       VIEWER_ASSETS_BUCKET      = aws_s3_bucket.package_assets.bucket
+      PROXY_ALLOWED_BUCKETS     = var.proxy_allowed_buckets
     }
   }
 }
