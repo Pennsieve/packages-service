@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/dataset"
@@ -46,7 +47,13 @@ func (suite *S3ProxyTestSuite) SetupSuite() {
 
 	db, err := sql.Open("postgres", connString)
 	require.NoError(suite.T(), err)
-	require.NoError(suite.T(), db.Ping())
+	
+	// Retry database connection with backoff
+	err = suite.waitForDatabase(db)
+	if err != nil {
+		suite.T().Skipf("Database not available: %v", err)
+		return
+	}
 
 	suite.db = db
 	suite.orgId = 1 // Test organization
@@ -91,16 +98,40 @@ func (suite *S3ProxyTestSuite) TearDownTest() {
 }
 
 func (suite *S3ProxyTestSuite) cleanupTestData() {
-	// Clean up files and packages tables
+	if suite.db == nil {
+		return
+	}
+	
+	// Clean up files and packages tables - but preserve main test dataset N:dataset:1234
 	query := fmt.Sprintf(`DELETE FROM "%d".files WHERE s3_bucket LIKE 'test-%%'`, suite.orgId)
 	suite.db.Exec(query)
 
 	query = fmt.Sprintf(`DELETE FROM "%d".packages WHERE node_id LIKE 'N:package:test-%%'`, suite.orgId)
 	suite.db.Exec(query)
+	
+	// Clean up only temporary test datasets (not the main N:dataset:1234)
+	query = fmt.Sprintf(`DELETE FROM "%d".datasets WHERE node_id LIKE 'N:dataset:test-%%'`, suite.orgId)
+	suite.db.Exec(query)
 }
 
 func (suite *S3ProxyTestSuite) createTestPackageWithFile(nodeId, bucket, key string) int64 {
-	// Insert test package
+	// First ensure we have a dataset - try to get existing one first
+	var datasetId int64
+	err := suite.db.QueryRow(fmt.Sprintf(`
+		SELECT id FROM "%d".datasets WHERE node_id = $1
+	`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
+	
+	if err != nil {
+		// Dataset doesn't exist, create it
+		err = suite.db.QueryRow(fmt.Sprintf(`
+			INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
+			VALUES ($1, 'Test Dataset', 'READY'::text, 1, NOW(), NOW())
+			RETURNING id
+		`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
+		require.NoError(suite.T(), err)
+	}
+
+	// Insert test package with all required fields
 	packageQuery := fmt.Sprintf(`
 		INSERT INTO "%d".packages (name, type, state, node_id, dataset_id, owner_id, size, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
@@ -108,16 +139,16 @@ func (suite *S3ProxyTestSuite) createTestPackageWithFile(nodeId, bucket, key str
 	`, suite.orgId)
 
 	var packageId int64
-	err := suite.db.QueryRow(packageQuery, "test-package", "Package", "READY", nodeId, 1234, 101, 1024).Scan(&packageId)
+	err = suite.db.QueryRow(packageQuery, "test-package", "Package", "READY", nodeId, datasetId, 101, 1024).Scan(&packageId)
 	require.NoError(suite.T(), err)
 
-	// Insert test file
+	// Insert test file with all required fields
 	fileQuery := fmt.Sprintf(`
-		INSERT INTO "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, uuid, processing_state, uploaded_state, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, gen_random_uuid(), $9, $10, NOW(), NOW())
+		INSERT INTO "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, processing_state, uploaded_state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 	`, suite.orgId)
 
-	_, err = suite.db.Exec(fileQuery, packageId, "test-file.txt", "Text", bucket, key, "Source", 1024, "test-checksum", "Processed", "Uploaded")
+	_, err = suite.db.Exec(fileQuery, packageId, "test-file.txt", 1, bucket, key, "source", 1024, "processed", "Uploaded")
 	require.NoError(suite.T(), err)
 
 	return packageId
@@ -367,10 +398,15 @@ func (suite *S3ProxyTestSuite) TestViewerAssetAccess() {
 	
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "test-viewer-assets-bucket", s3Location.Bucket)
+	
 	// Expected format: O{WorkspaceIntId}/D{DatasetIntId}/P{PackageIntId}/{AssetPath}
-	// The createTestPackageWithFile function creates a package with dataset_id=1234, and we need to get the actual package int ID
-	expectedKey := fmt.Sprintf("O%d/D%d/P", suite.orgId, 1234) // We'll check the prefix since package int ID is auto-generated
-	assert.True(suite.T(), strings.HasPrefix(s3Location.Key, expectedKey), "Key should start with O%d/D%d/P", suite.orgId, 1234)
+	// Get the actual dataset internal ID from the database
+	var actualDatasetIntId int64
+	err = suite.db.QueryRow(fmt.Sprintf(`SELECT id FROM "%d".datasets WHERE node_id = $1`, suite.orgId), datasetNodeId).Scan(&actualDatasetIntId)
+	require.NoError(suite.T(), err)
+	
+	expectedKeyPrefix := fmt.Sprintf("O%d/D%d/P", suite.orgId, actualDatasetIntId)
+	assert.True(suite.T(), strings.HasPrefix(s3Location.Key, expectedKeyPrefix), "Key should start with %s, but got: %s", expectedKeyPrefix, s3Location.Key)
 	assert.True(suite.T(), strings.HasSuffix(s3Location.Key, "/preview/thumbnail.jpg"), "Key should end with asset path")
 }
 
@@ -449,41 +485,49 @@ func (suite *S3ProxyTestSuite) TestCrossDatasetAccessDenied() {
 		return
 	}
 
-	// Insert test data: organization, datasets, packages, and files
-	orgId := int64(1)
+	// Use org ID from suite setup
+	orgId := int64(suite.orgId)
 	
-	// Create two datasets in the same organization
-	dataset1Id := int64(1001)
-	dataset1NodeId := "N:dataset:unauthorized"
-	dataset2Id := int64(1002) 
-	dataset2NodeId := "N:dataset:1234"
+	// Create unique node IDs to avoid conflicts with current timestamp
+	timestamp := fmt.Sprintf("%d", time.Now().UnixNano())
+	dataset1NodeId := fmt.Sprintf("N:dataset:test-unauthorized-%s", timestamp)
+	dataset2NodeId := fmt.Sprintf("N:dataset:test-authorized-%s", timestamp)
+	packageNodeId := fmt.Sprintf("N:package:test-unauthorized-pkg-%s", timestamp)
 
-	// Insert datasets
-	_, err := suite.db.Exec(fmt.Sprintf(`
-		INSERT INTO "%d".datasets (id, node_id, name, state, created_at, updated_at)
-		VALUES ($1, $2, 'Unauthorized Dataset', 'READY', NOW(), NOW()),
-			   ($3, $4, 'Authorized Dataset', 'READY', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING
-	`, orgId), dataset1Id, dataset1NodeId, dataset2Id, dataset2NodeId)
+	// Ensure clean state before test
+	suite.cleanupTestData()
+	
+	// Insert datasets without specifying IDs (let DB auto-generate)
+	var dataset1Id, dataset2Id int64
+	
+	err := suite.db.QueryRow(fmt.Sprintf(`
+		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
+		VALUES ($1, 'Test Unauthorized Dataset', 'READY'::text, 1, NOW(), NOW())
+		RETURNING id
+	`, orgId), dataset1NodeId).Scan(&dataset1Id)
+	require.NoError(suite.T(), err)
+	
+	err = suite.db.QueryRow(fmt.Sprintf(`
+		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
+		VALUES ($1, 'Test Authorized Dataset', 'READY'::text, 1, NOW(), NOW())
+		RETURNING id
+	`, orgId), dataset2NodeId).Scan(&dataset2Id)
 	require.NoError(suite.T(), err)
 
-	// Create a package in dataset1 (unauthorized)
-	packageId := int64(2001)
-	packageNodeId := "N:package:unauthorized-pkg"
-	
-	_, err = suite.db.Exec(fmt.Sprintf(`
-		INSERT INTO "%d".packages (id, node_id, name, package_type, package_state, dataset_id, created_at, updated_at)
-		VALUES ($1, $2, 'Unauthorized Package', 1, 'READY', $3, NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING
-	`, orgId), packageId, packageNodeId, dataset1Id)
+	// Create a package in dataset1 (unauthorized) without specifying ID
+	var packageId int64
+	err = suite.db.QueryRow(fmt.Sprintf(`
+		INSERT INTO "%d".packages (node_id, name, type, state, dataset_id, owner_id, size, created_at, updated_at)
+		VALUES ($1, 'Test Unauthorized Package', 'Package', 'READY', $2, 101, 1024, NOW(), NOW())
+		RETURNING id
+	`, orgId), packageNodeId, dataset1Id).Scan(&packageId)
 	require.NoError(suite.T(), err)
 
-	// Create a file for the package
+	// Create a file for the package - use minimal required fields to avoid column type issues
 	_, err = suite.db.Exec(fmt.Sprintf(`
-		INSERT INTO "%d".files (id, package_id, name, file_type, s3_bucket, s3_key, created_at, updated_at)
-		VALUES (3001, $1, 'test-file.txt', 1, 'test-bucket', 'test/unauthorized-file.txt', NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING
-	`, orgId), packageId)
+		INSERT INTO "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, processing_state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+	`, orgId), packageId, "test-unauthorized-file.txt", 1, "test-unauthorized-bucket", "test/unauthorized-file.txt", "source", "processed")
 	require.NoError(suite.T(), err)
 
 	// Create claims for user with access only to dataset2, NOT dataset1
@@ -518,6 +562,30 @@ func (suite *S3ProxyTestSuite) TestCrossDatasetAccessDenied() {
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), http.StatusInternalServerError, resp.StatusCode)
 	assert.Contains(suite.T(), resp.Body, "package not found, no associated file, or package does not belong to specified dataset")
+}
+
+// waitForDatabase waits for the database to be available with exponential backoff
+func (suite *S3ProxyTestSuite) waitForDatabase(db *sql.DB) error {
+	maxRetries := 10
+	backoff := time.Millisecond * 100
+
+	for i := 0; i < maxRetries; i++ {
+		err := db.Ping()
+		if err == nil {
+			return nil
+		}
+		
+		suite.T().Logf("Database connection attempt %d failed: %v. Retrying in %v...", i+1, err, backoff)
+		time.Sleep(backoff)
+		backoff *= 2 // Exponential backoff
+		
+		if backoff > time.Second*5 {
+			backoff = time.Second * 5 // Cap at 5 seconds
+		}
+	}
+	
+	// Final attempt
+	return db.Ping()
 }
 
 // Helper function to get environment variable with default
