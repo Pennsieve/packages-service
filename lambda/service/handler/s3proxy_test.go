@@ -115,17 +115,26 @@ func (suite *S3ProxyTestSuite) cleanupTestData() {
 }
 
 func (suite *S3ProxyTestSuite) createTestPackageWithFile(nodeId, bucket, key string) int64 {
-    // First ensure we have a dataset - use ON CONFLICT to handle duplicates gracefully
+    // First ensure we have a dataset - use INSERT ... ON CONFLICT with primary key
     var datasetId int64
+    
+    // Try to get existing dataset first
     err := suite.db.QueryRow(fmt.Sprintf(`
-		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
-		VALUES ($1, 'Test Dataset', 'READY'::text, 1, NOW(), NOW())
-		ON CONFLICT (node_id) DO UPDATE SET 
-			name = EXCLUDED.name,
-			updated_at = NOW()
-		RETURNING id
+		SELECT id FROM "%d".datasets WHERE node_id = $1
 	`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
-    require.NoError(suite.T(), err)
+    
+    if err != nil {
+        // Dataset doesn't exist, create it with a specific ID to avoid conflicts
+        err = suite.db.QueryRow(fmt.Sprintf(`
+			INSERT INTO "%d".datasets (id, node_id, name, state, status_id, created_at, updated_at)
+			VALUES (9999, $1, 'Test Dataset', 'READY'::text, 1, NOW(), NOW())
+			ON CONFLICT (id) DO UPDATE SET 
+				node_id = EXCLUDED.node_id,
+				updated_at = NOW()
+			RETURNING id
+		`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
+        require.NoError(suite.T(), err)
+    }
 
     // Insert test package with all required fields
     packageQuery := fmt.Sprintf(`
@@ -498,15 +507,12 @@ func (suite *S3ProxyTestSuite) TestCrossDatasetAccessDenied() {
     suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".packages WHERE node_id LIKE 'N:package:test-%%'`, orgId))
     suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".datasets WHERE node_id LIKE 'N:dataset:test-%%'`, orgId))
 
-    // Insert datasets using ON CONFLICT to handle any remaining duplicates gracefully
+    // Insert datasets using simple INSERT since we cleaned up beforehand
     var dataset1Id, dataset2Id int64
 
     err := suite.db.QueryRow(fmt.Sprintf(`
 		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
 		VALUES ($1, 'Test Unauthorized Dataset', 'READY'::text, 1, NOW(), NOW())
-		ON CONFLICT (node_id) DO UPDATE SET 
-			name = EXCLUDED.name,
-			updated_at = NOW()
 		RETURNING id
 	`, orgId), dataset1NodeId).Scan(&dataset1Id)
     require.NoError(suite.T(), err)
@@ -514,9 +520,6 @@ func (suite *S3ProxyTestSuite) TestCrossDatasetAccessDenied() {
     err = suite.db.QueryRow(fmt.Sprintf(`
 		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
 		VALUES ($1, 'Test Authorized Dataset', 'READY'::text, 1, NOW(), NOW())
-		ON CONFLICT (node_id) DO UPDATE SET 
-			name = EXCLUDED.name,
-			updated_at = NOW()
 		RETURNING id
 	`, orgId), dataset2NodeId).Scan(&dataset2Id)
     require.NoError(suite.T(), err)
