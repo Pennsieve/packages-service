@@ -98,6 +98,13 @@ paths:
             type: string
           required: false
           description: optional path for viewer assets within the package
+        - in: query
+          name: redirect
+          schema:
+            type: string
+            enum: ["true", "false"]
+          required: false
+          description: whether to return HTTP redirect (default true) or JSON with presigned URL (false)
         - in: header
           name: Range
           schema:

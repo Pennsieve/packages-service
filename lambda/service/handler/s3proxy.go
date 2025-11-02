@@ -2,11 +2,8 @@ package handler
 
 import (
     "context"
-    "encoding/base64"
     "fmt"
-    "io"
     "net/http"
-    "strings"
     "time"
 
     "github.com/aws/aws-lambda-go/events"
@@ -65,12 +62,19 @@ func (h *S3ProxyHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTT
     // Check for optional path parameter for viewer assets
     assetPath, isAssetRequest := h.queryParams["path"]
 
+    // Check for redirect preference (default to true for backwards compatibility)
+    redirectMode := true
+    if redirectParam, ok := h.queryParams["redirect"]; ok && redirectParam == "false" {
+        redirectMode = false
+    }
+
     h.logger.WithFields(log.Fields{
         "packageId":      packageId,
         "datasetId":      datasetIdStr,
         "assetPath":      assetPath,
         "isAssetRequest": isAssetRequest,
-    }).Info("proxying GET request for package")
+        "redirectMode":   redirectMode,
+    }).Info("handling GET request for package")
 
     var s3Location *S3Location
     var err error
@@ -93,53 +97,43 @@ func (h *S3ProxyHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTT
         return h.logAndBuildError(fmt.Sprintf("failed to generate presigned URL: %v", err), http.StatusInternalServerError), nil
     }
 
-    // Make request to S3
-    req, err := http.NewRequestWithContext(ctx, http.MethodGet, presignedURL, nil)
-    if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to create request: %v", err), http.StatusInternalServerError), nil
-    }
-
-    // Forward Range header if present
-    if rangeHeader := h.request.Headers["range"]; rangeHeader != "" {
-        req.Header.Set("Range", rangeHeader)
-    } else if rangeHeader := h.request.Headers["Range"]; rangeHeader != "" {
-        req.Header.Set("Range", rangeHeader)
-    }
-
-    client := &http.Client{
-        Timeout: 30 * time.Second,
-    }
-    resp, err := client.Do(req)
-    if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to fetch from S3: %v", err), http.StatusBadGateway), nil
-    }
-    defer resp.Body.Close()
-
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to read response body: %v", err), http.StatusInternalServerError), nil
-    }
-
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
+    
+    if redirectMode {
+        // Return redirect response (preferred for large files)
+        headers["Location"] = presignedURL
 
-    // Forward relevant S3 response headers
-    h.forwardS3Headers(resp, headers)
+        h.logger.WithFields(log.Fields{
+            "presignedURL": presignedURL,
+            "packageId":    packageId,
+            "datasetId":    datasetIdStr,
+        }).Debug("redirecting to presigned URL")
 
-    // Check if content needs base64 encoding
-    isBase64Encoded := h.needsBase64Encoding(resp.Header.Get("Content-Type"))
-    responseBody := string(body)
+        return &events.APIGatewayV2HTTPResponse{
+            StatusCode: http.StatusTemporaryRedirect,
+            Headers:    headers,
+            Body:       "",
+        }, nil
+    } else {
+        // Return presigned URL in response body (for clients that can't handle redirects)
+        // This mode is useful for DuckDB or other clients that might have issues with redirects
+        headers["Content-Type"] = "application/json"
+        
+        responseBody := fmt.Sprintf(`{"presigned_url": "%s"}`, presignedURL)
+        
+        h.logger.WithFields(log.Fields{
+            "presignedURL": presignedURL,
+            "packageId":    packageId,
+            "datasetId":    datasetIdStr,
+        }).Debug("returning presigned URL in response body")
 
-    if isBase64Encoded {
-        responseBody = base64.StdEncoding.EncodeToString(body)
+        return &events.APIGatewayV2HTTPResponse{
+            StatusCode: http.StatusOK,
+            Headers:    headers,
+            Body:       responseBody,
+        }, nil
     }
-
-    return &events.APIGatewayV2HTTPResponse{
-        StatusCode:      resp.StatusCode,
-        Headers:         headers,
-        Body:            responseBody,
-        IsBase64Encoded: isBase64Encoded,
-    }, nil
 }
 
 func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
@@ -162,7 +156,7 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         "datasetId":      datasetIdStr,
         "assetPath":      assetPath,
         "isAssetRequest": isAssetRequest,
-    }).Info("proxying HEAD request for package")
+    }).Info("handling HEAD request for package metadata")
 
     var s3Location *S3Location
     var err error
@@ -179,16 +173,16 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         return h.logAndBuildError(fmt.Sprintf("failed to get S3 location: %v", err), http.StatusInternalServerError), nil
     }
 
-    // Generate presigned URL
+    // Generate presigned URL for HEAD request
     presignedURL, err := h.generatePresignedURL(ctx, s3Location, http.MethodHead)
     if err != nil {
         return h.logAndBuildError(fmt.Sprintf("failed to generate presigned URL: %v", err), http.StatusInternalServerError), nil
     }
 
-    // Make HEAD request to S3
+    // Make HEAD request to S3 to get actual metadata
     req, err := http.NewRequestWithContext(ctx, http.MethodHead, presignedURL, nil)
     if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to create request: %v", err), http.StatusInternalServerError), nil
+        return h.logAndBuildError(fmt.Sprintf("failed to create HEAD request: %v", err), http.StatusInternalServerError), nil
     }
 
     client := &http.Client{
@@ -196,15 +190,22 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
     }
     resp, err := client.Do(req)
     if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to fetch from S3: %v", err), http.StatusBadGateway), nil
+        return h.logAndBuildError(fmt.Sprintf("failed to fetch metadata from S3: %v", err), http.StatusBadGateway), nil
     }
     defer resp.Body.Close()
 
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
 
-    // Forward relevant S3 response headers
+    // Forward relevant S3 response headers that DuckDB needs
     h.forwardS3Headers(resp, headers)
+
+    h.logger.WithFields(log.Fields{
+        "contentLength": resp.Header.Get("Content-Length"),
+        "contentType":   resp.Header.Get("Content-Type"),
+        "packageId":     packageId,
+        "datasetId":     datasetIdStr,
+    }).Debug("returning HEAD response with S3 metadata")
 
     return &events.APIGatewayV2HTTPResponse{
         StatusCode: resp.StatusCode,
@@ -358,16 +359,16 @@ func (h *S3ProxyHandler) buildCORSHeaders() map[string]string {
     }
 }
 
-// forwardS3Headers forwards relevant headers from S3 response
+// forwardS3Headers forwards relevant headers from S3 response that DuckDB needs
 func (h *S3ProxyHandler) forwardS3Headers(resp *http.Response, headers map[string]string) {
-    // Forward relevant S3 response headers
+    // Forward S3 response headers that are essential for DuckDB and other clients
     headersToForward := []string{
         "Content-Type",
-        "Content-Length",
+        "Content-Length", 
         "Content-Range",
         "ETag",
         "Last-Modified",
-        "Accept-Ranges",
+        "Accept-Ranges", // Critical for range requests
         "Cache-Control",
         "Content-Disposition",
         "Content-Encoding",
@@ -380,24 +381,3 @@ func (h *S3ProxyHandler) forwardS3Headers(resp *http.Response, headers map[strin
     }
 }
 
-// needsBase64Encoding checks if content type requires base64 encoding
-func (h *S3ProxyHandler) needsBase64Encoding(contentType string) bool {
-    // Text-based content types that don't need encoding
-    textTypes := []string{
-        "text/",
-        "application/json",
-        "application/xml",
-        "application/javascript",
-        "application/x-www-form-urlencoded",
-    }
-
-    contentType = strings.ToLower(contentType)
-    for _, textType := range textTypes {
-        if strings.Contains(contentType, textType) {
-            return false
-        }
-    }
-
-    // Binary content needs base64 encoding
-    return true
-}
