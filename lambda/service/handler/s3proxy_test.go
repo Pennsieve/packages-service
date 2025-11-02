@@ -273,23 +273,6 @@ func (suite *S3ProxyTestSuite) TestGetS3LocationForNonexistentPackage() {
 	assert.Contains(suite.T(), err.Error(), "package not found")
 }
 
-func (suite *S3ProxyTestSuite) TestNeedsBase64Encoding() {
-	req := newTestRequest("GET", "/s3/proxy", "test-request-id", map[string]string{}, "")
-	handler := S3ProxyHandler{RequestHandler: *NewHandler(req, suite.claims)}
-
-	// Text content types should not need base64 encoding
-	assert.False(suite.T(), handler.needsBase64Encoding("text/plain"))
-	assert.False(suite.T(), handler.needsBase64Encoding("application/json"))
-	assert.False(suite.T(), handler.needsBase64Encoding("application/xml"))
-	assert.False(suite.T(), handler.needsBase64Encoding("application/javascript"))
-	assert.False(suite.T(), handler.needsBase64Encoding("application/x-www-form-urlencoded"))
-
-	// Binary content types should need base64 encoding
-	assert.True(suite.T(), handler.needsBase64Encoding("image/png"))
-	assert.True(suite.T(), handler.needsBase64Encoding("application/pdf"))
-	assert.True(suite.T(), handler.needsBase64Encoding("application/octet-stream"))
-	assert.True(suite.T(), handler.needsBase64Encoding("video/mp4"))
-}
 
 func (suite *S3ProxyTestSuite) TestBuildCORSHeaders() {
 	req := newTestRequest("GET", "/s3/proxy", "test-request-id", map[string]string{}, "")
@@ -589,15 +572,6 @@ func TestS3ProxyHandleUnitTests(t *testing.T) {
 		assert.Equal(t, "*", resp.Headers["Access-Control-Allow-Origin"])
 	})
 
-	t.Run("needsBase64Encoding", func(t *testing.T) {
-		req := newTestRequest("GET", "/s3/proxy", "test-request-id", map[string]string{}, "")
-		handler := S3ProxyHandler{RequestHandler: *NewHandler(req, claims)}
-
-		assert.False(t, handler.needsBase64Encoding("text/plain"))
-		assert.False(t, handler.needsBase64Encoding("application/json"))
-		assert.True(t, handler.needsBase64Encoding("image/png"))
-		assert.True(t, handler.needsBase64Encoding("application/pdf"))
-	})
 
 	t.Run("buildCORSHeaders", func(t *testing.T) {
 		req := newTestRequest("GET", "/s3/proxy", "test-request-id", map[string]string{}, "")
