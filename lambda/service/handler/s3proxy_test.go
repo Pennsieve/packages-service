@@ -301,6 +301,11 @@ func TestExtractBucketName(t *testing.T) {
             url:            "https://my-bucket.s3-us-west-2.amazonaws.com/test-key",
             expectedBucket: "my-bucket",
         },
+        {
+            name:           "Real pennsieve dev bucket",
+            url:            "https://pennsieve-dev-storage-use1.s3.amazonaws.com/14b49597-25da-4f83-8705-a0cb56313817/test-key",
+            expectedBucket: "pennsieve-dev-storage-use1",
+        },
     }
 
     for _, tt := range tests {

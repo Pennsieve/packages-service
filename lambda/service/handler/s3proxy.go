@@ -156,20 +156,41 @@ func (h *S3ProxyHandler) validatePresignedURL(presignedURL string) error {
     }
 
     // Validate against allowed buckets if configured
+    if h.logger != nil {
+        h.logger.WithFields(log.Fields{
+            "bucket": bucketName,
+            "allowed_buckets_count": len(ProxyAllowedBuckets),
+            "allowed_buckets": ProxyAllowedBuckets,
+        }).Debug("checking bucket against allowed list")
+    }
+    
     if len(ProxyAllowedBuckets) > 0 {
         allowed := false
         for _, allowedBucket := range ProxyAllowedBuckets {
+            if h.logger != nil {
+                h.logger.WithFields(log.Fields{
+                    "comparing_bucket": bucketName,
+                    "against_allowed": allowedBucket,
+                    "equal": bucketName == allowedBucket,
+                }).Debug("bucket comparison")
+            }
             if bucketName == allowedBucket {
                 allowed = true
                 break
             }
         }
         if !allowed {
-            h.logger.WithFields(log.Fields{
-                "bucket": bucketName,
-                "allowed_buckets": ProxyAllowedBuckets,
-            }).Warn("attempted access to non-allowed bucket")
+            if h.logger != nil {
+                h.logger.WithFields(log.Fields{
+                    "bucket": bucketName,
+                    "allowed_buckets": ProxyAllowedBuckets,
+                }).Warn("attempted access to non-allowed bucket")
+            }
             return fmt.Errorf("bucket %s is not in the allowed list", bucketName)
+        }
+    } else {
+        if h.logger != nil {
+            h.logger.Debug("no bucket restrictions configured - allowing all buckets")
         }
     }
 
