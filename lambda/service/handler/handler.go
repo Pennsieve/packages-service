@@ -60,6 +60,15 @@ func init() {
 }
 
 func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (*events.APIGatewayV2HTTPResponse, error) {
+	path := request.RequestContext.HTTP.Path
+	
+	// For unauthenticated endpoints, don't parse claims or create default service
+	if path == "/proxy/s3" {
+		handler := NewHandler(&request, nil)
+		return handler.handle(ctx)
+	}
+	
+	// For authenticated endpoints, parse claims and create service
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
 	handler := NewHandler(&request, claims).WithDefaultService()
 	return handler.handle(ctx)
