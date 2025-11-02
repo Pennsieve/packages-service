@@ -11,6 +11,7 @@ import (
     "testing"
     "time"
 
+    "github.com/pennsieve/packages-service/api/store"
     "github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
     "github.com/pennsieve/pennsieve-go-core/pkg/models/dataset"
     "github.com/pennsieve/pennsieve-go-core/pkg/models/organization"
@@ -34,18 +35,17 @@ type S3ProxyTestSuite struct {
 }
 
 func (suite *S3ProxyTestSuite) SetupSuite() {
-    // Connect to test database
-    pgHost := getEnvOrDefault("POSTGRES_HOST", "localhost")
-    pgPort := getEnvOrDefault("POSTGRES_PORT", "5432")
-    pgUser := getEnvOrDefault("POSTGRES_USER", "postgres")
-    pgPassword := getEnvOrDefault("POSTGRES_PASSWORD", "password")
-    pgDB := getEnvOrDefault("PENNSIEVE_DB", "postgres")
-    pgSSLMode := getEnvOrDefault("POSTGRES_SSL_MODE", "disable")
+    // Connect to test database using the same approach as working tests
+    pgConfig := &store.PostgresConfig{
+        Host:     getEnvOrDefault("POSTGRES_HOST", "localhost"),
+        Port:     getEnvOrDefault("POSTGRES_PORT", "5432"),
+        User:     getEnvOrDefault("POSTGRES_USER", "postgres"),
+        Password: getEnvOrDefault("POSTGRES_PASSWORD", "password"),
+        DBName:   getEnvOrDefault("PENNSIEVE_DB", "postgres"),
+        SSLMode:  getEnvOrDefault("POSTGRES_SSL_MODE", "disable"),
+    }
 
-    connString := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-        pgHost, pgPort, pgUser, pgPassword, pgDB, pgSSLMode)
-
-    db, err := sql.Open("postgres", connString)
+    db, err := pgConfig.Open()
     require.NoError(suite.T(), err)
 
     // Retry database connection with backoff
@@ -498,14 +498,18 @@ func (suite *S3ProxyTestSuite) TestCrossDatasetAccessDenied() {
     dataset2NodeId := fmt.Sprintf("N:dataset:test-authorized-%s", timestamp)
     packageNodeId := fmt.Sprintf("N:package:test-unauthorized-pkg-%s", timestamp)
 
-    // Ensure clean state before test - more thorough cleanup
+    // More thorough cleanup before test to avoid any ID conflicts
     suite.cleanupTestData()
-
-    // Additional cleanup specific to this test to avoid conflicts
-    // First clean up files, then packages, then datasets (respecting foreign key constraints)
+    
+    // Delete everything in reverse dependency order to avoid foreign key violations
     suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".files WHERE s3_bucket LIKE 'test-%%' OR s3_bucket = 'test-unauthorized-bucket'`, orgId))
     suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".packages WHERE node_id LIKE 'N:package:test-%%'`, orgId))
-    suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".datasets WHERE node_id LIKE 'N:dataset:test-%%'`, orgId))
+    suite.db.Exec(fmt.Sprintf(`DELETE FROM "%d".datasets WHERE node_id LIKE 'N:dataset:test-%%' OR id = 9999 OR node_id LIKE '%%test-unauthorized%%' OR node_id LIKE '%%test-authorized%%'`, orgId))
+    
+    // Reset the auto-increment sequence to avoid conflicts
+    var maxId int
+    suite.db.QueryRow(fmt.Sprintf(`SELECT COALESCE(MAX(id), 0) FROM "%d".datasets`, orgId)).Scan(&maxId)
+    suite.db.Exec(fmt.Sprintf(`SELECT setval('"%d".datasets_id_seq', %d)`, orgId, maxId+1))
 
     // Insert datasets using simple INSERT since we cleaned up beforehand
     var dataset1Id, dataset2Id int64
