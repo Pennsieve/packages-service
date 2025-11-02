@@ -13,11 +13,13 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var PennsieveDB *sql.DB
 var SQSClient *sqs.Client
 var ViewerAssetsBucket string
+var ProxyAllowedBuckets []string // List of allowed S3 buckets for the unauthenticated proxy endpoint only
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -38,6 +40,22 @@ func init() {
 		log.Infof("ViewerAssetsBucket initialized: %s", ViewerAssetsBucket)
 	} else {
 		log.Warn("VIEWER_ASSETS_BUCKET environment variable not set")
+	}
+	
+	// Initialize ProxyAllowedBuckets for the unauthenticated proxy endpoint
+	// Format: comma-separated list of bucket names
+	// Example: PROXY_ALLOWED_BUCKETS="bucket1,bucket2,bucket3"
+	if allowedBuckets, ok := os.LookupEnv("PROXY_ALLOWED_BUCKETS"); ok {
+		buckets := strings.Split(allowedBuckets, ",")
+		for _, b := range buckets {
+			trimmed := strings.TrimSpace(b)
+			if trimmed != "" {
+				ProxyAllowedBuckets = append(ProxyAllowedBuckets, trimmed)
+			}
+		}
+		log.Infof("ProxyAllowedBuckets initialized with %d buckets: %v", len(ProxyAllowedBuckets), ProxyAllowedBuckets)
+	} else {
+		log.Warn("PROXY_ALLOWED_BUCKETS environment variable not set - proxy endpoint will accept all S3 buckets")
 	}
 }
 

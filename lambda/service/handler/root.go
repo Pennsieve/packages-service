@@ -12,7 +12,12 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 	case "/restore":
 		restoreHandler := RestoreHandler{RequestHandler: *h}
 		return restoreHandler.handle(ctx)
-	case "/s3/proxy":
+	case "/presign/s3":
+		// Authenticated endpoint for generating presigned URLs
+		s3PresignHandler := S3PresignHandler{RequestHandler: *h}
+		return s3PresignHandler.handle(ctx)
+	case "/proxy/s3":
+		// Unauthenticated proxy endpoint that accepts presigned URLs
 		s3ProxyHandler := S3ProxyHandler{RequestHandler: *h}
 		return s3ProxyHandler.handle(ctx)
 	default:
