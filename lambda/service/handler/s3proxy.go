@@ -161,7 +161,7 @@ func (h *S3ProxyHandler) validatePresignedURL(presignedURL string) error {
             "bucket": bucketName,
             "allowed_buckets_count": len(ProxyAllowedBuckets),
             "allowed_buckets": ProxyAllowedBuckets,
-        }).Debug("checking bucket against allowed list")
+        }).Info("DEBUG: checking bucket against allowed list")
     }
     
     if len(ProxyAllowedBuckets) > 0 {
@@ -172,7 +172,7 @@ func (h *S3ProxyHandler) validatePresignedURL(presignedURL string) error {
                     "comparing_bucket": bucketName,
                     "against_allowed": allowedBucket,
                     "equal": bucketName == allowedBucket,
-                }).Debug("bucket comparison")
+                }).Info("DEBUG: bucket comparison")
             }
             if bucketName == allowedBucket {
                 allowed = true
@@ -190,7 +190,7 @@ func (h *S3ProxyHandler) validatePresignedURL(presignedURL string) error {
         }
     } else {
         if h.logger != nil {
-            h.logger.Debug("no bucket restrictions configured - allowing all buckets")
+            h.logger.Info("DEBUG: no bucket restrictions configured - allowing all buckets")
         }
     }
 
