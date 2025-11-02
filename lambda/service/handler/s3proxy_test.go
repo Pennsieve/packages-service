@@ -115,21 +115,17 @@ func (suite *S3ProxyTestSuite) cleanupTestData() {
 }
 
 func (suite *S3ProxyTestSuite) createTestPackageWithFile(nodeId, bucket, key string) int64 {
-    // First ensure we have a dataset - try to get existing one first
+    // First ensure we have a dataset - use ON CONFLICT to handle duplicates gracefully
     var datasetId int64
     err := suite.db.QueryRow(fmt.Sprintf(`
-		SELECT id FROM "%d".datasets WHERE node_id = $1
+		INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
+		VALUES ($1, 'Test Dataset', 'READY'::text, 1, NOW(), NOW())
+		ON CONFLICT (node_id) DO UPDATE SET 
+			name = EXCLUDED.name,
+			updated_at = NOW()
+		RETURNING id
 	`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
-
-    if err != nil {
-        // Dataset doesn't exist, create it
-        err = suite.db.QueryRow(fmt.Sprintf(`
-			INSERT INTO "%d".datasets (node_id, name, state, status_id, created_at, updated_at)
-			VALUES ($1, 'Test Dataset', 'READY'::text, 1, NOW(), NOW())
-			RETURNING id
-		`, suite.orgId), "N:dataset:1234").Scan(&datasetId)
-        require.NoError(suite.T(), err)
-    }
+    require.NoError(suite.T(), err)
 
     // Insert test package with all required fields
     packageQuery := fmt.Sprintf(`
