@@ -84,6 +84,19 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     ]
   }
 
+  statement {
+    sid     = "PackagesServiceLambdaS3Permissions"
+    effect  = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:HeadObject"
+    ]
+    resources = [
+      "arn:aws:s3:::pennsieve-*-storage-*/*",
+      "arn:aws:s3:::pennsieve-*-package-*/*"
+    ]
+  }
+
 }
 
 #
