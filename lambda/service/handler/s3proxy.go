@@ -195,13 +195,27 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
     h.logger.WithFields(log.Fields{
         "contentLength": headers["Content-Length"],
         "contentType":   headers["Content-Type"],
-    }).Debug("returning HEAD response with S3 metadata")
+        "allHeaders":    headers,
+    }).Info("returning HEAD response with S3 metadata")
 
-    return &events.APIGatewayV2HTTPResponse{
+    response := &events.APIGatewayV2HTTPResponse{
         StatusCode: http.StatusOK,
         Headers:    headers,
         Body:       "", // HEAD responses have no body
-    }, nil
+    }
+    
+    h.logger.WithFields(log.Fields{
+        "responseStatusCode": response.StatusCode,
+        "responseHeaders":    response.Headers,
+        "responseBody":       response.Body,
+    }).Info("final Lambda response being returned")
+
+    // Ensure Content-Length is set explicitly in multiple ways due to API Gateway issues
+    contentLengthValue := fmt.Sprintf("%d", headOutput.ContentLength)
+    response.Headers["content-length"] = contentLengthValue  // lowercase
+    response.Headers["Content-Length"] = contentLengthValue  // proper case
+    
+    return response, nil
 }
 
 // validatePresignedURL validates that the URL is a valid S3 presigned URL
