@@ -147,12 +147,15 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
 
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
+    
+    // Also set lowercase versions for API Gateway compatibility
+    headers["access-control-allow-origin"] = headers["Access-Control-Allow-Origin"]
+    headers["access-control-expose-headers"] = headers["Access-Control-Expose-Headers"]
 
-    // Set Content-Type to */* to prevent API Gateway from modifying Content-Length
-    // API Gateway has special handling that sets Content-Length to 0 for certain content types
-    // Using wildcard */* prevents this transformation
-    headers["Content-Type"] = "*/*"
-    headers["content-type"] = "*/*" // lowercase version for compatibility
+    // Set Content-Type to application/octet-stream for binary files
+    // This is the standard MIME type for binary data
+    headers["Content-Type"] = "application/octet-stream"
+    headers["content-type"] = "application/octet-stream" // lowercase version for compatibility
     // ContentLength is int64 (not a pointer) in SDK v2
     headers["Content-Length"] = fmt.Sprintf("%d", headOutput.ContentLength)
     if headOutput.ETag != nil {
@@ -408,11 +411,14 @@ func containsMiddle(s, substr string) bool {
 
 // buildCORSHeaders returns standard CORS headers
 func (h *S3ProxyHandler) buildCORSHeaders() map[string]string {
+    // Explicitly list Content-Length first in exposed headers for DuckDB-WASM
+    // Some browsers/frameworks are sensitive to the order and case
     return map[string]string{
         "Access-Control-Allow-Origin":   "*",
         "Access-Control-Allow-Methods":  "GET, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers":  "Content-Type, Range, Origin, Accept",
+        "Access-Control-Allow-Headers":  "Content-Type, Content-Length, Range, Origin, Accept",
         "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range, ETag, Last-Modified, Accept-Ranges, Cache-Control, Content-Encoding, Content-Disposition",
+        "Access-Control-Max-Age":        "3600",
     }
 }
 
