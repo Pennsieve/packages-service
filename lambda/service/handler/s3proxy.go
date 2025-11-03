@@ -6,9 +6,9 @@ import (
     "net/http"
     "net/url"
     "strings"
-    "time"
 
     "github.com/aws/aws-lambda-go/events"
+    "github.com/aws/aws-sdk-go-v2/service/s3"
     log "github.com/sirupsen/logrus"
 )
 
@@ -84,38 +84,78 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         return h.logAndBuildError(fmt.Sprintf("invalid presigned URL: %v", err), http.StatusBadRequest), nil
     }
 
+    // Parse the URL to extract bucket and key
+    parsedURL, err := url.Parse(presignedURL)
+    if err != nil {
+        return h.logAndBuildError(fmt.Sprintf("failed to parse presigned URL: %v", err), http.StatusBadRequest), nil
+    }
+
+    bucket := extractBucketName(parsedURL)
+    key := extractS3Key(parsedURL)
+
+    if bucket == "" || key == "" {
+        return h.logAndBuildError("could not extract bucket or key from presigned URL", http.StatusBadRequest), nil
+    }
+
     h.logger.WithFields(log.Fields{
-        "presignedURL": presignedURL,
-    }).Info("handling HEAD request for S3 metadata")
+        "bucket": bucket,
+        "key":    key,
+    }).Info("handling HEAD request for S3 metadata using direct S3 access")
 
-    // Make HEAD request to S3 to get actual metadata
-    req, err := http.NewRequestWithContext(ctx, http.MethodHead, presignedURL, nil)
-    if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to create HEAD request: %v", err), http.StatusInternalServerError), nil
+    // Use direct S3 HEAD request instead of using the presigned URL
+    // This works because presigned URLs are method-specific and won't work for HEAD
+    if S3Client == nil {
+        return h.logAndBuildError("S3 client not initialized", http.StatusInternalServerError), nil
     }
 
-    client := &http.Client{
-        Timeout: 10 * time.Second,
+    headInput := &s3.HeadObjectInput{
+        Bucket: &bucket,
+        Key:    &key,
     }
-    resp, err := client.Do(req)
+
+    headOutput, err := S3Client.HeadObject(ctx, headInput)
     if err != nil {
-        return h.logAndBuildError(fmt.Sprintf("failed to fetch metadata from S3: %v", err), http.StatusBadGateway), nil
+        h.logger.WithError(err).WithFields(log.Fields{
+            "bucket": bucket,
+            "key":    key,
+        }).Error("failed to get object metadata from S3")
+        
+        // Check if it's a 404 or 403 error and return appropriate status
+        // AWS SDK v2 error handling
+        if strings.Contains(err.Error(), "NotFound") {
+            return h.logAndBuildError("object not found", http.StatusNotFound), nil
+        }
+        if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Forbidden") {
+            return h.logAndBuildError("access denied", http.StatusForbidden), nil
+        }
+        
+        return h.logAndBuildError(fmt.Sprintf("failed to get object metadata: %v", err), http.StatusBadGateway), nil
     }
-    defer resp.Body.Close()
 
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
 
-    // Forward relevant S3 response headers
-    h.forwardS3Headers(resp, headers)
+    // Add S3 metadata headers
+    if headOutput.ContentType != nil {
+        headers["Content-Type"] = *headOutput.ContentType
+    }
+    // ContentLength is int64, not a pointer in SDK v2
+    headers["Content-Length"] = fmt.Sprintf("%d", headOutput.ContentLength)
+    if headOutput.ETag != nil {
+        headers["ETag"] = *headOutput.ETag
+    }
+    if headOutput.LastModified != nil {
+        headers["Last-Modified"] = headOutput.LastModified.Format(http.TimeFormat)
+    }
+    headers["Accept-Ranges"] = "bytes" // S3 always supports range requests
 
     h.logger.WithFields(log.Fields{
-        "contentLength": resp.Header.Get("Content-Length"),
-        "contentType":   resp.Header.Get("Content-Type"),
+        "contentLength": headers["Content-Length"],
+        "contentType":   headers["Content-Type"],
     }).Debug("returning HEAD response with S3 metadata")
 
     return &events.APIGatewayV2HTTPResponse{
-        StatusCode: resp.StatusCode,
+        StatusCode: http.StatusOK,
         Headers:    headers,
         Body:       "", // HEAD responses have no body
     }, nil
@@ -240,6 +280,35 @@ func extractBucketName(parsedURL *url.URL) string {
             if len(parts) > 0 && parts[0] != "" {
                 return parts[0]
             }
+        }
+    }
+    
+    return ""
+}
+
+// extractS3Key extracts the S3 key from a presigned URL
+func extractS3Key(parsedURL *url.URL) string {
+    host := parsedURL.Host
+    path := parsedURL.Path
+    
+    // Remove leading slash
+    if strings.HasPrefix(path, "/") {
+        path = path[1:]
+    }
+    
+    // Virtual-hosted-style URLs: bucket-name.s3.amazonaws.com/key
+    // The entire path is the key
+    if contains(host, ".s3.") || contains(host, ".s3-") {
+        // Remove query parameters - path is already clean
+        return path
+    }
+    
+    // Path-style URLs: s3.amazonaws.com/bucket-name/key
+    // Need to remove the bucket name from the path
+    if strings.HasPrefix(host, "s3.") || strings.HasPrefix(host, "s3-") {
+        parts := strings.SplitN(path, "/", 2)
+        if len(parts) == 2 {
+            return parts[1] // Return everything after the bucket name
         }
     }
     
