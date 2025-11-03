@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/service"
@@ -18,6 +19,7 @@ import (
 
 var PennsieveDB *sql.DB
 var SQSClient *sqs.Client
+var S3Client *s3.Client
 var ViewerAssetsBucket string
 var ProxyAllowedBuckets []string // List of allowed S3 buckets for the unauthenticated proxy endpoint only
 

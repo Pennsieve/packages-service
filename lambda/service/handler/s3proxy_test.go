@@ -318,3 +318,52 @@ func TestExtractBucketName(t *testing.T) {
         })
     }
 }
+
+func TestExtractS3Key(t *testing.T) {
+    tests := []struct {
+        name        string
+        url         string
+        expectedKey string
+    }{
+        {
+            name:        "Virtual-hosted style simple key",
+            url:         "https://my-bucket.s3.amazonaws.com/test-key",
+            expectedKey: "test-key",
+        },
+        {
+            name:        "Virtual-hosted style with path",
+            url:         "https://my-bucket.s3.amazonaws.com/folder/subfolder/file.txt",
+            expectedKey: "folder/subfolder/file.txt",
+        },
+        {
+            name:        "Path-style simple key",
+            url:         "https://s3.amazonaws.com/my-bucket/test-key",
+            expectedKey: "test-key",
+        },
+        {
+            name:        "Path-style with path",
+            url:         "https://s3.amazonaws.com/my-bucket/folder/subfolder/file.txt",
+            expectedKey: "folder/subfolder/file.txt",
+        },
+        {
+            name:        "Real pennsieve dev key",
+            url:         "https://pennsieve-dev-storage-use1.s3.amazonaws.com/14b49597-25da-4f83-8705-a0cb56313817/2d901a56-de34-46ef-8b32-4aa72f4f75d2",
+            expectedKey: "14b49597-25da-4f83-8705-a0cb56313817/2d901a56-de34-46ef-8b32-4aa72f4f75d2",
+        },
+        {
+            name:        "Complex path with query params",
+            url:         "https://my-bucket.s3.amazonaws.com/path/to/file.parquet?X-Amz-Algorithm=AWS4-HMAC-SHA256",
+            expectedKey: "path/to/file.parquet",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            parsedURL, err := url.Parse(tt.url)
+            require.NoError(t, err)
+            
+            key := extractS3Key(parsedURL)
+            assert.Equal(t, tt.expectedKey, key, "S3 key should match")
+        })
+    }
+}
