@@ -97,9 +97,14 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         return h.logAndBuildError("could not extract bucket or key from presigned URL", http.StatusBadRequest), nil
     }
 
+    // Extract response-content-disposition from presigned URL if present (for fallback)
+    queryParams := parsedURL.Query()
+    responseContentDisposition := queryParams.Get("response-content-disposition")
+
     h.logger.WithFields(log.Fields{
-        "bucket": bucket,
-        "key":    key,
+        "bucket":       bucket,
+        "key":          key,
+        "presignedURL": presignedURL,
     }).Info("handling HEAD request for S3 metadata using direct S3 access")
 
     // Use direct S3 HEAD request instead of using the presigned URL
@@ -132,6 +137,14 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         return h.logAndBuildError(fmt.Sprintf("failed to get object metadata: %v", err), http.StatusBadGateway), nil
     }
 
+    // Debug log the actual content length received from S3
+    h.logger.WithFields(log.Fields{
+        "contentLength": headOutput.ContentLength,
+        "contentType":   headOutput.ContentType,
+        "bucket":        bucket,
+        "key":           key,
+    }).Info("received S3 HEAD response")
+
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
 
@@ -139,7 +152,7 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
     if headOutput.ContentType != nil {
         headers["Content-Type"] = *headOutput.ContentType
     }
-    // ContentLength is int64, not a pointer in SDK v2
+    // ContentLength is int64 (not a pointer) in SDK v2
     headers["Content-Length"] = fmt.Sprintf("%d", headOutput.ContentLength)
     if headOutput.ETag != nil {
         headers["ETag"] = *headOutput.ETag
@@ -148,6 +161,36 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
         headers["Last-Modified"] = headOutput.LastModified.Format(http.TimeFormat)
     }
     headers["Accept-Ranges"] = "bytes" // S3 always supports range requests
+    
+    // Additional headers that might be useful
+    if headOutput.CacheControl != nil {
+        headers["Cache-Control"] = *headOutput.CacheControl
+    }
+    if headOutput.ContentEncoding != nil {
+        headers["Content-Encoding"] = *headOutput.ContentEncoding
+    }
+    
+    // Set Content-Disposition based on the S3 key filename
+    // Extract filename from the S3 key (last part after the last slash)
+    filename := key
+    if lastSlash := strings.LastIndex(key, "/"); lastSlash != -1 {
+        filename = key[lastSlash+1:]
+    }
+    
+    // If we have a filename from the key, use it
+    if filename != "" && filename != key {
+        headers["Content-Disposition"] = fmt.Sprintf("attachment; filename=\"%s\"", filename)
+    } else if responseContentDisposition != "" {
+        // Fallback to presigned URL content-disposition if no filename in key
+        if decoded, err := url.QueryUnescape(responseContentDisposition); err == nil {
+            headers["Content-Disposition"] = decoded
+        } else {
+            headers["Content-Disposition"] = responseContentDisposition
+        }
+    } else if headOutput.ContentDisposition != nil {
+        // Fallback to S3 object metadata
+        headers["Content-Disposition"] = *headOutput.ContentDisposition
+    }
 
     h.logger.WithFields(log.Fields{
         "contentLength": headers["Content-Length"],
@@ -354,7 +397,7 @@ func (h *S3ProxyHandler) buildCORSHeaders() map[string]string {
         "Access-Control-Allow-Origin":   "*",
         "Access-Control-Allow-Methods":  "GET, HEAD, OPTIONS",
         "Access-Control-Allow-Headers":  "Content-Type, Range, Origin, Accept",
-        "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range, ETag, Last-Modified, Accept-Ranges",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range, ETag, Last-Modified, Accept-Ranges, Cache-Control, Content-Encoding, Content-Disposition",
     }
 }
 
