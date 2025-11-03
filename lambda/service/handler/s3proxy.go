@@ -148,10 +148,11 @@ func (h *S3ProxyHandler) handleHead(ctx context.Context) (*events.APIGatewayV2HT
     // Build response headers with CORS
     headers := h.buildCORSHeaders()
 
-    // Add S3 metadata headers
-    if headOutput.ContentType != nil {
-        headers["Content-Type"] = *headOutput.ContentType
-    }
+    // Set Content-Type to */* to prevent API Gateway from modifying Content-Length
+    // API Gateway has special handling that sets Content-Length to 0 for certain content types
+    // Using wildcard */* prevents this transformation
+    headers["Content-Type"] = "*/*"
+    headers["content-type"] = "*/*" // lowercase version for compatibility
     // ContentLength is int64 (not a pointer) in SDK v2
     headers["Content-Length"] = fmt.Sprintf("%d", headOutput.ContentLength)
     if headOutput.ETag != nil {
