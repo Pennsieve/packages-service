@@ -172,8 +172,9 @@ func TestS3ProxyBuildCORSHeaders(t *testing.T) {
     expectedHeaders := map[string]string{
         "Access-Control-Allow-Origin":   "*",
         "Access-Control-Allow-Methods":  "GET, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers":  "Content-Type, Range, Origin, Accept",
-        "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range, ETag, Last-Modified, Accept-Ranges, Cache-Control, Content-Encoding, Content-Disposition",
+        "Access-Control-Allow-Headers":  "Content-Type, Content-Length, Range, Origin, Accept",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Type, Content-Range, ETag, Last-Modified, Accept-Ranges, Cache-Control, Content-Encoding",
+        "Access-Control-Max-Age":        "3600",
     }
 
     for key, expectedValue := range expectedHeaders {
