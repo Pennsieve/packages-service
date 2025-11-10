@@ -64,7 +64,7 @@ resource "aws_lambda_function" "cloudfront_keygen" {
   function_name = "${var.service_name}-${var.environment_name}-cf-keygen"
   role          = aws_iam_role.cloudfront_keygen_lambda.arn
   handler       = "index.handler"
-  runtime       = "python3.11"
+  runtime       = "python3.10"
   timeout       = 30
 
   environment {
