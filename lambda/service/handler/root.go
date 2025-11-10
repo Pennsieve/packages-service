@@ -20,6 +20,10 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 		// Unauthenticated proxy endpoint that accepts presigned URLs
 		s3ProxyHandler := S3ProxyHandler{RequestHandler: *h}
 		return s3ProxyHandler.handle(ctx)
+	case "/cloudfront/sign":
+		// Authenticated endpoint for generating CloudFront signed URLs
+		cloudfrontHandler := CloudFrontSignedURLHandler{RequestHandler: *h}
+		return cloudfrontHandler.handle(ctx)
 	default:
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}

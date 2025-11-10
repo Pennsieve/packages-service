@@ -227,6 +227,98 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
+  /cloudfront/sign:
+    get:
+      summary: Generate CloudFront signed URLs for assets
+      description: |
+        Authenticated endpoint that generates CloudFront signed URLs for package viewer assets.
+        This endpoint validates dataset and package ownership before generating signed URLs.
+        Provides better performance and caching compared to direct S3 access.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: cloudfrontSign
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Packages Service
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+        - in: query
+          name: package_id
+          schema:
+            type: string
+          required: true
+          description: package node id
+        - in: query
+          name: path
+          schema:
+            type: string
+          required: true
+          description: path to the viewer asset within the package
+      responses:
+        '200':
+          description: Successfully generated CloudFront signed URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signed_url:
+                    type: string
+                    description: The CloudFront signed URL
+                  expires_at:
+                    type: integer
+                    format: int64
+                    description: Unix timestamp when the signed URL expires
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Error'
+    options:
+      summary: CORS preflight for CloudFront signed URL generation
+      description: |
+        Handles OPTIONS preflight requests for CORS support.
+        Returns appropriate CORS headers for the CloudFront signing endpoint.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: cloudfrontSignOptions
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Packages Service
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      responses:
+        '204':
+          description: Successful CORS preflight response
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+            Access-Control-Max-Age:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Error'
+
   /proxy/s3:
     get:
       summary: Proxy S3 requests using presigned URLs

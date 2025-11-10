@@ -16,13 +16,16 @@ resource "aws_lambda_function" "service_lambda" {
 
   environment {
     variables = {
-      ENV                       = var.environment_name
-      PENNSIEVE_DOMAIN          = data.terraform_remote_state.account.outputs.domain_name,
-      REGION                    = var.aws_region
-      RDS_PROXY_ENDPOINT        = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
-      RESTORE_PACKAGE_QUEUE_URL = aws_sqs_queue.restore_package_queue.url
-      VIEWER_ASSETS_BUCKET      = aws_s3_bucket.package_assets.bucket
-      PROXY_ALLOWED_BUCKETS     = var.proxy_allowed_buckets
+      ENV                                 = var.environment_name
+      PENNSIEVE_DOMAIN                    = data.terraform_remote_state.account.outputs.domain_name,
+      REGION                              = var.aws_region
+      RDS_PROXY_ENDPOINT                  = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
+      RESTORE_PACKAGE_QUEUE_URL           = aws_sqs_queue.restore_package_queue.url
+      VIEWER_ASSETS_BUCKET                = aws_s3_bucket.package_assets.bucket
+      PROXY_ALLOWED_BUCKETS               = var.proxy_allowed_buckets
+      CLOUDFRONT_DISTRIBUTION_DOMAIN      = aws_cloudfront_distribution.package_assets.domain_name
+      CLOUDFRONT_KEY_ID                   = aws_cloudfront_public_key.package_assets.id
+      CLOUDFRONT_PRIVATE_KEY_SSM_PARAM    = aws_ssm_parameter.cloudfront_private_key.name
     }
   }
 }
