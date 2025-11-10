@@ -86,22 +86,8 @@ resource "aws_cloudfront_origin_access_control" "package_assets" {
 
 
 
-# CloudFront key group for signed URLs
-resource "aws_cloudfront_public_key" "package_assets" {
-  comment     = "Public key for package assets CloudFront signed URLs"
-  encoded_key = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx8wKG0QMpBBVr+fLLkoV\ndummy-key-replace-in-console\n-----END PUBLIC KEY-----"
-  name        = "package-assets-${var.environment_name}-public-key"
-  
-  lifecycle {
-    ignore_changes = [encoded_key]
-  }
-}
-
-resource "aws_cloudfront_key_group" "package_assets" {
-  comment = "Key group for package assets CloudFront signed URLs"
-  items   = [aws_cloudfront_public_key.package_assets.id]
-  name    = "package-assets-${var.environment_name}-key-group"
-}
+# CloudFront key group configuration moved to cloudfront-keygen.tf
+# The key pair is now auto-generated during deployment
 
 # Private CloudFront distribution for the package assets bucket
 resource "aws_cloudfront_distribution" "package_assets" {
