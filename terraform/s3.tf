@@ -133,17 +133,17 @@ resource "aws_cloudfront_distribution" "package_assets" {
     }
 
     min_ttl     = 0
-    default_ttl = 3600
-    max_ttl     = 86400
+    default_ttl = 86400   # 24 hours - good for data files that don't change often
+    max_ttl     = 31536000 # 1 year
   }
 
-  # Cache behavior for static assets with longer TTL
+  # Specific cache behavior for Parquet files with longer TTL
   ordered_cache_behavior {
-    path_pattern           = "*.css"
+    path_pattern           = "*.parquet"
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = "S3-${aws_s3_bucket.package_assets.id}"
-    compress               = true
+    compress               = false  # Parquet files are already compressed
     viewer_protocol_policy = "https-only"
     trusted_key_groups     = [aws_cloudfront_key_group.package_assets.id]
 
@@ -155,92 +155,8 @@ resource "aws_cloudfront_distribution" "package_assets" {
     }
 
     min_ttl     = 0
-    default_ttl = 31536000  # 1 year
-    max_ttl     = 31536000  # 1 year
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "*.js"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${aws_s3_bucket.package_assets.id}"
-    compress               = true
-    viewer_protocol_policy = "https-only"
-    trusted_key_groups     = [aws_cloudfront_key_group.package_assets.id]
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 31536000  # 1 year
-    max_ttl     = 31536000  # 1 year
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "*.png"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${aws_s3_bucket.package_assets.id}"
-    compress               = false
-    viewer_protocol_policy = "https-only"
-    trusted_key_groups     = [aws_cloudfront_key_group.package_assets.id]
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 31536000  # 1 year
-    max_ttl     = 31536000  # 1 year
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "*.jpg"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${aws_s3_bucket.package_assets.id}"
-    compress               = false
-    viewer_protocol_policy = "https-only"
-    trusted_key_groups     = [aws_cloudfront_key_group.package_assets.id]
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 31536000  # 1 year
-    max_ttl     = 31536000  # 1 year
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "*.jpeg"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "S3-${aws_s3_bucket.package_assets.id}"
-    compress               = false
-    viewer_protocol_policy = "https-only"
-    trusted_key_groups     = [aws_cloudfront_key_group.package_assets.id]
-
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 31536000  # 1 year
-    max_ttl     = 31536000  # 1 year
+    default_ttl = 2592000  # 30 days - Parquet files are typically immutable
+    max_ttl     = 31536000 # 1 year
   }
 
   price_class = "PriceClass_100"
