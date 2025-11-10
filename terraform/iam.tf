@@ -97,6 +97,30 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     ]
   }
 
+  statement {
+    sid     = "PackagesServiceLambdaSSMPermissions"
+    effect  = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters"
+    ]
+    resources = [
+      aws_ssm_parameter.cloudfront_private_key.arn,
+      aws_ssm_parameter.cloudfront_public_key.arn
+    ]
+  }
+
+  statement {
+    sid     = "PackagesServiceLambdaKMSDecryptPermissions"
+    effect  = "Allow"
+    actions = [
+      "kms:Decrypt"
+    ]
+    resources = [
+      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"
+    ]
+  }
+
 }
 
 #

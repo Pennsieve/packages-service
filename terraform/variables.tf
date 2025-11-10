@@ -24,6 +24,7 @@ variable "proxy_allowed_buckets" {
   default     = ""
 }
 
+
 locals {
   common_tags = {
     aws_account      = var.aws_account
