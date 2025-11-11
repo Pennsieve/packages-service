@@ -86,13 +86,11 @@ resource "aws_cloudfront_origin_access_control" "package_assets" {
 
 
 
-# CloudFront public key from local file
+# CloudFront public key from variable (dummy key for CI, replace with real key after deployment)
 resource "aws_cloudfront_public_key" "package_assets" {
   comment     = "Public key for package assets CloudFront signed URLs"
-  encoded_key = file("${path.module}/.cloudfront-keys/public_key.pem")
+  encoded_key = var.cloudfront_public_key_pem
   name        = "package-assets-${var.environment_name}-public-key"
-  
-  depends_on = [null_resource.generate_cloudfront_keys]
 }
 
 # CloudFront key group
@@ -219,4 +217,10 @@ resource "aws_s3_bucket_policy" "package_assets" {
   })
 
   depends_on = [aws_cloudfront_distribution.package_assets]
+}
+
+# Terraform outputs for CloudFront resources
+output "cloudfront_key_group_id" {
+  value       = aws_cloudfront_key_group.package_assets.id
+  description = "CloudFront key group ID for package assets"
 }

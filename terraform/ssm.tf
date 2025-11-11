@@ -1,29 +1,20 @@
-# Generate CloudFront keys if they don't exist
-resource "null_resource" "generate_cloudfront_keys" {
-  provisioner "local-exec" {
-    command = "${path.module}/generate-cloudfront-keys.sh"
-  }
-  
-  # Always run to ensure keys exist (script will check internally)
-  triggers = {
-    always_run = timestamp()
-  }
-}
-
 # SSM Parameters for CloudFront signing keys
+# Uses dummy keys by default for CI/CD. Replace with real keys after deployment.
 resource "aws_ssm_parameter" "cloudfront_private_key" {
   name        = "/${var.environment_name}/${var.service_name}/cloudfront/private-key"
   description = "CloudFront private key for signing URLs (base64 encoded)"
   type        = "SecureString"
-  value       = sensitive(filebase64("${path.module}/.cloudfront-keys/private_key.pem"))
+  value       = var.cloudfront_private_key_base64
 
   tags = merge(local.common_tags, {
     Name        = "${var.environment_name}-${var.service_name}-cloudfront-private-key"
     Description = "CloudFront private key for package assets"
     Service     = "packages-service"
   })
-  
-  depends_on = [null_resource.generate_cloudfront_keys]
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # SSM Parameter for CloudFront public key
@@ -31,15 +22,17 @@ resource "aws_ssm_parameter" "cloudfront_public_key" {
   name        = "/${var.environment_name}/${var.service_name}/cloudfront/public-key"
   description = "CloudFront public key for signing URLs"
   type        = "String"
-  value       = file("${path.module}/.cloudfront-keys/public_key.pem")
+  value       = var.cloudfront_public_key_pem
 
   tags = merge(local.common_tags, {
     Name        = "${var.environment_name}-${var.service_name}-cloudfront-public-key"
     Description = "CloudFront public key for package assets"
     Service     = "packages-service"
   })
-  
-  depends_on = [null_resource.generate_cloudfront_keys]
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # Mark outputs as sensitive
