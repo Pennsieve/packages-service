@@ -25,6 +25,7 @@ resource "aws_lambda_function" "service_lambda" {
       PROXY_ALLOWED_BUCKETS               = var.proxy_allowed_buckets
       CLOUDFRONT_DISTRIBUTION_DOMAIN      = aws_cloudfront_distribution.package_assets.domain_name
       CLOUDFRONT_KEY_ID                   = aws_cloudfront_public_key.package_assets.id
+      CLOUDFRONT_PUBLIC_KEY_SSM_PARAM     = aws_ssm_parameter.cloudfront_public_key.name
       CLOUDFRONT_PRIVATE_KEY_SSM_PARAM    = aws_ssm_parameter.cloudfront_private_key.name
     }
   }

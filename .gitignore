@@ -17,3 +17,6 @@
 
 # Lambda Binaries Zip files
 lambda/bin
+
+# CloudFront keys (never commit these!)
+terraform/.cloudfront-keys/
