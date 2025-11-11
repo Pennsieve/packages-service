@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"net/http"
 	"os"
 	"time"
@@ -22,7 +23,6 @@ import (
 type CloudFrontSignedURLHandler struct {
 	RequestHandler
 }
-
 
 type CloudFrontSignedURLResponse struct {
 	SignedURL string `json:"signed_url"`
@@ -51,74 +51,6 @@ func init() {
 		log.Warn("CLOUDFRONT_KEY_ID environment variable not set")
 	}
 
-	// Load private key from SSM Parameter Store
-	if ssmParamName, ok := os.LookupEnv("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM"); ok {
-		log.Infof("Loading CloudFront private key from SSM parameter: %s", ssmParamName)
-		
-		// Create AWS config
-		ctx := context.Background()
-		cfg, err := config.LoadDefaultConfig(ctx)
-		if err != nil {
-			log.Errorf("Failed to load AWS config: %v", err)
-			return
-		}
-
-		// Create SSM client
-		ssmClient := ssm.NewFromConfig(cfg)
-
-		// Get parameter from SSM
-		withDecryption := true
-		input := &ssm.GetParameterInput{
-			Name:           &ssmParamName,
-			WithDecryption: &withDecryption,
-		}
-
-		result, err := ssmClient.GetParameter(ctx, input)
-		if err != nil {
-			log.Errorf("Failed to get CloudFront private key from SSM: %v", err)
-			return
-		}
-
-		if result.Parameter == nil || result.Parameter.Value == nil {
-			log.Error("SSM parameter value is nil")
-			return
-		}
-
-		// Decode base64
-		keyBytes, err := base64.StdEncoding.DecodeString(*result.Parameter.Value)
-		if err != nil {
-			log.Errorf("Failed to decode CloudFront private key from base64: %v", err)
-			return
-		}
-
-		// Parse PEM block
-		block, _ := pem.Decode(keyBytes)
-		if block == nil {
-			log.Error("Failed to parse PEM block from CloudFront private key")
-			return
-		}
-
-		// Parse private key
-		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			// Try PKCS8 format if PKCS1 fails
-			keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				log.Errorf("Failed to parse CloudFront private key: %v", err)
-				return
-			}
-			var ok bool
-			key, ok = keyInterface.(*rsa.PrivateKey)
-			if !ok {
-				log.Error("CloudFront private key is not RSA")
-				return
-			}
-		}
-		cloudfrontPrivateKey = key
-		log.Info("CloudFront private key loaded successfully from SSM")
-	} else {
-		log.Warn("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM environment variable not set")
-	}
 }
 
 func (h *CloudFrontSignedURLHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
@@ -150,6 +82,109 @@ func (h *CloudFrontSignedURLHandler) handleOptions(ctx context.Context) (*events
 
 func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	// Validate CloudFront configuration
+	// Load private key from SSM Parameter Store
+	if ssmParamName, ok := os.LookupEnv("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM"); ok {
+		log.Infof("Loading CloudFront private key from SSM parameter: %s", ssmParamName)
+
+		// Create AWS config with explicit region
+		region := os.Getenv("REGION")
+		if region == "" {
+			region = os.Getenv("AWS_REGION")
+		}
+		if region == "" {
+			region = "us-east-1" // fallback
+		}
+
+		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+		if err != nil {
+			log.Errorf("Failed to load AWS config: %v", err)
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+
+		log.Infof("AWS config loaded with region: %s", cfg.Region)
+
+		// Create SSM client
+		ssmClient := ssm.NewFromConfig(cfg)
+
+		// Get parameter from SSM
+
+		//withDecryption := fal
+		ssmParam := ssmParamName
+
+		log.Infof("ssmParam: %s", ssmParam)
+		input := ssm.GetParameterInput{
+			Name:           aws.String(ssmParam),
+			WithDecryption: aws.Bool(true),
+		}
+
+		log.Infof("Parameter Input: %v", input)
+
+		result, err := ssmClient.GetParameter(ctx, &input)
+		if err != nil {
+			log.Errorf("Failed to get CloudFront private key from SSM: %v", err)
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+
+		if result.Parameter == nil || result.Parameter.Value == nil {
+			log.Error("SSM parameter value is nil")
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+
+		paramValue := *result.Parameter.Value
+		log.Infof("SSM parameter value length: %d", len(paramValue))
+		prefixLen := 50
+		if len(paramValue) < prefixLen {
+			prefixLen = len(paramValue)
+		}
+		log.Infof("SSM parameter value prefix (first 50 chars): %s", paramValue[:prefixLen])
+
+		// Decode base64
+		keyBytes, err := base64.StdEncoding.DecodeString(paramValue)
+		if err != nil {
+			log.Errorf("Failed to decode CloudFront private key from base64: %v", err)
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+
+		log.Infof("Decoded key bytes length: %d", len(keyBytes))
+		decodedPrefixLen := 50
+		if len(keyBytes) < decodedPrefixLen {
+			decodedPrefixLen = len(keyBytes)
+		}
+		log.Infof("Decoded key bytes prefix (first 50 chars): %s", string(keyBytes)[:decodedPrefixLen])
+		
+		// Log the full decoded content for debugging
+		log.Infof("Full decoded key content: %s", string(keyBytes))
+
+		// Parse PEM block
+		block, _ := pem.Decode(keyBytes)
+		if block == nil {
+			log.Error("Failed to parse PEM block from CloudFront private key")
+			log.Errorf("PEM parsing failed - full content length: %d", len(keyBytes))
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+
+		// Parse private key
+		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			// Try PKCS8 format if PKCS1 fails
+			keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				log.Errorf("Failed to parse CloudFront private key: %v", err)
+				return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+			}
+			var ok bool
+			key, ok = keyInterface.(*rsa.PrivateKey)
+			if !ok {
+				log.Error("CloudFront private key is not RSA")
+				return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+			}
+		}
+		cloudfrontPrivateKey = key
+		log.Info("CloudFront private key loaded successfully from SSM")
+	} else {
+		log.Warn("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM environment variable not set")
+	}
+
 	if cloudfrontDistributionDomain == "" || cloudfrontKeyID == "" || cloudfrontPrivateKey == nil {
 		return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
 	}
@@ -222,7 +257,6 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
 		Body:       string(responseBody),
 	}, nil
 }
-
 
 // getS3KeyForViewerAsset validates and constructs the S3 key for viewer assets
 func (h *CloudFrontSignedURLHandler) getS3KeyForViewerAsset(ctx context.Context, packageNodeId, datasetNodeId, assetPath string) (string, error) {

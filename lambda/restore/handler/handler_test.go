@@ -138,7 +138,7 @@ func TestHandleMessage(t *testing.T) {
 	for _, v := range putObjectInputByNodeId {
 		putObjectInputs = append(putObjectInputs, v)
 	}
-	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: true}).WithObjects(putObjectInputs...)
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: aws.Bool(true)}).WithObjects(putObjectInputs...)
 	defer s3Fixture.Teardown()
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo

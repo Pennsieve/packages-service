@@ -230,20 +230,63 @@ The service is deployed using:
 
 ### CloudFront Setup
 
-1. Generate RSA key pair:
-```bash
-openssl genrsa -out cloudfront-private-key.pem 2048
-openssl rsa -pubout -in cloudfront-private-key.pem -out cloudfront-public-key.pem
-```
+#### For CI/CD Deployment (Automated)
 
-2. Store keys in SSM Parameter Store:
-   - Private key (base64-encoded) in SecureString parameter
-   - Public key uploaded to CloudFront via Terraform
-
-3. Deploy infrastructure:
+1. **Deploy with dummy keys** (CI/CD safe):
 ```bash
 terraform apply
 ```
+The deployment uses secure dummy keys by default, allowing all infrastructure to be created automatically.
+
+2. **Replace with production keys** (after deployment):
+```bash
+# Generate real RSA key pair
+cd terraform
+./generate-cloudfront-keys.sh
+
+# Update SSM parameters with real keys
+aws ssm put-parameter \
+  --name "/{environment}/{service}/cloudfront/private-key" \
+  --value "$(cat .cloudfront-keys/private_key_base64.txt)" \
+  --type "SecureString" \
+  --overwrite
+
+aws ssm put-parameter \
+  --name "/{environment}/{service}/cloudfront/public-key" \
+  --value "$(cat .cloudfront-keys/public_key.pem)" \
+  --type "String" \
+  --overwrite
+
+# Create new CloudFront public key and update key group
+aws cloudfront create-public-key \
+  --public-key-config Name="pkg-assets-{environment}-key",CallerReference="pkg-assets-$(date +%s)",EncodedKey="$(cat .cloudfront-keys/public_key.pem)" \
+  --query 'PublicKey.Id' --output text
+```
+
+3. **Update CloudFront key group** with the new public key ID:
+```bash
+# Get the new public key ID from the previous command, then update key group
+NEW_KEY_ID="<public-key-id-from-previous-command>"
+aws cloudfront update-key-group \
+  --id "$(terraform output -raw cloudfront_key_group_id)" \
+  --key-group-config Items="$NEW_KEY_ID",Name="package-assets-{environment}-key-group",Comment="Key group for package assets CloudFront signed URLs"
+```
+
+#### For Local Development
+
+1. **Generate keys locally**:
+```bash
+cd terraform
+./generate-cloudfront-keys.sh
+```
+
+2. **Deploy with local keys** (if overriding variables):
+```bash
+terraform apply -var="cloudfront_public_key_pem=$(cat .cloudfront-keys/public_key.pem)" \
+                -var="cloudfront_private_key_base64=$(cat .cloudfront-keys/private_key_base64.txt)"
+```
+
+> **Security Note**: The `.cloudfront-keys/` directory is gitignored. Never commit real signing keys to version control. The dummy keys in variables.tf are safe for CI/CD and testing but should be replaced with real keys in production environments.
 
 ## Monitoring & Observability
 

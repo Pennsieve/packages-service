@@ -5,9 +5,9 @@ resource "aws_lambda_function" "service_lambda" {
   runtime       = "go1.x"
   role          = aws_iam_role.packages_service_lambda_role.arn
   timeout       = 300
-  memory_size   = 128
+  memory_size   = 512
   s3_bucket     = var.lambda_bucket
-  s3_key        = "${var.service_name}/${var.service_name}-${var.image_tag}.zip"
+  s3_key        = "${var.service_name}/packages-service-${var.image_tag}.zip"
 
   vpc_config {
     subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)

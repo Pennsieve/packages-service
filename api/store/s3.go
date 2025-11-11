@@ -115,7 +115,7 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 					nodeId := bucketToKeyToNodeId[bucket][aws.ToString(success.Key)]
 					deletedPackage := DeletedPackage{
 						NodeId:       nodeId,
-						DeleteMarker: success.DeleteMarker,
+						DeleteMarker: aws.ToBool(success.DeleteMarker),
 					}
 					response.Deleted = append(response.Deleted, deletedPackage)
 				}

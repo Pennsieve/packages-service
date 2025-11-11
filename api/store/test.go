@@ -244,7 +244,7 @@ func (f *S3Fixture) Teardown() {
 		if err != nil {
 			assert.FailNow(f.T, "error listing test objects", "bucket: %s, error: %v", name, err)
 		}
-		if listOutput.IsTruncated {
+		if aws.ToBool(listOutput.IsTruncated) {
 			assert.FailNow(f.T, "test object list is truncated; handling truncated object list is not yet implemented", "bucket: %s, error: %v", name, err)
 		}
 		if len(listOutput.DeleteMarkers)+len(listOutput.Versions) > 0 {
