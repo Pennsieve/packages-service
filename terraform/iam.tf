@@ -102,7 +102,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     effect  = "Allow"
     actions = [
       "ssm:GetParameter",
-      "ssm:GetParameters"
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath"
     ]
     resources = [
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.environment_name}/${var.service_name}/cloudfront/private-key",
@@ -117,7 +118,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
       "kms:Decrypt"
     ]
     resources = [
-      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"
+      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*",
+      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/aws/ssm"
     ]
   }
 
