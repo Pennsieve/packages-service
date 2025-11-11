@@ -25,8 +25,8 @@ openssl genrsa -out "$KEYS_DIR/private_key.pem" 2048
 # Extract public key from private key
 openssl rsa -pubout -in "$KEYS_DIR/private_key.pem" -out "$KEYS_DIR/public_key.pem"
 
-# Generate base64 encoded version of private key (for SSM)
-base64 -i "$KEYS_DIR/private_key.pem" -o "$KEYS_DIR/private_key_base64.txt"
+# Generate base64 encoded version of private key (for SSM) - remove newlines
+base64 -i "$KEYS_DIR/private_key.pem" | tr -d '\n' > "$KEYS_DIR/private_key_base64.txt"
 
 echo "✅ Keys generated successfully!"
 echo ""
