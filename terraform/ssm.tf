@@ -4,9 +4,9 @@ resource "null_resource" "generate_cloudfront_keys" {
     command = "${path.module}/generate-cloudfront-keys.sh"
   }
   
-  # Run script to generate keys (script will check if they exist)
+  # Always run to ensure keys exist (script will check internally)
   triggers = {
-    script_hash = filesha256("${path.module}/generate-cloudfront-keys.sh")
+    always_run = timestamp()
   }
 }
 
