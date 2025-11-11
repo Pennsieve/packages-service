@@ -1,10 +1,10 @@
 # S3 bucket for package viewer assets
 resource "aws_s3_bucket" "package_assets" {
-  bucket = "pennsieve-${var.environment_name}-package-assets-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+  bucket = "pennsieve-${var.environment_name}-pkg-assets-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
 
   tags = merge(local.common_tags, {
-    Name        = "pennsieve-${var.environment_name}-package-assets-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
-    Description = "S3 bucket for package viewer assets"
+    Name        = "pennsieve-${var.environment_name}-pkg-assets-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+    Description = "S3 bucket for package assets"
     Service     = "packages-service"
   })
 }
@@ -77,7 +77,7 @@ resource "aws_s3_bucket_cors_configuration" "package_assets" {
 
 # CloudFront Origin Access Control for the S3 bucket
 resource "aws_cloudfront_origin_access_control" "package_assets" {
-  name                              = "package-assets-${var.environment_name}-oac"
+  name                              = "pkg-assets-${var.environment_name}-oac"
   description                       = "OAC for package assets S3 bucket"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
@@ -86,8 +86,21 @@ resource "aws_cloudfront_origin_access_control" "package_assets" {
 
 
 
-# CloudFront key group configuration moved to cloudfront-keygen.tf
-# The key pair is now auto-generated during deployment
+# CloudFront public key from local file
+resource "aws_cloudfront_public_key" "package_assets" {
+  comment     = "Public key for package assets CloudFront signed URLs"
+  encoded_key = file("${path.module}/.cloudfront-keys/public_key.pem")
+  name        = "package-assets-${var.environment_name}-public-key"
+  
+  depends_on = [null_resource.generate_cloudfront_keys]
+}
+
+# CloudFront key group
+resource "aws_cloudfront_key_group" "package_assets" {
+  comment = "Key group for package assets CloudFront signed URLs"
+  items   = [aws_cloudfront_public_key.package_assets.id]
+  name    = "package-assets-${var.environment_name}-key-group"
+}
 
 # Private CloudFront distribution for the package assets bucket
 resource "aws_cloudfront_distribution" "package_assets" {
@@ -166,7 +179,7 @@ resource "aws_cloudfront_distribution" "package_assets" {
   depends_on = [aws_s3_bucket.package_assets]
 }
 
-# S3 bucket policy to allow only CloudFront access
+# S3 bucket policy to allow CloudFront access
 resource "aws_s3_bucket_policy" "package_assets" {
   bucket = aws_s3_bucket.package_assets.id
 
@@ -188,19 +201,19 @@ resource "aws_s3_bucket_policy" "package_assets" {
         }
       },
       {
-        Sid       = "DenyDirectS3Access"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
+        Sid       = "AllowAdminAccess"
+        Effect    = "Allow"
+        Principal = {
+          AWS = [
+            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root",
+            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/admin"
+          ]
+        }
+        Action   = "s3:*"
         Resource = [
           aws_s3_bucket.package_assets.arn,
           "${aws_s3_bucket.package_assets.arn}/*"
         ]
-        Condition = {
-          StringNotEquals = {
-            "AWS:SourceArn" = aws_cloudfront_distribution.package_assets.arn
-          }
-        }
       }
     ]
   })
