@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
@@ -230,9 +231,18 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
 		ExpiresAt: expiresAt.Unix(),
 	}
 
-	responseBody, err := json.Marshal(response)
+	// Use custom encoder to avoid escaping HTML characters like &
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	err = encoder.Encode(response)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to marshal response: %v", err), http.StatusInternalServerError), nil
+	}
+	responseBody := buf.Bytes()
+	// Remove trailing newline added by encoder
+	if len(responseBody) > 0 && responseBody[len(responseBody)-1] == '\n' {
+		responseBody = responseBody[:len(responseBody)-1]
 	}
 
 	// Build response headers with CORS
