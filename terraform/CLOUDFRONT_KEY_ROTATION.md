@@ -9,25 +9,31 @@ The new implementation replaces the manual key generation script with an automat
 - **Zero-downtime rotation** using CloudFront key groups
 - **Secure key storage** in AWS Secrets Manager
 - **Audit trails** for all key operations
-- **Backward compatibility** with existing SSM-based keys
+- **Grace period mechanism** for seamless rotation transitions
+- **Lambda container caching** for optimized performance
 
 ## Architecture
 
 ### Components
 
 1. **AWS Secrets Manager**: Stores the CloudFront signing key pair with automatic rotation
-2. **Lambda Rotation Function**: Handles the key rotation process
+2. **Lambda Rotation Function**: Handles the key rotation process with cleanup
 3. **CloudFront Key Group**: Supports multiple active keys during rotation
-4. **Service Lambda**: Uses Secrets Manager (with SSM fallback) to retrieve keys
+4. **Service Lambda**: Uses Secrets Manager with smart caching for optimal performance
 
 ### Key Rotation Process
 
-The rotation follows AWS Secrets Manager's standard four-step process:
+The rotation follows AWS Secrets Manager's standard four-step process with CloudFront cleanup:
 
 1. **createSecret**: Generate new RSA 2048-bit key pair
 2. **setSecret**: Upload public key to CloudFront and update key group
 3. **testSecret**: Validate the new key pair
 4. **finishSecret**: Promote the new key to AWSCURRENT
+
+**Additional Cleanup Process**:
+- **Scheduled cleanup**: EventBridge triggers cleanup every 12 hours
+- **Grace period**: Old keys remain active for 48 hours after rotation
+- **Automatic removal**: Expired keys are removed from CloudFront key group
 
 ## Implementation Details
 
@@ -41,6 +47,8 @@ The rotation follows AWS Secrets Manager's standard four-step process:
 #### Lambda Rotation Function
 - **Function**: `{environment}-{service_name}-key-rotation`
 - **Runtime**: Go on provided.al2
+- **Grace Period**: 48 hours for seamless rotation
+- **Cleanup Schedule**: Every 12 hours via EventBridge
 - **Permissions**: 
   - Secrets Manager operations
   - CloudFront public key and key group management
@@ -103,24 +111,34 @@ aws secretsmanager rotate-secret \
 
 ## Key Rotation Timeline
 
-During rotation, the system maintains multiple active keys:
+The system uses a 48-hour grace period for seamless rotations:
 
 1. **Day 0**: Current key (K1) is active
 2. **Day 30**: Rotation triggered
    - New key (K2) generated and added to key group
    - Both K1 and K2 are active
-3. **Day 30-31**: Transition period
-   - New signed URLs use K2
-   - Existing signed URLs with K1 continue to work
-4. **After maximum URL lifetime** (e.g., 1 hour):
-   - K1 can be safely removed from key group
+   - Service Lambda continues using cached K1
+3. **Day 30-32**: Grace period (48 hours)
+   - New Lambda containers load K2 from Secrets Manager
+   - Existing containers use cached K1 (still valid)
+   - Both keys work for signed URLs
+4. **Day 32**: Automatic cleanup
+   - EventBridge triggers cleanup Lambda
+   - K1 removed from CloudFront key group after grace period
    - Only K2 remains active
+
+### Smart Caching Strategy
+
+- **Container-level caching**: Keys loaded once per Lambda container lifecycle
+- **No per-request calls**: Avoids Secrets Manager API calls on every request
+- **Grace period safety**: Cached keys remain valid during rotation transitions
+- **Automatic refresh**: New containers get latest keys from Secrets Manager
 
 ## Monitoring and Alerts
 
 ### CloudWatch Alarms
 
-The system includes three essential CloudWatch alarms that send notifications to VictorOps/PagerDuty:
+The system includes four essential CloudWatch alarms that send notifications to VictorOps/PagerDuty:
 
 1. **Key Rotation Lambda Errors** (`{environment}-{service_name}-key-rotation-errors`)
    - Triggers: Any error in the rotation Lambda function
@@ -137,6 +155,12 @@ The system includes three essential CloudWatch alarms that send notifications to
    - Evaluation: More than 25 errors in 3 consecutive 5-minute periods
    - Threshold: Set high to avoid false positives from transient errors
    - Action: Alert on persistent key retrieval problems
+
+4. **Key Cleanup Failures** (`{environment}-{service_name}-key-cleanup-failures`)
+   - Triggers: Errors during scheduled cleanup of expired keys
+   - Evaluation: Any cleanup error within 1 hour
+   - Action: Alert when old key removal fails
+   - Uses metric filters to identify cleanup-specific errors
 
 ### Alert Configuration
 
@@ -158,6 +182,7 @@ All alarms are configured to send notifications to the existing VictorOps/PagerD
    - Never exposed in environment variables
    - Encrypted at rest using KMS
    - Retrieved only during Lambda cold starts
+   - Cached in memory for container lifetime (secure container isolation)
 
 2. **Access Control**:
    - Lambda has minimal required permissions
@@ -186,20 +211,25 @@ If issues occur with the new key:
    - Remove from key group via CloudFront console or API
    - Existing signed URLs with good keys continue working
 
-## Migration from SSM
+## Migration from SSM (Completed)
 
-The system maintains backward compatibility during migration:
+The migration from SSM Parameter Store to Secrets Manager has been completed:
 
 1. **Environment Variables**:
-   - New: `CLOUDFRONT_SIGNING_KEYS_SECRET_NAME`
-   - Legacy: `CLOUDFRONT_PRIVATE_KEY_SSM_PARAM` (fallback)
+   - Current: `CLOUDFRONT_SIGNING_KEYS_SECRET_NAME`
+   - Legacy SSM fallback: **Removed** (no longer needed)
 
-2. **Migration Steps**:
-   1. Deploy new infrastructure (Secrets Manager, rotation Lambda)
-   2. Update Lambda environment variables
-   3. Test with Secrets Manager
-   4. Remove SSM parameters once confirmed working
-   5. Clean up SSM-related Terraform resources
+2. **Migration Steps** (Completed):
+   1. ✅ Deployed new infrastructure (Secrets Manager, rotation Lambda)
+   2. ✅ Updated Lambda environment variables
+   3. ✅ Tested with Secrets Manager
+   4. ✅ Removed SSM fallback code from service Lambda
+   5. ✅ Cleaned up SSM-related Terraform resources
+
+3. **Current State**:
+   - Service Lambda uses **only** Secrets Manager
+   - Smart caching implemented for optimal performance
+   - All SSM parameter dependencies removed
 
 ## Comparison with Previous Implementation
 
@@ -257,11 +287,22 @@ Monthly costs (approximate):
 - CloudFront: No additional cost for key groups
 - Total: ~$0.40/month per environment
 
+## Current Implementation Status
+
+As of the latest deployment:
+- ✅ **Automatic key rotation** every 30 days
+- ✅ **Smart caching** with container-level key storage
+- ✅ **48-hour grace period** for seamless transitions
+- ✅ **Automatic cleanup** of expired keys every 12 hours
+- ✅ **CloudWatch monitoring** with comprehensive alarms
+- ✅ **SSM migration completed** (fallback code removed)
+
 ## Future Enhancements
 
 Potential improvements:
 1. SNS notifications on rotation events
-2. Automatic cleanup of old CloudFront public keys
+2. ✅ **Automatic cleanup of old CloudFront public keys** (IMPLEMENTED)
 3. Multi-region secret replication
 4. Custom rotation schedules based on environment
 5. Integration with AWS Systems Manager for compliance reporting
+6. Metrics dashboard for rotation health

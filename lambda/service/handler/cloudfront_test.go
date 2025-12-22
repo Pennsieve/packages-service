@@ -406,9 +406,29 @@ func TestCloudFrontSignedURLHandler_GenerateSignedURLWithPolicy(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
+            // Setup database mock for organization bucket query
+            db, mock, err := sqlmock.New()
+            require.NoError(t, err)
+            defer db.Close()
+            
+            originalDB := PennsieveDB
+            PennsieveDB = db
+            defer func() { PennsieveDB = originalDB }()
+            
+            // Mock organization with no custom bucket (default)
+            mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+                WithArgs(int64(1)).
+                WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+            
             handler := &CloudFrontSignedURLHandler{
                 RequestHandler: RequestHandler{
                     logger: testLogger,
+                    claims: &authorizer.Claims{
+                        OrgClaim: &organization.Claim{
+                            IntId:  1,
+                            NodeId: "N:org:test",
+                        },
+                    },
                 },
             }
 
@@ -680,9 +700,29 @@ func TestCloudFrontSignedURLHandler_ExpirationTime(t *testing.T) {
     defer resetCloudFrontConfig()
     setupCloudFrontConfig()
 
+    // Setup database mock for organization bucket query
+    db, mock, err := sqlmock.New()
+    require.NoError(t, err)
+    defer db.Close()
+    
+    originalDB := PennsieveDB
+    PennsieveDB = db
+    defer func() { PennsieveDB = originalDB }()
+
+    // Mock organization with no custom bucket
+    mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+        WithArgs(int64(1)).
+        WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+
     handler := &CloudFrontSignedURLHandler{
         RequestHandler: RequestHandler{
             logger: testLogger,
+            claims: &authorizer.Claims{
+                OrgClaim: &organization.Claim{
+                    IntId:  1,
+                    NodeId: "N:org:test",
+                },
+            },
         },
     }
 
@@ -723,6 +763,10 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
 
     t.Run("complete flow with valid package", func(t *testing.T) {
         // Setup database expectations
+        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+            WithArgs(int64(1)).
+            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+        
         mock.ExpectQuery("SELECT p.id, d.id").
             WithArgs("N:package:test-456", "N:dataset:test-123").
             WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
@@ -785,6 +829,10 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
 
     t.Run("complete flow without optional path", func(t *testing.T) {
         // Setup database expectations
+        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+            WithArgs(int64(2)).
+            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+        
         mock.ExpectQuery("SELECT p.id, d.id").
             WithArgs("N:package:test-789", "N:dataset:test-456").
             WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
@@ -875,14 +923,181 @@ func matchesWildcardPattern(url, pattern string) bool {
     return url == pattern
 }
 
+// Test deterministic path generation
+func TestGenerateDeterministicPath(t *testing.T) {
+    tests := []struct {
+        name         string
+        bucketName   string
+        expectedPath string
+    }{
+        {
+            name:         "pennsieve-dev-storage-use1 bucket",
+            bucketName:   "pennsieve-dev-storage-use1",
+            expectedPath: "7fb7583a",
+        },
+        {
+            name:         "different bucket name",
+            bucketName:   "some-other-bucket",
+            expectedPath: "68934a3e",
+        },
+        {
+            name:         "case insensitive",
+            bucketName:   "PENNSIEVE-DEV-STORAGE-USE1",
+            expectedPath: "7fb7583a", // Should be same as lowercase version
+        },
+        {
+            name:         "empty bucket name",
+            bucketName:   "",
+            expectedPath: "d41d8cd9",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := generateDeterministicPath(tt.bucketName)
+            assert.Equal(t, tt.expectedPath, result, 
+                "Expected path %s for bucket %s, got %s", tt.expectedPath, tt.bucketName, result)
+        })
+    }
+}
+
+func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
+    // Setup database mock
+    db, mock, err := sqlmock.New()
+    require.NoError(t, err)
+    defer db.Close()
+
+    originalDB := PennsieveDB
+    PennsieveDB = db
+    defer func() { PennsieveDB = originalDB }()
+
+    // Setup CloudFront configuration
+    defer resetCloudFrontConfig()
+    setupCloudFrontConfig()
+
+    tests := []struct {
+        name                    string
+        orgId                   int64
+        bucketName              string
+        expectedCloudFrontPath  string
+        expectedResourcePattern string
+        mockError               error
+    }{
+        {
+            name:                    "organization with pennsieve-dev-storage-use1 bucket",
+            orgId:                   19,
+            bucketName:              "pennsieve-dev-storage-use1",
+            expectedCloudFrontPath:  "/7fb7583a",
+            expectedResourcePattern: "https://test.cloudfront.net/7fb7583a/O19/D2049/P2243538/*",
+            mockError:              nil,
+        },
+        {
+            name:                    "organization with different bucket",
+            orgId:                   367,
+            bucketName:              "sparc-storage-bucket",
+            expectedCloudFrontPath:  "/8a7b2c1d", // This would be the actual MD5 hash
+            expectedResourcePattern: "https://test.cloudfront.net/8a7b2c1d/O367/D123/P456/*",
+            mockError:              nil,
+        },
+        {
+            name:                    "organization with no custom bucket (default)",
+            orgId:                   1,
+            bucketName:              "",
+            expectedCloudFrontPath:  "",
+            expectedResourcePattern: "https://test.cloudfront.net/O1/D2/P3/*",
+            mockError:              nil,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Setup database mock for organization bucket query
+            var bucketValue interface{}
+            if tt.bucketName == "" {
+                bucketValue = nil
+            } else {
+                bucketValue = tt.bucketName
+            }
+            
+            mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+                WithArgs(tt.orgId).
+                WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(bucketValue))
+
+            // Mock package/dataset query for signed URL generation
+            mock.ExpectQuery("SELECT p.id, d.id").
+                WithArgs("N:package:test", "N:dataset:test").
+                WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
+                    AddRow(2243538, 2049))
+
+            handler := &CloudFrontSignedURLHandler{
+                RequestHandler: RequestHandler{
+                    claims: &authorizer.Claims{
+                        OrgClaim: &organization.Claim{
+                            IntId: tt.orgId,
+                        },
+                    },
+                    logger: testLogger,
+                },
+            }
+
+            // Test getOrganizationCloudFrontPath
+            cloudFrontPath, err := handler.getOrganizationCloudFrontPath(context.Background(), tt.orgId)
+            if tt.mockError != nil {
+                assert.Error(t, err)
+                assert.Contains(t, err.Error(), tt.mockError.Error())
+            } else {
+                assert.NoError(t, err)
+                assert.Equal(t, tt.expectedCloudFrontPath, cloudFrontPath)
+            }
+
+            // Test full signed URL generation to verify path is included correctly
+            if tt.mockError == nil {
+                signedURL, _, err := handler.generateCloudFrontSignedURLWithPolicy("O19/D2049/P2243538/", "test-file.json")
+                assert.NoError(t, err)
+                assert.NotEmpty(t, signedURL)
+                
+                if tt.expectedCloudFrontPath != "" {
+                    // URL should contain the deterministic path
+                    assert.Contains(t, signedURL, tt.expectedCloudFrontPath)
+                }
+            }
+
+            // Ensure all database expectations were met
+            assert.NoError(t, mock.ExpectationsWereMet())
+        })
+    }
+}
+
 // Benchmark tests
 func BenchmarkGenerateCloudFrontSignedURL(b *testing.B) {
     defer resetCloudFrontConfig()
     setupCloudFrontConfig()
 
+    // Setup database mock
+    db, mock, err := sqlmock.New()
+    require.NoError(b, err)
+    defer db.Close()
+    
+    originalDB := PennsieveDB
+    PennsieveDB = db
+    defer func() { PennsieveDB = originalDB }()
+
+    // For benchmark, expect many queries
+    for i := 0; i < b.N; i++ {
+        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
+            WithArgs(int64(1)).
+            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+    }
+
     handler := &CloudFrontSignedURLHandler{
         RequestHandler: RequestHandler{
             logger: testLogger,
+            claims: &authorizer.Claims{
+                OrgClaim: &organization.Claim{
+                    IntId:  1,
+                    NodeId: "N:org:test",
+                },
+            },
         },
     }
 
@@ -904,5 +1119,14 @@ func BenchmarkPolicyMatching(b *testing.B) {
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
         _ = matchesWildcardPattern(testURL, pattern)
+    }
+}
+
+func BenchmarkGenerateDeterministicPath(b *testing.B) {
+    bucketName := "pennsieve-dev-storage-use1"
+    
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _ = generateDeterministicPath(bucketName)
     }
 }

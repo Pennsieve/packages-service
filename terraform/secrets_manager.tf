@@ -75,7 +75,8 @@ resource "aws_iam_role_policy" "key_rotation_lambda" {
           "secretsmanager:DescribeSecret",
           "secretsmanager:GetSecretValue",
           "secretsmanager:PutSecretValue",
-          "secretsmanager:UpdateSecretVersionStage"
+          "secretsmanager:UpdateSecretVersionStage",
+          "secretsmanager:ListSecretVersionIds"
         ]
         Resource = aws_secretsmanager_secret.cloudfront_signing_keys.arn
       },
@@ -116,30 +117,6 @@ resource "aws_iam_role_policy_attachment" "key_rotation_lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lambda function for key rotation
-resource "aws_lambda_function" "key_rotation" {
-  function_name = "${var.environment_name}-${var.service_name}-key-rotation"
-  role          = aws_iam_role.key_rotation_lambda.arn
-  handler       = "main"
-  runtime       = "provided.al2"
-  architectures = ["x86_64"]
-  timeout       = 60
-  memory_size   = 256
-  s3_bucket     = var.lambda_bucket
-  s3_key        = "${var.service_name}/key-rotation-${var.image_tag}.zip"
-
-  environment {
-    variables = {
-      ENVIRONMENT           = var.environment_name
-      CLOUDFRONT_KEY_GROUP_ID = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
-    }
-  }
-
-  tags = merge(local.common_tags, {
-    Name        = "${var.environment_name}-${var.service_name}-key-rotation"
-    Description = "Lambda function for automatic CloudFront key rotation"
-  })
-}
 
 # Permission for Secrets Manager to invoke rotation Lambda
 resource "aws_lambda_permission" "allow_secretsmanager_rotation" {
@@ -160,4 +137,39 @@ output "cloudfront_signing_keys_secret_arn" {
 output "cloudfront_signing_keys_secret_name" {
   value       = aws_secretsmanager_secret.cloudfront_signing_keys.name
   description = "Name of the Secrets Manager secret containing CloudFront signing keys"
+}
+
+# EventBridge rule for scheduled CloudFront key cleanup
+resource "aws_cloudwatch_event_rule" "cloudfront_key_cleanup" {
+  name                = "${var.environment_name}-${var.service_name}-cloudfront-key-cleanup"
+  description         = "Scheduled cleanup of expired CloudFront keys"
+  schedule_expression = "rate(12 hours)"  # Run twice daily to ensure timely cleanup
+  
+  tags = merge(local.common_tags, {
+    Name        = "${var.environment_name}-${var.service_name}-cloudfront-key-cleanup"
+    Description = "EventBridge rule for CloudFront key cleanup"
+    Service     = "packages-service"
+  })
+}
+
+# EventBridge target to invoke key rotation Lambda for cleanup
+resource "aws_cloudwatch_event_target" "cloudfront_key_cleanup_target" {
+  rule      = aws_cloudwatch_event_rule.cloudfront_key_cleanup.name
+  target_id = "CloudFrontKeyCleanupTarget"
+  arn       = aws_lambda_function.key_rotation.arn
+  
+  input = jsonencode({
+    Step               = "cleanupOldKeys"
+    SecretId           = aws_secretsmanager_secret.cloudfront_signing_keys.arn
+    ClientRequestToken = "scheduled-cleanup-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  })
+}
+
+# Permission for EventBridge to invoke the key rotation Lambda
+resource "aws_lambda_permission" "allow_eventbridge_cleanup" {
+  statement_id  = "AllowEventBridgeCleanupInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.key_rotation.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cloudfront_key_cleanup.arn
 }

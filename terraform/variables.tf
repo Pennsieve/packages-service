@@ -41,17 +41,6 @@ variable "cloudfront_private_key_base64" {
   default     = "LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcEFJQkFBS0NBUUVBdTFTVTFMZlZMUEhDb3pNeEgyTW80bGdPRWVQek5tMHRSZ2VMZXpWNmZmQXQwZ3VuClZUTHc3b25MUm5ycTAvSXpXN3lXUjdRa3JtQkw3alRLRW41dStxS2hid0tmQnN0SXMrYk1ZMlprcDE4Z25UeEsKTHhvUzJ0RmN6R2tQTFBnaXpza3VlbU1naFJuaVdhb0xjeWVoa2QzcXFHRWx2Vy9WREw1QWFXVGcwbkxWa2pSbwo5eis0MFJRenVWYUU4QWtBRm14Wnpvdzd4K1ZKWUtkanlra0owaTlTOXBKVjlxSkFFU0FxZUdVeHJjSWxialhmCmJjbXdJREFRQUJBb0lCQVFDbTRJSkd3d0hha2RrbgpocWlBQlUxQzNPSk9qd2JZT2dVM2RLbEJWM0Ezd0lMUlhUck1WYUU="
 }
 
-variable "viewer_asset_buckets" {
-  description = "Configuration for viewer asset S3 buckets to be used as CloudFront origins"
-  type = list(object({
-    bucket_name     = string
-    bucket_region   = string
-    cloudfront_path = string  # Path in CloudFront URL (e.g., "/viewer1")
-    s3_prefix       = string  # Prefix in S3 bucket (e.g., "/viewer_assets")
-  }))
-  default = []
-}
-
 
 locals {
   common_tags = {

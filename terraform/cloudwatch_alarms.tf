@@ -72,3 +72,37 @@ resource "aws_cloudwatch_metric_alarm" "service_lambda_key_errors" {
     Name = "${var.environment_name}-${var.service_name}-lambda-key-errors"
   })
 }
+
+# Alarm for scheduled key cleanup failures  
+resource "aws_cloudwatch_metric_alarm" "key_cleanup_failures" {
+  alarm_name          = "${var.environment_name}-${var.service_name}-key-cleanup-failures"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  threshold           = "0"
+  alarm_description   = "CloudFront scheduled key cleanup failures"
+  treat_missing_data  = "notBreaching"
+
+  # Use metric query to monitor Lambda errors
+  metric_query {
+    id          = "cleanup_errors"
+    return_data = true
+
+    metric {
+      metric_name = "Errors"
+      namespace   = "AWS/Lambda"
+      period      = 3600  # 1 hour - since cleanup runs every 12 hours
+      stat        = "Sum"
+
+      dimensions = {
+        FunctionName = aws_lambda_function.key_rotation.function_name
+      }
+    }
+  }
+
+  alarm_actions = [data.terraform_remote_state.account.outputs.ops_victor_ops_sns_topic_arn]
+  ok_actions    = [data.terraform_remote_state.account.outputs.ops_victor_ops_sns_topic_arn]
+
+  tags = merge(local.common_tags, {
+    Name = "${var.environment_name}-${var.service_name}-key-cleanup-failures"
+  })
+}

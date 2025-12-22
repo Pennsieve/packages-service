@@ -6,19 +6,19 @@ API_DIR ?= "api"
 
 # Service Lambda
 SERVICE_NAME  ?= "packages-service"
-SERVICE_EXEC  ?= "packages_service"
+SERVICE_EXEC  ?= "bootstrap"
 SERVICE_PACK  ?= "packagesService"
 SERVICE_PACKAGE_NAME  ?= "${SERVICE_NAME}-${IMAGE_TAG}.zip"
 
 # Restore Package Lambda
 RESTORE_NAME  ?= "restore-package"
-RESTORE_EXEC  ?= "restore_package"
+RESTORE_EXEC  ?= "bootstrap"
 RESTORE_PACK  ?= "restorePackage"
 RESTORE_PACKAGE_NAME  ?= "${RESTORE_NAME}-${IMAGE_TAG}.zip"
 
 # Key Rotation Lambda
 KEY_ROTATION_NAME  ?= "key-rotation"
-KEY_ROTATION_EXEC  ?= "main"
+KEY_ROTATION_EXEC  ?= "bootstrap"
 KEY_ROTATION_PACK  ?= "keyRotation"
 KEY_ROTATION_PACKAGE_NAME  ?= "${KEY_ROTATION_NAME}-${IMAGE_TAG}.zip"
 
