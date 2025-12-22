@@ -397,11 +397,10 @@ func handleRotation(ctx context.Context, event RotationEvent) error {
     }
 }
 
-// removeOldKeyFromGroup removes an old CloudFront public key from the key group
-// Following AWS best practice: remove from key group but keep the public key
-// so existing signed URLs continue to work until they expire
+// removeOldKeyFromGroup removes an old CloudFront public key from the key group and deletes it entirely
+// Since signed URL policies are only valid for 1 hour, it's safe to delete the key immediately
 func removeOldKeyFromGroup(ctx context.Context, cfClient *cloudfront.Client, keyGroupID, publicKeyID string) error {
-    log.Printf("Removing old CloudFront public key %s from key group %s", publicKeyID, keyGroupID)
+    log.Printf("Removing and deleting old CloudFront public key %s from key group %s", publicKeyID, keyGroupID)
 
     // Get current key group configuration
     keyGroupResp, err := cfClient.GetKeyGroup(ctx, &cloudfront.GetKeyGroupInput{
@@ -441,7 +440,37 @@ func removeOldKeyFromGroup(ctx context.Context, cfClient *cloudfront.Client, key
     }
 
     log.Printf("Successfully removed old public key %s from key group", publicKeyID)
-    log.Printf("Note: CloudFront public key %s is kept available for existing signed URLs", publicKeyID)
+
+    // Now delete the CloudFront public key entirely to reclaim quota
+    err = deleteCloudFrontPublicKey(ctx, cfClient, publicKeyID)
+    if err != nil {
+        log.Printf("Warning: failed to delete CloudFront public key %s: %v", publicKeyID, err)
+        // Don't fail the entire operation if deletion fails
+        return nil
+    }
+
+    log.Printf("Successfully deleted CloudFront public key %s (quota reclaimed)", publicKeyID)
+    return nil
+}
+
+// deleteCloudFrontPublicKey deletes a CloudFront public key to reclaim quota
+func deleteCloudFrontPublicKey(ctx context.Context, cfClient *cloudfront.Client, publicKeyID string) error {
+    // Get the public key details to retrieve the ETag
+    keyResp, err := cfClient.GetPublicKey(ctx, &cloudfront.GetPublicKeyInput{
+        Id: aws.String(publicKeyID),
+    })
+    if err != nil {
+        return fmt.Errorf("failed to get public key %s for deletion: %w", publicKeyID, err)
+    }
+
+    // Delete the public key using the ETag
+    _, err = cfClient.DeletePublicKey(ctx, &cloudfront.DeletePublicKeyInput{
+        Id:      aws.String(publicKeyID),
+        IfMatch: keyResp.ETag,
+    })
+    if err != nil {
+        return fmt.Errorf("failed to delete public key %s: %w", publicKeyID, err)
+    }
 
     return nil
 }
