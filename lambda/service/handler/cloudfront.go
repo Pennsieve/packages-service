@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	log "github.com/sirupsen/logrus"
 )
@@ -30,10 +31,20 @@ type CloudFrontSignedURLResponse struct {
 	ExpiresAt int64  `json:"expires_at"` // Unix timestamp
 }
 
+type CloudFrontKeyPair struct {
+	PrivateKey  string    `json:"privateKey"`
+	PublicKey   string    `json:"publicKey"`
+	KeyID       string    `json:"keyId"`
+	CreatedAt   time.Time `json:"createdAt"`
+	KeyGroupID  string    `json:"keyGroupId"`
+	PublicKeyID string    `json:"publicKeyId"`
+}
+
 var (
 	cloudfrontDistributionDomain string
 	cloudfrontKeyID              string
 	cloudfrontPrivateKey         *rsa.PrivateKey
+	cloudfrontKeyPair            *CloudFrontKeyPair
 )
 
 func init() {
@@ -82,9 +93,14 @@ func (h *CloudFrontSignedURLHandler) handleOptions(ctx context.Context) (*events
 }
 
 func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	// Validate CloudFront configuration
-	// Load private key from SSM Parameter Store
-	if ssmParamName, ok := os.LookupEnv("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM"); ok {
+	// Load private key from Secrets Manager (fallback to SSM for backward compatibility)
+	if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
+		// Use Secrets Manager (new approach)
+		if err := h.loadKeysFromSecretsManager(ctx, secretName); err != nil {
+			log.Errorf("Failed to load keys from Secrets Manager: %v", err)
+			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
+		}
+	} else if ssmParamName, ok := os.LookupEnv("CLOUDFRONT_PRIVATE_KEY_SSM_PARAM"); ok {
 		log.Infof("Loading CloudFront private key from SSM parameter: %s", ssmParamName)
 
 		// Create AWS config with explicit region
@@ -193,6 +209,7 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
 	// Get parameters from query string
 	datasetID := h.queryParams["dataset_id"]
 	packageID := h.queryParams["package_id"]
+	// Note: path is now optional - if provided, it will be appended to the URL for user convenience
 	path := h.queryParams["path"]
 
 	// Validate required parameters
@@ -202,25 +219,22 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
 	if packageID == "" {
 		return h.logAndBuildError("missing required 'package_id' query parameter", http.StatusBadRequest), nil
 	}
-	if path == "" {
-		return h.logAndBuildError("missing required 'path' query parameter - CloudFront signing only supports viewer assets", http.StatusBadRequest), nil
-	}
 
 	h.logger.WithFields(log.Fields{
 		"packageId": packageID,
 		"datasetId": datasetID,
 		"assetPath": path,
-	}).Info("handling GET request for CloudFront signed URL")
+	}).Info("handling GET request for CloudFront signed URL with prefix access")
 
-	// For viewer assets, validate and construct the key
-	s3Key, err := h.getS3KeyForViewerAsset(ctx, packageID, datasetID, path)
+	// Get the S3 prefix for the package
+	s3Prefix, err := h.getS3PrefixForPackage(ctx, packageID, datasetID)
 
 	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to get S3 key: %v", err), http.StatusInternalServerError), nil
+		return h.logAndBuildError(fmt.Sprintf("failed to get S3 prefix: %v", err), http.StatusInternalServerError), nil
 	}
 
-	// Generate CloudFront signed URL
-	signedURL, expiresAt, err := h.generateCloudFrontSignedURL(s3Key)
+	// Generate CloudFront signed URL with custom policy for prefix access
+	signedURL, expiresAt, err := h.generateCloudFrontSignedURLWithPolicy(s3Prefix, path)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to generate signed URL: %v", err), http.StatusInternalServerError), nil
 	}
@@ -268,8 +282,8 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
 	}, nil
 }
 
-// getS3KeyForViewerAsset validates and constructs the S3 key for viewer assets
-func (h *CloudFrontSignedURLHandler) getS3KeyForViewerAsset(ctx context.Context, packageNodeId, datasetNodeId, assetPath string) (string, error) {
+// getS3PrefixForPackage validates and constructs the S3 prefix for all assets in a package
+func (h *CloudFrontSignedURLHandler) getS3PrefixForPackage(ctx context.Context, packageNodeId, datasetNodeId string) (string, error) {
 	// Query to get the internal integer IDs and validate that the package belongs to the dataset
 	query := fmt.Sprintf(`
 		SELECT p.id, d.id
@@ -288,9 +302,9 @@ func (h *CloudFrontSignedURLHandler) getS3KeyForViewerAsset(ctx context.Context,
 		return "", fmt.Errorf("package not found or does not belong to specified dataset: %w", err)
 	}
 
-	// Construct the S3 key for the viewer asset
-	// Format: O{WorkspaceIntId}/D{DatasetIntId}/P{PackageIntId}/{AssetPath}
-	assetKey := fmt.Sprintf("O%d/D%d/P%d/%s", h.claims.OrgClaim.IntId, datasetIntId, packageIntId, assetPath)
+	// Construct the S3 prefix for all assets in the package
+	// Format: O{WorkspaceIntId}/D{DatasetIntId}/P{PackageIntId}/
+	assetPrefix := fmt.Sprintf("O%d/D%d/P%d/", h.claims.OrgClaim.IntId, datasetIntId, packageIntId)
 
 	h.logger.WithFields(log.Fields{
 		"packageNodeId":  packageNodeId,
@@ -298,29 +312,125 @@ func (h *CloudFrontSignedURLHandler) getS3KeyForViewerAsset(ctx context.Context,
 		"packageIntId":   packageIntId,
 		"datasetIntId":   datasetIntId,
 		"workspaceIntId": h.claims.OrgClaim.IntId,
-		"assetPath":      assetPath,
-		"assetKey":       assetKey,
-	}).Debug("constructed S3 key for viewer asset")
+		"assetPrefix":    assetPrefix,
+	}).Debug("constructed S3 prefix for package assets")
 
-	return assetKey, nil
+	return assetPrefix, nil
 }
 
-// generateCloudFrontSignedURL generates a signed URL for CloudFront distribution
-func (h *CloudFrontSignedURLHandler) generateCloudFrontSignedURL(s3Key string) (string, time.Time, error) {
-	// Construct the full URL
-	resourceURL := fmt.Sprintf("https://%s/%s", cloudfrontDistributionDomain, s3Key)
-
+// generateCloudFrontSignedURLWithPolicy generates a signed URL with custom policy for prefix access
+func (h *CloudFrontSignedURLHandler) generateCloudFrontSignedURLWithPolicy(s3Prefix string, optionalPath string) (string, time.Time, error) {
+	// Construct the resource pattern with wildcard for all files under the prefix
+	// This allows access to any file within the package
+	resourcePattern := fmt.Sprintf("https://%s/%s*", cloudfrontDistributionDomain, s3Prefix)
+	
 	// Set expiration time (1 hour from now)
 	expiresAt := time.Now().Add(1 * time.Hour)
+
+	// Create custom policy that allows access to all files with the prefix
+	policy := &sign.Policy{
+		Statements: []sign.Statement{
+			{
+				Resource: resourcePattern,
+				Condition: sign.Condition{
+					DateLessThan: sign.NewAWSEpochTime(expiresAt),
+				},
+			},
+		},
+	}
 
 	// Create the signer
 	signer := sign.NewURLSigner(cloudfrontKeyID, cloudfrontPrivateKey)
 
-	// Sign the URL
-	signedURL, err := signer.Sign(resourceURL, expiresAt)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to sign URL: %w", err)
+	// Build the base URL - if optionalPath is provided, include it for user convenience
+	// The policy still allows access to all files in the prefix
+	var baseURL string
+	if optionalPath != "" {
+		baseURL = fmt.Sprintf("https://%s/%s%s", cloudfrontDistributionDomain, s3Prefix, optionalPath)
+	} else {
+		// Return URL pointing to the prefix
+		baseURL = fmt.Sprintf("https://%s/%s", cloudfrontDistributionDomain, s3Prefix)
 	}
 
+	// Sign with the custom policy
+	signedURL, err := signer.SignWithPolicy(baseURL, policy)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to sign URL with policy: %w", err)
+	}
+
+	h.logger.WithFields(log.Fields{
+		"resourcePattern": resourcePattern,
+		"baseURL":         baseURL,
+		"expiresAt":       expiresAt,
+	}).Debug("generated CloudFront signed URL with prefix policy")
+
 	return signedURL, expiresAt, nil
+}
+
+func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Context, secretName string) error {
+	log.Infof("Loading CloudFront keys from Secrets Manager: %s", secretName)
+
+	// Create AWS config with explicit region
+	region := os.Getenv("REGION")
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
+	}
+	if region == "" {
+		region = "us-east-1" // fallback
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	log.Infof("AWS config loaded with region: %s", cfg.Region)
+
+	// Create Secrets Manager client
+	smClient := secretsmanager.NewFromConfig(cfg)
+
+	// Get secret value
+	result, err := smClient.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(secretName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get CloudFront keys from Secrets Manager: %w", err)
+	}
+
+	if result.SecretString == nil {
+		return fmt.Errorf("secret value is nil")
+	}
+
+	// Parse the key pair from JSON
+	var keyPair CloudFrontKeyPair
+	if err := json.Unmarshal([]byte(*result.SecretString), &keyPair); err != nil {
+		return fmt.Errorf("failed to parse CloudFront key pair: %w", err)
+	}
+
+	cloudfrontKeyPair = &keyPair
+	log.Infof("Loaded CloudFront key pair with ID: %s, created at: %s", keyPair.KeyID, keyPair.CreatedAt)
+
+	// Decode base64 private key
+	keyBytes, err := base64.StdEncoding.DecodeString(keyPair.PrivateKey)
+	if err != nil {
+		return fmt.Errorf("failed to decode CloudFront private key from base64: %w", err)
+	}
+
+	// Parse PEM block
+	block, _ := pem.Decode(keyBytes)
+	if block == nil {
+		return fmt.Errorf("failed to parse PEM block from private key")
+	}
+
+	// Parse RSA private key
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse RSA private key: %w", err)
+	}
+
+	cloudfrontPrivateKey = privateKey
+	cloudfrontKeyID = keyPair.PublicKeyID // Use the CloudFront public key ID for signing
+
+	log.Infof("Successfully loaded CloudFront private key (Public Key ID: %s)", cloudfrontKeyID)
+	return nil
 }

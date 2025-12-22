@@ -16,6 +16,12 @@ RESTORE_EXEC  ?= "restore_package"
 RESTORE_PACK  ?= "restorePackage"
 RESTORE_PACKAGE_NAME  ?= "${RESTORE_NAME}-${IMAGE_TAG}.zip"
 
+# Key Rotation Lambda
+KEY_ROTATION_NAME  ?= "key-rotation"
+KEY_ROTATION_EXEC  ?= "main"
+KEY_ROTATION_PACK  ?= "keyRotation"
+KEY_ROTATION_PACKAGE_NAME  ?= "${KEY_ROTATION_NAME}-${IMAGE_TAG}.zip"
+
 .DEFAULT: help
 
 help:
@@ -78,6 +84,15 @@ package:
   		env GOOS=linux GOARCH=amd64 go build -o $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_EXEC); \
 		cd $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/ ; \
 			zip -r $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) .
+	@echo ""
+	@echo "************************************"
+	@echo "*   Building key rotation lambda   *"
+	@echo "************************************"
+	@echo ""
+	cd ${WORKING_DIR}/lambda/key-rotation; \
+  		env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_EXEC); \
+		cd $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/ ; \
+			zip -r $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME) .
 
 # Copy Service lambda to S3 location
 publish: package
@@ -95,10 +110,18 @@ publish: package
 	@echo ""
 	aws s3 cp $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
 	rm -rf $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME)
+	@echo ""
+	@echo "***************************************"
+	@echo "*   Publishing key rotation lambda    *"
+	@echo "***************************************"
+	@echo ""
+	aws s3 cp $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
+	rm -rf $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME)
 
 # Run go mod tidy on modules
 tidy:
 	cd ${WORKING_DIR}/lambda/service; go mod tidy
 	cd ${WORKING_DIR}/lambda/restore; go mod tidy
+	cd ${WORKING_DIR}/lambda/key-rotation; go mod tidy
 	cd ${WORKING_DIR}/api; go mod tidy
 

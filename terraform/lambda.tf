@@ -17,16 +17,14 @@ resource "aws_lambda_function" "service_lambda" {
   environment {
     variables = {
       ENV                                 = var.environment_name
-      PENNSIEVE_DOMAIN                    = data.terraform_remote_state.account.outputs.domain_name,
+      PENNSIEVE_DOMAIN                    = data.terraform_remote_state.account.outputs.domain_name
       REGION                              = var.aws_region
-      RDS_PROXY_ENDPOINT                  = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint,
+      RDS_PROXY_ENDPOINT                  = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint
       RESTORE_PACKAGE_QUEUE_URL           = aws_sqs_queue.restore_package_queue.url
-      VIEWER_ASSETS_BUCKET                = aws_s3_bucket.package_assets.bucket
-      PROXY_ALLOWED_BUCKETS               = var.proxy_allowed_buckets
-      CLOUDFRONT_DISTRIBUTION_DOMAIN      = aws_cloudfront_distribution.package_assets.domain_name
-      CLOUDFRONT_KEY_ID                   = aws_cloudfront_public_key.package_assets.id
-      CLOUDFRONT_PUBLIC_KEY_SSM_PARAM     = aws_ssm_parameter.cloudfront_public_key.name
-      CLOUDFRONT_PRIVATE_KEY_SSM_PARAM    = aws_ssm_parameter.cloudfront_private_key.name
+      CLOUDFRONT_DISTRIBUTION_DOMAIN      = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_cloudfront_domain_name
+      CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
+      CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
+      CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
     }
   }
 }

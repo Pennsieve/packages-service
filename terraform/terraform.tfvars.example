@@ -1,0 +1,35 @@
+# Example configuration for viewer asset buckets
+# Copy this file to terraform.tfvars and populate with actual values
+
+# Configure the viewer asset buckets that should be accessible via CloudFront
+# Each bucket will be available at the specified cloudfront_path
+viewer_asset_buckets = [
+  {
+    bucket_name     = "company-viewer-assets-1"
+    bucket_region   = "us-east-1"
+    cloudfront_path = "/viewer1"  # Will be accessible at: https://cloudfront.net/viewer1/*
+    s3_prefix       = "/viewer_assets"  # The prefix in the S3 bucket where assets are stored
+  },
+  {
+    bucket_name     = "company-viewer-assets-2"
+    bucket_region   = "us-west-2"
+    cloudfront_path = "/viewer2"  # Will be accessible at: https://cloudfront.net/viewer2/*
+    s3_prefix       = "/viewer_assets"  # The prefix in the S3 bucket where assets are stored
+  },
+  {
+    bucket_name     = "company-viewer-assets-3"
+    bucket_region   = "eu-west-1"
+    cloudfront_path = "/viewer3"  # Will be accessible at: https://cloudfront.net/viewer3/*
+    s3_prefix       = "/viewer_assets"  # The prefix in the S3 bucket where assets are stored
+  }
+]
+
+# Other required variables
+aws_account = "your-account-id"
+aws_region = "us-east-1"
+environment_name = "dev"
+service_name = "packages-service"
+vpc_name = "your-vpc-name"
+domain_name = "your-domain.com"
+api_domain_name = "api.your-domain.com"
+image_tag = "latest"

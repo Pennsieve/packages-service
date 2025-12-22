@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/service"
@@ -14,14 +13,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
-	"strings"
 )
 
 var PennsieveDB *sql.DB
 var SQSClient *sqs.Client
-var S3Client *s3.Client
 var ViewerAssetsBucket string
-var ProxyAllowedBuckets []string // List of allowed S3 buckets for the unauthenticated proxy endpoint only
 
 func init() {
 	log.SetFormatter(&log.JSONFormatter{})
@@ -35,7 +31,7 @@ func init() {
 			log.Warnf("could not set log level to %q: %v", level, err)
 		}
 	}
-	
+
 	// Initialize ViewerAssetsBucket from environment variable
 	if bucket, ok := os.LookupEnv("VIEWER_ASSETS_BUCKET"); ok {
 		ViewerAssetsBucket = bucket
@@ -43,33 +39,10 @@ func init() {
 	} else {
 		log.Warn("VIEWER_ASSETS_BUCKET environment variable not set")
 	}
-	
-	// Initialize ProxyAllowedBuckets for the unauthenticated proxy endpoint
-	// Format: comma-separated list of bucket names
-	// Example: PROXY_ALLOWED_BUCKETS="bucket1,bucket2,bucket3"
-	if allowedBuckets, ok := os.LookupEnv("PROXY_ALLOWED_BUCKETS"); ok {
-		buckets := strings.Split(allowedBuckets, ",")
-		for _, b := range buckets {
-			trimmed := strings.TrimSpace(b)
-			if trimmed != "" {
-				ProxyAllowedBuckets = append(ProxyAllowedBuckets, trimmed)
-			}
-		}
-		log.Infof("ProxyAllowedBuckets initialized with %d buckets: %v", len(ProxyAllowedBuckets), ProxyAllowedBuckets)
-	} else {
-		log.Warn("PROXY_ALLOWED_BUCKETS environment variable not set - proxy endpoint will accept all S3 buckets")
-	}
+
 }
 
 func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (*events.APIGatewayV2HTTPResponse, error) {
-	path := request.RequestContext.HTTP.Path
-	
-	// For unauthenticated endpoints, don't parse claims or create default service
-	if path == "/proxy/s3" {
-		handler := NewHandler(&request, nil)
-		return handler.handle(ctx)
-	}
-	
 	// For authenticated endpoints, parse claims and create service
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
 	handler := NewHandler(&request, claims).WithDefaultService()
