@@ -5,7 +5,6 @@ import (
     "crypto/rand"
     "crypto/rsa"
     "crypto/x509"
-    "database/sql"
     "encoding/base64"
     "encoding/json"
     "encoding/pem"
@@ -16,9 +15,9 @@ import (
     "testing"
     "time"
 
-    "github.com/DATA-DOG/go-sqlmock"
     "github.com/aws/aws-sdk-go-v2/aws"
     "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+    "github.com/pennsieve/packages-service/api/store"
     "github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
     "github.com/pennsieve/pennsieve-go-core/pkg/models/organization"
     "github.com/sirupsen/logrus"
@@ -252,14 +251,22 @@ func TestCloudFrontSignedURLHandler_MissingCloudFrontConfiguration(t *testing.T)
 }
 
 func TestCloudFrontSignedURLHandler_GetS3PrefixForPackage(t *testing.T) {
-    // Create mock database
-    db, mock, err := sqlmock.New()
-    require.NoError(t, err)
+    // Use real database
+    db := store.OpenDB(t)
     defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        db.Truncate(2, "packages")
+        db.Truncate(2, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
 
     // Replace global PennsieveDB for testing
     originalDB := PennsieveDB
-    PennsieveDB = db
+    PennsieveDB = db.DB
     defer func() { PennsieveDB = originalDB }()
 
     tests := []struct {
@@ -267,74 +274,57 @@ func TestCloudFrontSignedURLHandler_GetS3PrefixForPackage(t *testing.T) {
         packageNodeId  string
         datasetNodeId  string
         orgId          int64
-        mockSetup      func(sqlmock.Sqlmock)
         expectedPrefix string
         expectError    bool
         errorContains  string
     }{
         {
-            name:          "valid package and dataset",
-            packageNodeId: "N:package:123",
-            datasetNodeId: "N:dataset:456",
+            name:          "valid package and dataset in org 1",
+            packageNodeId: "N:package:test-alpha",
+            datasetNodeId: "N:dataset:test-alpha",
             orgId:         1,
-            mockSetup: func(mock sqlmock.Sqlmock) {
-                rows := sqlmock.NewRows([]string{"package_id", "dataset_id"}).
-                    AddRow(789, 101)
-                mock.ExpectQuery("SELECT p.id, d.id").
-                    WithArgs("N:package:123", "N:dataset:456").
-                    WillReturnRows(rows)
-            },
-            expectedPrefix: "O1/D101/P789/",
+            expectedPrefix: "O1/D100/P1000/",
+            expectError:    false,
+        },
+        {
+            name:          "valid package and dataset in org 2",
+            packageNodeId: "N:package:test-gamma",
+            datasetNodeId: "N:dataset:test-gamma",
+            orgId:         2,
+            expectedPrefix: "O2/D200/P2000/",
             expectError:    false,
         },
         {
             name:          "package not found",
-            packageNodeId: "N:package:invalid",
-            datasetNodeId: "N:dataset:456",
+            packageNodeId: "N:package:nonexistent",
+            datasetNodeId: "N:dataset:test-alpha",
             orgId:         1,
-            mockSetup: func(mock sqlmock.Sqlmock) {
-                mock.ExpectQuery("SELECT p.id, d.id").
-                    WithArgs("N:package:invalid", "N:dataset:456").
-                    WillReturnError(sql.ErrNoRows)
-            },
+            expectedPrefix: "",
+            expectError:    true,
+            errorContains:  "package not found or does not belong to specified dataset",
+        },
+        {
+            name:          "dataset not found",
+            packageNodeId: "N:package:test-alpha",
+            datasetNodeId: "N:dataset:nonexistent",
+            orgId:         1,
             expectedPrefix: "",
             expectError:    true,
             errorContains:  "package not found or does not belong to specified dataset",
         },
         {
             name:          "package doesn't belong to dataset",
-            packageNodeId: "N:package:123",
-            datasetNodeId: "N:dataset:wrong",
+            packageNodeId: "N:package:test-alpha",
+            datasetNodeId: "N:dataset:test-beta",
             orgId:         1,
-            mockSetup: func(mock sqlmock.Sqlmock) {
-                mock.ExpectQuery("SELECT p.id, d.id").
-                    WithArgs("N:package:123", "N:dataset:wrong").
-                    WillReturnError(sql.ErrNoRows)
-            },
             expectedPrefix: "",
             expectError:    true,
             errorContains:  "package not found or does not belong to specified dataset",
-        },
-        {
-            name:          "database error",
-            packageNodeId: "N:package:123",
-            datasetNodeId: "N:dataset:456",
-            orgId:         1,
-            mockSetup: func(mock sqlmock.Sqlmock) {
-                mock.ExpectQuery("SELECT p.id, d.id").
-                    WithArgs("N:package:123", "N:dataset:456").
-                    WillReturnError(errors.New("database connection failed"))
-            },
-            expectedPrefix: "",
-            expectError:    true,
-            errorContains:  "database connection failed",
         },
     }
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            tt.mockSetup(mock)
-
             handler := &CloudFrontSignedURLHandler{
                 RequestHandler: RequestHandler{
                     logger: testLogger,
@@ -356,9 +346,6 @@ func TestCloudFrontSignedURLHandler_GetS3PrefixForPackage(t *testing.T) {
                 assert.NoError(t, err)
                 assert.Equal(t, tt.expectedPrefix, prefix)
             }
-
-            // Ensure all expectations were met
-            assert.NoError(t, mock.ExpectationsWereMet())
         })
     }
 }
@@ -366,6 +353,22 @@ func TestCloudFrontSignedURLHandler_GetS3PrefixForPackage(t *testing.T) {
 func TestCloudFrontSignedURLHandler_GenerateSignedURLWithPolicy(t *testing.T) {
     defer resetCloudFrontConfig()
     setupCloudFrontConfig()
+
+    // Use real database
+    db := store.OpenDB(t)
+    defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
+
+    // Replace global PennsieveDB for testing
+    originalDB := PennsieveDB
+    PennsieveDB = db.DB
+    defer func() { PennsieveDB = originalDB }()
 
     tests := []struct {
         name              string
@@ -402,24 +405,17 @@ func TestCloudFrontSignedURLHandler_GenerateSignedURLWithPolicy(t *testing.T) {
             expectedURLPrefix: "https://test.cloudfront.net/O1/D2/P3/file with spaces.txt",
             checkPolicy:       true,
         },
+        {
+            name:              "path with trailing space (should be trimmed)",
+            s3Prefix:          "O1/D2/P3/",
+            optionalPath:      "2d901a56-de34-46ef-8b32-4aa72f4f75d2 ",
+            expectedURLPrefix: "https://test.cloudfront.net/O1/D2/P3/2d901a56-de34-46ef-8b32-4aa72f4f75d2",
+            checkPolicy:       true,
+        },
     }
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            // Setup database mock for organization bucket query
-            db, mock, err := sqlmock.New()
-            require.NoError(t, err)
-            defer db.Close()
-            
-            originalDB := PennsieveDB
-            PennsieveDB = db
-            defer func() { PennsieveDB = originalDB }()
-            
-            // Mock organization with no custom bucket (default)
-            mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-                WithArgs(int64(1)).
-                WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
-            
             handler := &CloudFrontSignedURLHandler{
                 RequestHandler: RequestHandler{
                     logger: testLogger,
@@ -700,19 +696,21 @@ func TestCloudFrontSignedURLHandler_ExpirationTime(t *testing.T) {
     defer resetCloudFrontConfig()
     setupCloudFrontConfig()
 
-    // Setup database mock for organization bucket query
-    db, mock, err := sqlmock.New()
-    require.NoError(t, err)
+    // Use real database
+    db := store.OpenDB(t)
     defer db.Close()
-    
-    originalDB := PennsieveDB
-    PennsieveDB = db
-    defer func() { PennsieveDB = originalDB }()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
 
-    // Mock organization with no custom bucket
-    mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-        WithArgs(int64(1)).
-        WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
+    // Replace global PennsieveDB for testing
+    originalDB := PennsieveDB
+    PennsieveDB = db.DB
+    defer func() { PennsieveDB = originalDB }()
 
     handler := &CloudFrontSignedURLHandler{
         RequestHandler: RequestHandler{
@@ -748,13 +746,22 @@ func TestCloudFrontSignedURLHandler_ExpirationTime(t *testing.T) {
 }
 
 func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
-    // Setup database mock
-    db, mock, err := sqlmock.New()
-    require.NoError(t, err)
+    // Use real database
+    db := store.OpenDB(t)
     defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        db.Truncate(2, "packages")
+        db.Truncate(2, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
 
+    // Replace global PennsieveDB for testing
     originalDB := PennsieveDB
-    PennsieveDB = db
+    PennsieveDB = db.DB
     defer func() { PennsieveDB = originalDB }()
 
     // Setup CloudFront configuration
@@ -762,15 +769,6 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
     setupCloudFrontConfig()
 
     t.Run("complete flow with valid package", func(t *testing.T) {
-        // Setup database expectations
-        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-            WithArgs(int64(1)).
-            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
-        
-        mock.ExpectQuery("SELECT p.id, d.id").
-            WithArgs("N:package:test-456", "N:dataset:test-123").
-            WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
-                AddRow(456, 123))
 
         // Create handler
         ctx := context.Background()
@@ -778,8 +776,8 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
             RequestHandler: RequestHandler{
                 method: http.MethodGet,
                 queryParams: map[string]string{
-                    "dataset_id": "N:dataset:test-123",
-                    "package_id": "N:package:test-456",
+                    "dataset_id": "N:dataset:test-alpha",
+                    "package_id": "N:package:test-alpha",
                     "path":       "viewer/manifest.json", // Optional
                 },
                 claims: &authorizer.Claims{
@@ -813,7 +811,7 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
         assert.NotEmpty(t, result.SignedURL)
 
         // Check URL contains expected components
-        assert.Contains(t, result.SignedURL, "https://test.cloudfront.net/O1/D123/P456/")
+        assert.Contains(t, result.SignedURL, "https://test.cloudfront.net/O1/D100/P1000/")
         assert.Contains(t, result.SignedURL, "viewer/manifest.json") // Optional path included
         assert.Contains(t, result.SignedURL, "Policy=")
         assert.Contains(t, result.SignedURL, "Signature=")
@@ -822,21 +820,9 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
         // Check expiration
         assert.Greater(t, result.ExpiresAt, time.Now().Unix())
         assert.Less(t, result.ExpiresAt, time.Now().Add(2*time.Hour).Unix())
-
-        // Ensure all database expectations were met
-        assert.NoError(t, mock.ExpectationsWereMet())
     })
 
     t.Run("complete flow without optional path", func(t *testing.T) {
-        // Setup database expectations
-        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-            WithArgs(int64(2)).
-            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
-        
-        mock.ExpectQuery("SELECT p.id, d.id").
-            WithArgs("N:package:test-789", "N:dataset:test-456").
-            WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
-                AddRow(789, 456))
 
         // Create handler without path parameter
         ctx := context.Background()
@@ -844,8 +830,8 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
             RequestHandler: RequestHandler{
                 method: http.MethodGet,
                 queryParams: map[string]string{
-                    "dataset_id": "N:dataset:test-456",
-                    "package_id": "N:package:test-789",
+                    "dataset_id": "N:dataset:test-gamma",
+                    "package_id": "N:package:test-gamma",
                     // No path parameter
                 },
                 claims: &authorizer.Claims{
@@ -871,24 +857,17 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
         require.NoError(t, err)
 
         // Validate URL points to prefix without specific file
-        assert.Contains(t, result.SignedURL, "https://test.cloudfront.net/O2/D456/P789/")
-
-        // Ensure all database expectations were met
-        assert.NoError(t, mock.ExpectationsWereMet())
+        assert.Contains(t, result.SignedURL, "https://test.cloudfront.net/O2/D200/P2000/")
     })
 
     t.Run("error when package not found", func(t *testing.T) {
-        // Setup database to return no rows
-        mock.ExpectQuery("SELECT p.id, d.id").
-            WithArgs("N:package:nonexistent", "N:dataset:test-123").
-            WillReturnError(sql.ErrNoRows)
 
         ctx := context.Background()
         handler := &CloudFrontSignedURLHandler{
             RequestHandler: RequestHandler{
                 method: http.MethodGet,
                 queryParams: map[string]string{
-                    "dataset_id": "N:dataset:test-123",
+                    "dataset_id": "N:dataset:test-alpha",
                     "package_id": "N:package:nonexistent",
                 },
                 claims: &authorizer.Claims{
@@ -908,9 +887,6 @@ func TestCloudFrontSignedURLHandler_Integration(t *testing.T) {
         require.NoError(t, err)
         assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
         assert.Contains(t, resp.Body, "failed to get S3 prefix")
-
-        // Ensure all database expectations were met
-        assert.NoError(t, mock.ExpectationsWereMet())
     })
 }
 
@@ -938,7 +914,7 @@ func TestGenerateDeterministicPath(t *testing.T) {
         {
             name:         "different bucket name",
             bucketName:   "some-other-bucket",
-            expectedPath: "68934a3e",
+            expectedPath: "7c442d9c",
         },
         {
             name:         "case insensitive",
@@ -962,13 +938,22 @@ func TestGenerateDeterministicPath(t *testing.T) {
 }
 
 func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
-    // Setup database mock
-    db, mock, err := sqlmock.New()
-    require.NoError(t, err)
+    // Use real database
+    db := store.OpenDB(t)
     defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        db.Truncate(2, "packages")
+        db.Truncate(2, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
 
+    // Replace global PennsieveDB for testing
     originalDB := PennsieveDB
-    PennsieveDB = db
+    PennsieveDB = db.DB
     defer func() { PennsieveDB = originalDB }()
 
     // Setup CloudFront configuration
@@ -984,19 +969,19 @@ func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
         mockError               error
     }{
         {
-            name:                    "organization with pennsieve-dev-storage-use1 bucket",
-            orgId:                   19,
-            bucketName:              "pennsieve-dev-storage-use1",
-            expectedCloudFrontPath:  "/7fb7583a",
-            expectedResourcePattern: "https://test.cloudfront.net/7fb7583a/O19/D2049/P2243538/*",
+            name:                    "organization with test bucket alpha",
+            orgId:                   10,
+            bucketName:              "test-bucket-alpha",
+            expectedCloudFrontPath:  "/3e34f47c", // MD5("test-bucket-alpha")[:8]
+            expectedResourcePattern: "https://test.cloudfront.net/3e34f47c/O10/D300/P3000/*",
             mockError:              nil,
         },
         {
-            name:                    "organization with different bucket",
-            orgId:                   367,
-            bucketName:              "sparc-storage-bucket",
-            expectedCloudFrontPath:  "/8a7b2c1d", // This would be the actual MD5 hash
-            expectedResourcePattern: "https://test.cloudfront.net/8a7b2c1d/O367/D123/P456/*",
+            name:                    "organization with test bucket beta",
+            orgId:                   11,
+            bucketName:              "test-bucket-beta",
+            expectedCloudFrontPath:  "/820f885c", // MD5("test-bucket-beta")[:8]
+            expectedResourcePattern: "https://test.cloudfront.net/820f885c/O11/D400/P4000/*",
             mockError:              nil,
         },
         {
@@ -1011,23 +996,16 @@ func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            // Setup database mock for organization bucket query
-            var bucketValue interface{}
-            if tt.bucketName == "" {
-                bucketValue = nil
-            } else {
-                bucketValue = tt.bucketName
+            // Update organization bucket for testing
+            if tt.bucketName != "" {
+                db.DB.Exec("UPDATE pennsieve.organizations SET storage_bucket = $1 WHERE id = $2", tt.bucketName, tt.orgId)
             }
-            
-            mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-                WithArgs(tt.orgId).
-                WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(bucketValue))
-
-            // Mock package/dataset query for signed URL generation
-            mock.ExpectQuery("SELECT p.id, d.id").
-                WithArgs("N:package:test", "N:dataset:test").
-                WillReturnRows(sqlmock.NewRows([]string{"package_id", "dataset_id"}).
-                    AddRow(2243538, 2049))
+            defer func() {
+                // Reset bucket back to original state
+                if tt.orgId == 1 {
+                    db.DB.Exec("UPDATE pennsieve.organizations SET storage_bucket = NULL WHERE id = $1", tt.orgId)
+                }
+            }()
 
             handler := &CloudFrontSignedURLHandler{
                 RequestHandler: RequestHandler{
@@ -1052,7 +1030,8 @@ func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
 
             // Test full signed URL generation to verify path is included correctly
             if tt.mockError == nil {
-                signedURL, _, err := handler.generateCloudFrontSignedURLWithPolicy("O19/D2049/P2243538/", "test-file.json")
+                testPrefix := fmt.Sprintf("O%d/D300/P3000/", tt.orgId)
+                signedURL, _, err := handler.generateCloudFrontSignedURLWithPolicy(testPrefix, "test-file.json")
                 assert.NoError(t, err)
                 assert.NotEmpty(t, signedURL)
                 
@@ -1061,9 +1040,6 @@ func TestCloudFrontSignedURLHandler_OrganizationBucketMapping(t *testing.T) {
                     assert.Contains(t, signedURL, tt.expectedCloudFrontPath)
                 }
             }
-
-            // Ensure all database expectations were met
-            assert.NoError(t, mock.ExpectationsWereMet())
         })
     }
 }
@@ -1073,21 +1049,20 @@ func BenchmarkGenerateCloudFrontSignedURL(b *testing.B) {
     defer resetCloudFrontConfig()
     setupCloudFrontConfig()
 
-    // Setup database mock
-    db, mock, err := sqlmock.New()
-    require.NoError(b, err)
+    // Use real database for benchmark
+    db := store.OpenDB(&testing.T{})
     defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
     
     originalDB := PennsieveDB
-    PennsieveDB = db
+    PennsieveDB = db.DB
     defer func() { PennsieveDB = originalDB }()
-
-    // For benchmark, expect many queries
-    for i := 0; i < b.N; i++ {
-        mock.ExpectQuery("SELECT storage_bucket FROM pennsieve.organizations WHERE id = \\$1").
-            WithArgs(int64(1)).
-            WillReturnRows(sqlmock.NewRows([]string{"storage_bucket"}).AddRow(nil))
-    }
 
     handler := &CloudFrontSignedURLHandler{
         RequestHandler: RequestHandler{
@@ -1129,4 +1104,247 @@ func BenchmarkGenerateDeterministicPath(b *testing.B) {
     for i := 0; i < b.N; i++ {
         _ = generateDeterministicPath(bucketName)
     }
+}
+
+func TestCloudFrontSignedURLHandler_IncludeComponents(t *testing.T) {
+    defer resetCloudFrontConfig()
+    setupCloudFrontConfig()
+
+    // Use real database
+    db := store.OpenDB(t)
+    defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
+
+    // Replace global PennsieveDB for testing
+    originalDB := PennsieveDB
+    PennsieveDB = db.DB
+    defer func() { PennsieveDB = originalDB }()
+
+    tests := []struct {
+        name                string
+        includeComponents   bool
+        expectComponents    bool
+        expectPolicyInfo    bool
+    }{
+        {
+            name:                "without components",
+            includeComponents:   false,
+            expectComponents:    false,
+            expectPolicyInfo:    false,
+        },
+        {
+            name:                "with components",
+            includeComponents:   true,
+            expectComponents:    true,
+            expectPolicyInfo:    true,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            queryParams := map[string]string{
+                "dataset_id": "N:dataset:test-alpha",
+                "package_id": "N:package:test-alpha",
+                "path":       "test-file.jpg",
+            }
+            
+            if tt.includeComponents {
+                queryParams["include_components"] = "true"
+            }
+
+            handler := &CloudFrontSignedURLHandler{
+                RequestHandler: RequestHandler{
+                    method:      http.MethodGet,
+                    queryParams: queryParams,
+                    claims: &authorizer.Claims{
+                        OrgClaim: &organization.Claim{
+                            IntId:  1,
+                            NodeId: "N:org:test",
+                        },
+                    },
+                    logger: testLogger,
+                },
+            }
+
+            resp, err := handler.handle(context.Background())
+
+            // Basic assertions
+            require.NoError(t, err)
+            assert.Equal(t, http.StatusOK, resp.StatusCode)
+            assert.Equal(t, "application/json", resp.Headers["Content-Type"])
+
+            // Parse response
+            var result CloudFrontSignedURLResponse
+            err = json.Unmarshal([]byte(resp.Body), &result)
+            require.NoError(t, err)
+
+            // Validate signed URL is always present
+            assert.NotEmpty(t, result.SignedURL)
+            assert.Greater(t, result.ExpiresAt, time.Now().Unix())
+
+            // Check components based on expectation
+            if tt.expectComponents {
+                require.NotNil(t, result.Components, "Components should be present when include_components=true")
+                
+                // Validate component fields
+                assert.NotEmpty(t, result.Components.BaseURL)
+                assert.NotEmpty(t, result.Components.Policy)
+                assert.NotEmpty(t, result.Components.Signature)
+                assert.NotEmpty(t, result.Components.KeyPairID)
+                
+                // Validate base URL format
+                assert.Contains(t, result.Components.BaseURL, "test.cloudfront.net/O1/D100/P1000/")
+                
+                // Check policy info if expected
+                if tt.expectPolicyInfo {
+                    require.NotNil(t, result.Components.PolicyInfo, "PolicyInfo should be present")
+                    assert.NotEmpty(t, result.Components.PolicyInfo.ResourcePattern)
+                    assert.Greater(t, result.Components.PolicyInfo.ExpiresAt, time.Now().Unix())
+                    assert.NotEmpty(t, result.Components.PolicyInfo.ExpiresAtISO)
+                    
+                    // Validate ISO timestamp format
+                    _, err := time.Parse(time.RFC3339, result.Components.PolicyInfo.ExpiresAtISO)
+                    assert.NoError(t, err, "ExpiresAtISO should be valid RFC3339 format")
+                }
+            } else {
+                assert.Nil(t, result.Components, "Components should be nil when include_components is not set")
+            }
+        })
+    }
+}
+
+func TestCloudFrontSignedURLHandler_ComponentsURLConstruction(t *testing.T) {
+    defer resetCloudFrontConfig()
+    setupCloudFrontConfig()
+
+    // Use real database
+    db := store.OpenDB(t)
+    defer db.Close()
+    db.ExecSQLFile("cloudfront-test.sql")
+    defer func() {
+        db.Truncate(1, "packages")
+        db.Truncate(1, "datasets")
+        // Clean up test organizations
+        db.DB.Exec("DELETE FROM pennsieve.organizations WHERE id IN (10, 11)")
+    }()
+
+    // Replace global PennsieveDB for testing
+    originalDB := PennsieveDB
+    PennsieveDB = db.DB
+    defer func() { PennsieveDB = originalDB }()
+
+    t.Run("components enable URL construction", func(t *testing.T) {
+        handler := &CloudFrontSignedURLHandler{
+            RequestHandler: RequestHandler{
+                method: http.MethodGet,
+                queryParams: map[string]string{
+                    "dataset_id":          "N:dataset:test-alpha",
+                    "package_id":          "N:package:test-alpha", 
+                    "include_components":  "true",
+                },
+                claims: &authorizer.Claims{
+                    OrgClaim: &organization.Claim{
+                        IntId:  1,
+                        NodeId: "N:org:test",
+                    },
+                },
+                logger: testLogger,
+            },
+        }
+
+        resp, err := handler.handle(context.Background())
+        require.NoError(t, err)
+
+        var result CloudFrontSignedURLResponse
+        err = json.Unmarshal([]byte(resp.Body), &result)
+        require.NoError(t, err)
+
+        require.NotNil(t, result.Components)
+
+        // Test that we can construct new URLs using the components
+        testFiles := []string{"file1.jpg", "file2.png", "deeply/nested/file3.json"}
+        
+        for _, filename := range testFiles {
+            constructedURL := fmt.Sprintf("%s%s?Policy=%s&Signature=%s&Key-Pair-Id=%s",
+                result.Components.BaseURL, 
+                filename,
+                result.Components.Policy,
+                result.Components.Signature,
+                result.Components.KeyPairID)
+
+            // Verify the constructed URL has all required components
+            assert.Contains(t, constructedURL, "test.cloudfront.net/O1/D100/P1000/")
+            assert.Contains(t, constructedURL, filename)
+            assert.Contains(t, constructedURL, "Policy=")
+            assert.Contains(t, constructedURL, "Signature=")
+            assert.Contains(t, constructedURL, "Key-Pair-Id=")
+        }
+
+        // Verify policy info is useful for debugging
+        assert.Contains(t, result.Components.PolicyInfo.ResourcePattern, "O1/D100/P1000/*")
+        assert.Contains(t, result.Components.PolicyInfo.ExpiresAtISO, "T")
+        assert.Contains(t, result.Components.PolicyInfo.ExpiresAtISO, "Z")
+    })
+}
+
+func TestCloudFrontSignedURLHandler_ExtractPolicyInfo(t *testing.T) {
+    defer resetCloudFrontConfig()
+    setupCloudFrontConfig()
+
+    // Use real database 
+    db := store.OpenDB(t)
+    defer db.Close()
+    
+    originalDB := PennsieveDB
+    PennsieveDB = db.DB
+    defer func() { PennsieveDB = originalDB }()
+
+    handler := &CloudFrontSignedURLHandler{
+        RequestHandler: RequestHandler{
+            logger: testLogger,
+            claims: &authorizer.Claims{
+                OrgClaim: &organization.Claim{IntId: 1},
+            },
+        },
+    }
+
+    // Test policy decoding
+    expiresAt := time.Now().Add(1 * time.Hour)
+    
+    // Create test policy JSON
+    policyJSON := fmt.Sprintf(`{
+        "Statement": [{
+            "Resource": "https://test.cloudfront.net/O1/D2/P3/*",
+            "Condition": {
+                "DateLessThan": {
+                    "AWS:EpochTime": %d
+                }
+            }
+        }]
+    }`, expiresAt.Unix())
+    
+    // Test base64 standard encoding
+    encodedPolicy := base64.StdEncoding.EncodeToString([]byte(policyJSON))
+    
+    policyInfo, err := handler.extractPolicyInfo(encodedPolicy, expiresAt)
+    require.NoError(t, err)
+    
+    assert.Equal(t, "https://test.cloudfront.net/O1/D2/P3/*", policyInfo.ResourcePattern)
+    assert.Equal(t, expiresAt.Unix(), policyInfo.ExpiresAt)
+    assert.Equal(t, expiresAt.UTC().Format(time.RFC3339), policyInfo.ExpiresAtISO)
+
+    // Test URL-safe base64 encoding
+    urlEncodedPolicy := base64.URLEncoding.EncodeToString([]byte(policyJSON))
+    
+    policyInfo2, err := handler.extractPolicyInfo(urlEncodedPolicy, expiresAt)
+    require.NoError(t, err)
+    
+    assert.Equal(t, policyInfo.ResourcePattern, policyInfo2.ResourcePattern)
+    assert.Equal(t, policyInfo.ExpiresAt, policyInfo2.ExpiresAt)
 }

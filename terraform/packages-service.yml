@@ -96,23 +96,22 @@ paths:
           name: path
           schema:
             type: string
-          required: true
-          description: path to the viewer asset within the package
+          required: false
+          description: Optional path to a specific asset within the package
+        - in: query
+          name: include_components
+          schema:
+            type: boolean
+            default: false
+          required: false
+          description: Include URL components in response for client-side URL construction
       responses:
         '200':
           description: Successfully generated CloudFront signed URL
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  signed_url:
-                    type: string
-                    description: The CloudFront signed URL
-                  expires_at:
-                    type: integer
-                    format: int64
-                    description: Unix timestamp when the signed URL expires
+                $ref: '#/components/schemas/cloudfrontSignedURLResponse'
         '4XX':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -224,5 +223,65 @@ components:
               error:
                 type: string
           description: any restore failures grouped by node id
+
+    cloudfrontSignedURLResponse:
+      type: object
+      required:
+        - signed_url
+        - expires_at
+      properties:
+        signed_url:
+          type: string
+          description: The CloudFront signed URL for accessing package assets
+          example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/viewer/manifest.json?Policy=eyJ...&Signature=gkv...&Key-Pair-Id=K13"
+        expires_at:
+          type: integer
+          format: int64
+          description: Unix timestamp when the signed URL expires
+          example: 1766457092
+        components:
+          $ref: '#/components/schemas/cloudfrontURLComponents'
+
+    cloudfrontURLComponents:
+      type: object
+      description: Optional URL components for client-side URL construction (only present when include_components=true)
+      properties:
+        base_url:
+          type: string
+          description: Base URL prefix for constructing additional URLs within the same package
+          example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/"
+        policy:
+          type: string
+          description: Base64-encoded CloudFront policy
+          example: "eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoi..."
+        signature:
+          type: string
+          description: CloudFront URL signature
+          example: "gkvuqiOWzMao2WC3BPCZqv0Iw4PiFcvdIer..."
+        key_pair_id:
+          type: string
+          description: CloudFront key pair ID used for signing
+          example: "K13520HK8DZ474"
+        policy_info:
+          $ref: '#/components/schemas/cloudfrontPolicyInfo'
+
+    cloudfrontPolicyInfo:
+      type: object
+      description: Decoded policy information for debugging and monitoring
+      properties:
+        resource_pattern:
+          type: string
+          description: The resource pattern allowed by this policy
+          example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/*"
+        expires_at:
+          type: integer
+          format: int64
+          description: Unix timestamp when the policy expires
+          example: 1766457092
+        expires_at_iso:
+          type: string
+          format: date-time
+          description: ISO 8601 formatted expiration time
+          example: "2025-12-23T01:11:32Z"
 
 

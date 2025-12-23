@@ -30,8 +30,23 @@ type CloudFrontSignedURLHandler struct {
 }
 
 type CloudFrontSignedURLResponse struct {
-    SignedURL string `json:"signed_url"`
-    ExpiresAt int64  `json:"expires_at"` // Unix timestamp
+    SignedURL  string                   `json:"signed_url"`
+    ExpiresAt  int64                    `json:"expires_at"` // Unix timestamp
+    Components *CloudFrontURLComponents `json:"components,omitempty"`
+}
+
+type CloudFrontURLComponents struct {
+    BaseURL    string      `json:"base_url"`
+    Policy     string      `json:"policy"`
+    Signature  string      `json:"signature"`
+    KeyPairID  string      `json:"key_pair_id"`
+    PolicyInfo *PolicyInfo `json:"policy_info,omitempty"`
+}
+
+type PolicyInfo struct {
+    ResourcePattern string `json:"resource_pattern"`
+    ExpiresAt       int64  `json:"expires_at"`
+    ExpiresAtISO    string `json:"expires_at_iso"`
 }
 
 type CloudFrontKeyPair struct {
@@ -116,7 +131,10 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
     datasetID := h.queryParams["dataset_id"]
     packageID := h.queryParams["package_id"]
     // Note: path is now optional - if provided, it will be appended to the URL for user convenience
-    path := h.queryParams["path"]
+    // Trim any whitespace from the path to avoid issues with trailing spaces
+    path := strings.TrimSpace(h.queryParams["path"])
+    // Check if client wants URL components included in response
+    includeComponents := h.queryParams["include_components"] == "true"
 
     // Validate required parameters
     if datasetID == "" {
@@ -149,6 +167,16 @@ func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.API
     response := CloudFrontSignedURLResponse{
         SignedURL: signedURL,
         ExpiresAt: expiresAt.Unix(),
+    }
+
+    // Extract and include URL components if requested
+    if includeComponents {
+        components, err := h.extractURLComponents(signedURL, expiresAt, s3Prefix)
+        if err != nil {
+            h.logger.WithError(err).Warn("Failed to extract URL components, continuing without them")
+        } else {
+            response.Components = components
+        }
     }
 
     // Use custom encoder to avoid escaping HTML characters like &
@@ -332,6 +360,117 @@ func generateDeterministicPath(bucketName string) string {
     pathID := hexString[:8]
 
     return pathID
+}
+
+// extractURLComponents parses a signed CloudFront URL and extracts its components
+func (h *CloudFrontSignedURLHandler) extractURLComponents(signedURL string, expiresAt time.Time, s3Prefix string) (*CloudFrontURLComponents, error) {
+    // Parse the URL to extract query parameters
+    parts := strings.Split(signedURL, "?")
+    if len(parts) != 2 {
+        return nil, fmt.Errorf("invalid signed URL format")
+    }
+    
+    baseURL := parts[0]
+    queryString := parts[1]
+    
+    // Parse query parameters
+    queryParts := strings.Split(queryString, "&")
+    var policy, signature, keyPairID string
+    
+    for _, part := range queryParts {
+        kv := strings.SplitN(part, "=", 2)
+        if len(kv) != 2 {
+            continue
+        }
+        
+        switch kv[0] {
+        case "Policy":
+            policy = kv[1]
+        case "Signature":
+            signature = kv[1]
+        case "Key-Pair-Id":
+            keyPairID = kv[1]
+        }
+    }
+    
+    // Extract base URL without the specific file (if any)
+    // Find the CloudFront domain and path prefix, then add the S3 prefix
+    var extractedBaseURL string
+    cloudfrontPathPrefix, err := h.getOrganizationCloudFrontPath(context.Background(), h.claims.OrgClaim.IntId)
+    if err == nil {
+        if cloudfrontPathPrefix != "" {
+            extractedBaseURL = fmt.Sprintf("https://%s%s/%s", cloudfrontDistributionDomain, cloudfrontPathPrefix, s3Prefix)
+        } else {
+            extractedBaseURL = fmt.Sprintf("https://%s/%s", cloudfrontDistributionDomain, s3Prefix)
+        }
+    } else {
+        // Fallback: extract from the actual URL
+        if idx := strings.LastIndex(baseURL, "/"); idx != -1 {
+            extractedBaseURL = baseURL[:idx+1]
+        } else {
+            extractedBaseURL = baseURL
+        }
+    }
+    
+    components := &CloudFrontURLComponents{
+        BaseURL:   extractedBaseURL,
+        Policy:    policy,
+        Signature: signature,
+        KeyPairID: keyPairID,
+    }
+    
+    // Extract policy information if policy is available
+    if policy != "" {
+        policyInfo, err := h.extractPolicyInfo(policy, expiresAt)
+        if err == nil {
+            components.PolicyInfo = policyInfo
+        }
+    }
+    
+    return components, nil
+}
+
+// extractPolicyInfo decodes and extracts useful information from the base64-encoded policy
+func (h *CloudFrontSignedURLHandler) extractPolicyInfo(encodedPolicy string, expiresAt time.Time) (*PolicyInfo, error) {
+    // Decode base64 policy
+    decodedPolicy, err := base64.StdEncoding.DecodeString(encodedPolicy)
+    if err != nil {
+        // Try URL-safe base64 decoding
+        decodedPolicy, err = base64.URLEncoding.DecodeString(encodedPolicy)
+        if err != nil {
+            return nil, fmt.Errorf("failed to decode policy from base64: %w", err)
+        }
+    }
+    
+    // Parse JSON policy
+    var policy struct {
+        Statement []struct {
+            Resource  string `json:"Resource"`
+            Condition struct {
+                DateLessThan struct {
+                    AwsEpochTime int64 `json:"AWS:EpochTime"`
+                } `json:"DateLessThan"`
+            } `json:"Condition"`
+        } `json:"Statement"`
+    }
+    
+    if err := json.Unmarshal(decodedPolicy, &policy); err != nil {
+        return nil, fmt.Errorf("failed to parse policy JSON: %w", err)
+    }
+    
+    // Extract information from first statement
+    if len(policy.Statement) == 0 {
+        return nil, fmt.Errorf("policy has no statements")
+    }
+    
+    statement := policy.Statement[0]
+    policyExpiresAt := statement.Condition.DateLessThan.AwsEpochTime
+    
+    return &PolicyInfo{
+        ResourcePattern: statement.Resource,
+        ExpiresAt:       policyExpiresAt,
+        ExpiresAtISO:    time.Unix(policyExpiresAt, 0).UTC().Format(time.RFC3339),
+    }, nil
 }
 
 func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Context, secretName string) error {
