@@ -111,6 +111,18 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
+    sid     = "PackagesServiceLambdaSecretsManagerPermissions"
+    effect  = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret"
+    ]
+    resources = [
+      aws_secretsmanager_secret.cloudfront_signing_keys.arn
+    ]
+  }
+
+  statement {
     sid     = "PackagesServiceLambdaKMSDecryptPermissions"
     effect  = "Allow"
     actions = [

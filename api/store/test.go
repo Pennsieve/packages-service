@@ -70,6 +70,17 @@ func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
 }
 
 func (tdb *TestDB) ExecSQLFile(sqlFile string) {
+	// Always run base setup first to ensure required data exists
+	if sqlFile != "00-base-setup.sql" {
+		basePath := filepath.Join("testdata", "00-base-setup.sql")
+		if baseBytes, err := os.ReadFile(basePath); err == nil {
+			if _, err = tdb.Exec(string(baseBytes)); err != nil {
+				// Log but don't fail - base setup is optional
+				tdb.t.Logf("Warning: base setup failed: %v", err)
+			}
+		}
+	}
+	
 	path := filepath.Join("testdata", sqlFile)
 	sqlBytes, err := os.ReadFile(path)
 	if err != nil {
