@@ -21,7 +21,7 @@ resource "aws_lambda_function" "service_lambda" {
       REGION                              = var.aws_region
       RDS_PROXY_ENDPOINT                  = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint
       RESTORE_PACKAGE_QUEUE_URL           = aws_sqs_queue.restore_package_queue.url
-      CLOUDFRONT_DISTRIBUTION_DOMAIN      = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_cloudfront_domain_name
+      CLOUDFRONT_DISTRIBUTION_DOMAIN      = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_cloudfront_alias
       CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
       CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
