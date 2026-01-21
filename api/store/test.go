@@ -148,10 +148,12 @@ func (n NoLogger) LogInfo(_ ...any) {}
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
 
 func GetTestAWSConfig(t *testing.T, mockSqsUrl string) aws.Config {
-	awsKey := os.Getenv("TEST_AWS_KEY")
-	awsSecret := os.Getenv("TEST_AWS_SECRET")
-	minioURL := os.Getenv("MINIO_URL")
-	dynamodbURL := os.Getenv("DYNAMODB_URL")
+	// awsKey and awsSecret should match MINIO_ROOT_USER and MINIO_ROOT_PASSWORD respectively.
+	awsKey := "awstestkey"
+	awsSecret := "awstestsecret"
+	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
+	minioURL := getEnvOrDefault("MINIO_URL", "http://localhost:9000")
+	dynamodbURL := getEnvOrDefault("DYNAMODB_URL", "http://localhost:8000")
 	awsConfig, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(awsKey, awsSecret, "")),

@@ -44,9 +44,17 @@ local-services:
 
 # Run tests locally
 test: local-services
-	./run-tests.sh localtest.env .env
+	./run-tests.sh localtest.env
 	docker compose -f docker-compose.test.yml down --remove-orphans
 	make clean
+
+test-new: local-services
+	@failed=0; \
+	for mod in $(MODULES); do \
+		echo "==> test $$mod"; \
+		go -C $$mod test ./... || failed=1; \
+	done; \
+	exit $$failed
 
 # Run test coverage locally
 test-coverage: local-services
