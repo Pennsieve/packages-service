@@ -36,9 +36,9 @@ help:
 # Start the local versions of docker services
 local-services:
 	docker compose -f docker-compose.test.yml down --remove-orphans
-	docker compose -f docker-compose.test.yml up -d pennsievedb minio dynamodb
+	docker compose -f docker-compose.test.yml -f docker-compose.test.local.override.yml up -d pennsievedb minio dynamodb
 	@echo "Waiting for database to be ready..."
-	@timeout 30 sh -c 'until PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; do sleep 1; done'
+	@until docker compose -f docker-compose.test.yml exec pennsievedb pg_isready -U postgres; do sleep 1; done
 
 # Run tests locally
 test: local-services
