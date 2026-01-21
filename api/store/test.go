@@ -80,7 +80,7 @@ func (tdb *TestDB) ExecSQLFile(sqlFile string) {
 			}
 		}
 	}
-	
+
 	path := filepath.Join("testdata", sqlFile)
 	sqlBytes, err := os.ReadFile(path)
 	if err != nil {

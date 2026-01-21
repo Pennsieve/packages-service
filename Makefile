@@ -1,4 +1,4 @@
-.PHONY: help clean test test-ci package publish
+.PHONY: help clean test test-ci package publish vet tidy fmt
 
 LAMBDA_BUCKET ?= "pennsieve-cc-lambda-functions-use1"
 WORKING_DIR   ?= "$(shell pwd)"
@@ -23,6 +23,8 @@ KEY_ROTATION_PACK  ?= "keyRotation"
 KEY_ROTATION_PACKAGE_NAME  ?= "${KEY_ROTATION_NAME}-${IMAGE_TAG}.zip"
 
 .DEFAULT: help
+
+MODULES := lambda/service lambda/restore lambda/key-rotation api
 
 help:
 	@echo "Make Help for $(SERVICE_NAME)"
@@ -120,8 +122,10 @@ publish: package
 
 # Run go mod tidy on modules
 tidy:
-	cd ${WORKING_DIR}/lambda/service; go mod tidy
-	cd ${WORKING_DIR}/lambda/restore; go mod tidy
-	cd ${WORKING_DIR}/lambda/key-rotation; go mod tidy
-	cd ${WORKING_DIR}/api; go mod tidy
+	@for mod in $(MODULES); do echo "==> tidy $$mod"; go -C $$mod mod tidy; done
 
+vet:
+	@for mod in $(MODULES); do echo "==> vet $$mod"; go -C $$mod vet ./...; done
+
+fmt:
+	@for mod in $(MODULES); do echo "==> fmt $$mod"; go -C $$mod fmt ./...; done
