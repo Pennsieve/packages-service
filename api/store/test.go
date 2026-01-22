@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -25,10 +24,6 @@ import (
 	"testing"
 	"time"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 type TestDB struct {
 	*sql.DB
@@ -147,30 +142,28 @@ func (n NoLogger) LogInfo(_ ...any) {}
 
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
 
-func GetTestAWSConfig(t *testing.T, mockSqsUrl string) aws.Config {
+func GetTestAWSConfig(t *testing.T) aws.Config {
 	// awsKey and awsSecret should match MINIO_ROOT_USER and MINIO_ROOT_PASSWORD respectively.
 	awsKey := "awstestkey"
 	awsSecret := "awstestsecret"
-	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
-	minioURL := getEnvOrDefault("MINIO_URL", "http://localhost:9000")
-	dynamodbURL := getEnvOrDefault("DYNAMODB_URL", "http://localhost:8000")
 	awsConfig, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(awsKey, awsSecret, "")),
-		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			if service == s3.ServiceID {
-				return aws.Endpoint{URL: minioURL, HostnameImmutable: true}, nil
-			} else if service == dynamodb.ServiceID {
-				return aws.Endpoint{URL: dynamodbURL}, nil
-			} else if service == sqs.ServiceID {
-				return aws.Endpoint{URL: mockSqsUrl}, nil
-			}
-			return aws.Endpoint{}, fmt.Errorf("unknown test endpoint requested for service: %s", service)
-		})))
+	)
 	if err != nil {
 		assert.FailNow(t, "error creating AWS config", err)
 	}
 	return awsConfig
+}
+
+func GetTestMinioURL() string {
+	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
+	return getEnvOrDefault("MINIO_URL", "http://localhost:9000")
+}
+
+func GetTestDynamoDBURL() string {
+	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
+	return getEnvOrDefault("DYNAMODB_URL", "http://localhost:8000")
 }
 
 type Fixture struct {

@@ -150,11 +150,19 @@ func TestHandleMessage(t *testing.T) {
 	}))
 	defer mockSQSServer.Close()
 
-	awsConfig := store.GetTestAWSConfig(t, mockSQSServer.URL)
+	awsConfig := store.GetTestAWSConfig(t)
 
-	s3Client := s3.NewFromConfig(awsConfig)
-	dyClient := dynamodb.NewFromConfig(awsConfig)
-	sqsClient := sqs.NewFromConfig(awsConfig)
+	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(store.GetTestMinioURL())
+		// by default minio expects path style
+		options.UsePathStyle = true
+	})
+	dyClient := dynamodb.NewFromConfig(awsConfig, func(options *dynamodb.Options) {
+		options.BaseEndpoint = aws.String(store.GetTestDynamoDBURL())
+	})
+	sqsClient := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) {
+		options.BaseEndpoint = aws.String(mockSQSServer.URL)
+	})
 
 	// Create the S3 fixture with the bucket and put requests
 	putObjectInputs := make([]*s3.PutObjectInput, 0, len(putObjectInputByNodeId))
