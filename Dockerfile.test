@@ -10,5 +10,3 @@ WORKDIR /go/src/github.com/pennsieve/packages-service
 
   # Run tests
 ENTRYPOINT ["./run-tests.sh"]
-
-#CMD CGO_ENABLED=0 ./run-tests.sh

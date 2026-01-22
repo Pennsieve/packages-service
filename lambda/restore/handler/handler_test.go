@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
@@ -21,6 +22,7 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -80,16 +82,7 @@ func TestHandleMessage(t *testing.T) {
 	ctx := context.Background()
 
 	orgId := 2
-	mockSQSServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
-		fmt.Println("TODO: verify expectations", r)
-	}))
-	defer mockSQSServer.Close()
-
-	awsConfig := store.GetTestAWSConfig(t, mockSQSServer.URL)
-
-	s3Client := s3.NewFromConfig(awsConfig)
-	dyClient := dynamodb.NewFromConfig(awsConfig)
-	sqsClient := sqs.NewFromConfig(awsConfig)
+	datasetId := 1
 
 	db := store.OpenDB(t)
 	defer db.Close()
@@ -99,11 +92,11 @@ func TestHandleMessage(t *testing.T) {
 	defer db.Truncate(orgId, "dataset_storage")
 	defer db.TruncatePennsieve("organization_storage")
 
-	rootCollectionPkg := store.NewTestPackage(1, 1, 1).
+	rootCollectionPkg := store.NewTestPackage(1, datasetId, 1).
 		WithType(packageType.Collection).
 		WithState(packageState.Ready).
 		Insert(ctx, db, orgId)
-	restoringCollection := store.NewTestPackage(2, 1, 1).
+	restoringCollection := store.NewTestPackage(2, datasetId, 1).
 		WithParentId(rootCollectionPkg.Id).
 		WithType(packageType.Collection).
 		Restoring().
@@ -131,6 +124,37 @@ func TestHandleMessage(t *testing.T) {
 			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
 		}
 	}
+
+	jobsQueueID := "TestJobsQueueUrl"
+
+	mockSQSServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
+		var sqsMessage struct {
+			MessageBody string
+			QueueUrl    string
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&sqsMessage))
+		assert.Equal(t, jobsQueueID, sqsMessage.QueueUrl)
+
+		// cannot unmarshall message as changelog.Message because we didn't define Unmarshall for changelog.Type
+		assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"organizationId":%d`, orgId))
+		assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"datasetId":%d`, datasetId))
+		for _, p := range untouchedPackages {
+			assert.NotContains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+		}
+		for _, p := range restoringFilePackages {
+			assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+		}
+		for _, p := range restoringCollectionPackages {
+			assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+		}
+	}))
+	defer mockSQSServer.Close()
+
+	awsConfig := store.GetTestAWSConfig(t, mockSQSServer.URL)
+
+	s3Client := s3.NewFromConfig(awsConfig)
+	dyClient := dynamodb.NewFromConfig(awsConfig)
+	sqsClient := sqs.NewFromConfig(awsConfig)
 
 	// Create the S3 fixture with the bucket and put requests
 	putObjectInputs := make([]*s3.PutObjectInput, 0, len(putObjectInputByNodeId))
@@ -184,7 +208,6 @@ func TestHandleMessage(t *testing.T) {
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	objectStore := store.NewS3Store(s3Client)
 	nosqlStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
-	jobsQueueID := "TestJobsQueueUrl"
 	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient, jobsQueueID)
 	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore)
 	expectedMessageId := "handle-message-message-id"
