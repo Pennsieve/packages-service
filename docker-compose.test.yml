@@ -3,8 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.test
-    env_file:
-      - dockertest.env
     depends_on:
       - pennsievedb
       - minio

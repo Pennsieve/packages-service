@@ -7,18 +7,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
-	"os"
 	"time"
 )
+
+const JobsQueueIDEnvKey = "JOBS_QUEUE_ID"
 
 type SQSChangelogStore struct {
 	Client *changelog.Client
 	Queue  string
 }
 
-func NewSQSChangelogStore(sqsClient *sqs.Client) *SQSChangelogStore {
-	jobsQueueURL := os.Getenv("JOBS_QUEUE_ID")
-	return &SQSChangelogStore{Client: changelog.NewClient(*sqsClient, jobsQueueURL), Queue: jobsQueueURL}
+func NewSQSChangelogStore(sqsClient *sqs.Client, jobsQueueID string) *SQSChangelogStore {
+	return &SQSChangelogStore{Client: changelog.NewClient(*sqsClient, jobsQueueID), Queue: jobsQueueID}
 }
 
 func (s *SQSChangelogStore) WithLogging(log *logging.Log) ChangelogStore {

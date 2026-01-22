@@ -10,7 +10,6 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
-	"os"
 	"strconv"
 	"time"
 )
@@ -23,19 +22,15 @@ const (
 
 var (
 	deleteMarkerVersionProjection = "NodeId, S3Bucket, S3Key, S3ObjectVersion, ObjectSize"
-	deleteRecordTable             string
 )
 
-func init() {
-	deleteRecordTable = os.Getenv(DeleteRecordTableNameEnvKey)
-}
-
 type DynamoDBStore struct {
-	Client *dynamodb.Client
+	Client                *dynamodb.Client
+	deleteRecordTableName string
 }
 
-func NewDynamoDBStore(client *dynamodb.Client) *DynamoDBStore {
-	return &DynamoDBStore{Client: client}
+func NewDynamoDBStore(client *dynamodb.Client, deleteRecordTableName string) *DynamoDBStore {
+	return &DynamoDBStore{Client: client, deleteRecordTableName: deleteRecordTableName}
 }
 
 func (d *DynamoDBStore) WithLogging(log *logging.Log) NoSQLStore {
@@ -89,9 +84,9 @@ func (d *dynamodbStore) GetDeleteMarkerVersions(ctx context.Context, restoring .
 		for i, r := range batch {
 			keys[i] = map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: r.NodeId}}
 		}
-		items, err := d.getBatchItemsSingleTable(ctx, deleteRecordTable, &deleteMarkerVersionProjection, keys)
+		items, err := d.getBatchItemsSingleTable(ctx, d.deleteRecordTableName, &deleteMarkerVersionProjection, keys)
 		if err != nil {
-			return nil, fmt.Errorf("error reading delete records from %s: %w", deleteRecordTable, err)
+			return nil, fmt.Errorf("error reading delete records from %s: %w", d.deleteRecordTableName, err)
 		}
 		for _, item := range items {
 			objectInfo := S3ObjectInfo{}
@@ -156,9 +151,9 @@ func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoring []*mo
 			deleteRequest := types.DeleteRequest{Key: map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: r.NodeId}}}
 			keys[i] = types.WriteRequest{DeleteRequest: &deleteRequest}
 		}
-		err := d.deleteBatchItemsSingleTable(ctx, deleteRecordTable, keys)
+		err := d.deleteBatchItemsSingleTable(ctx, d.deleteRecordTableName, keys)
 		if err != nil {
-			return fmt.Errorf("error removing delete records from %s: %w", deleteRecordTable, err)
+			return fmt.Errorf("error removing delete records from %s: %w", d.deleteRecordTableName, err)
 		}
 	}
 	return nil

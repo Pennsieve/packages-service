@@ -34,6 +34,10 @@ help:
 	@echo "make test-ci			- run dockerized tests for Jenkins"
 	@echo "make package			- create venv and package lambda function"
 	@echo "make publish			- package and publish lambda function"
+	@echo "make tidy            - run go mod tidy on all modules"
+	@echo "make vet             - run go vet on all modules"
+	@echo "make fmt             - run go fmt on all modules"
+
 
 # Start the local versions of docker services
 local-services:
@@ -44,28 +48,18 @@ local-services:
 
 # Run tests locally
 test: local-services
-	./run-tests.sh localtest.env
-	docker compose -f docker-compose.test.yml down --remove-orphans
-	make clean
-
-test-new: local-services
-	@failed=0; \
-	for mod in $(MODULES); do \
-		echo "==> test $$mod"; \
-		go -C $$mod test ./... || failed=1; \
-	done; \
-	exit $$failed
+	./run-tests.sh $(MODULES)
 
 # Run test coverage locally
 test-coverage: local-services
-	./run-test-coverage.sh localtest.env
+	./run-test-coverage.sh $(MODULES)
 	docker compose -f docker-compose.test.yml down --remove-orphans
 	make clean
 
 # Run dockerized tests (used on Jenkins)
 test-ci:
 	docker compose -f docker-compose.test.yml down --remove-orphans
-	@IMAGE_TAG=$(IMAGE_TAG) docker-compose -f docker-compose.test.yml up --exit-code-from=ci-tests ci-tests
+	@IMAGE_TAG=$(IMAGE_TAG) docker compose -f docker-compose.test.yml run --rm ci-tests $(MODULES)
 
 clean: docker-clean
 	rm -fR lambda/bin

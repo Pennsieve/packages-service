@@ -24,7 +24,6 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -142,7 +141,7 @@ func TestHandleMessage(t *testing.T) {
 	defer s3Fixture.Teardown()
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
-	deleteRecordTableName := os.Getenv(store.DeleteRecordTableNameEnvKey)
+	deleteRecordTableName := "TestDeleteRecords"
 	putItemInputByNodeId := map[string]*dynamodb.PutItemInput{}
 	for nodeId, putObject := range putObjectInputByNodeId {
 		// Delete the object from S3
@@ -184,8 +183,9 @@ func TestHandleMessage(t *testing.T) {
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	objectStore := store.NewS3Store(s3Client)
-	nosqlStore := store.NewDynamoDBStore(dyClient)
-	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient)
+	nosqlStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
+	jobsQueueID := "TestJobsQueueUrl"
+	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient, jobsQueueID)
 	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore)
 	expectedMessageId := "handle-message-message-id"
 	message := events.SQSMessage{

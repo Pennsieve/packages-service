@@ -9,6 +9,6 @@ apk add --no-cache git
 WORKDIR /go/src/github.com/pennsieve/packages-service
 
   # Run tests
-CMD CGO_ENABLED=0 ./run-tests.sh
+ENTRYPOINT ["./run-tests.sh"]
 
-# CMD CGO_ENABLED=0 go test -v ./...
+#CMD CGO_ENABLED=0 ./run-tests.sh

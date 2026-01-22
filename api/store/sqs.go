@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/models"
-	"os"
 )
 
 const m = "api/store/sqs"
+
+const RestorePackageQueueURLEnvKey = "RESTORE_PACKAGE_QUEUE_URL"
 
 type sqsStore struct {
 	Client            *sqs.Client
@@ -20,8 +21,8 @@ type QueueStore interface {
 	SendRestorePackage(ctx context.Context, restoreMessage models.RestorePackageMessage) error
 }
 
-func NewQueueStore(sqsClient *sqs.Client) QueueStore {
-	restorePackageQueue := os.Getenv("RESTORE_PACKAGE_QUEUE_URL")
+func NewQueueStore(sqsClient *sqs.Client, restorePackageQueueURL string) QueueStore {
+	restorePackageQueue := restorePackageQueueURL
 	return &sqsStore{Client: sqsClient, RestorePackageURL: restorePackageQueue}
 }
 

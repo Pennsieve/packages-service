@@ -16,6 +16,7 @@ import (
 	changelog2 "github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
+	"os"
 )
 
 const m = "restore/handler"
@@ -58,8 +59,8 @@ type Store struct {
 func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
 	sqlFactory := store.NewPostgresStoreFactory(PennsieveDB)
 	objectStore := store.NewS3Store(S3Client)
-	nosqlStore := store.NewDynamoDBStore(DyDBClient)
-	changelogStore := restore.NewSQSChangelogStore(SQSClient)
+	nosqlStore := store.NewDynamoDBStore(DyDBClient, os.Getenv(store.DeleteRecordTableNameEnvKey))
+	changelogStore := restore.NewSQSChangelogStore(SQSClient, os.Getenv(restore.JobsQueueIDEnvKey))
 	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, changelogStore)
 	return handleBatches(ctx, event, base)
 }
