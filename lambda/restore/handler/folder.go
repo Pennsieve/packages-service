@@ -57,7 +57,6 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		var folderDescRestoreInfos []*models.RestorePackageInfo
 		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
-		nonFolderNodeIdToId := map[string]int64{}
 		nonFolderNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
@@ -77,7 +76,6 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				folderDescRestoreInfos = append(folderDescRestoreInfos, &descRestoreInfo)
 			} else {
 				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
-				nonFolderNodeIdToId[descRestoreInfo.NodeId] = descRestoreInfo.Id
 				nonFolderNodeIdToInfos[descRestoreInfo.NodeId] = &descRestoreInfo
 			}
 		}
