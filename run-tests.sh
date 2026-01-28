@@ -12,4 +12,5 @@ for mod in "$@"; do
     go -C "$mod" test -v ./... || exit_status=1
 done
 
+echo "test exit status: $exit_status"
 exit $exit_status

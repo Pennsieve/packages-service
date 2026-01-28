@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -397,6 +400,49 @@ func TestQueries_TransitionAncestorPackageState(t *testing.T) {
 					assert.Equal(t, packageState.Restoring, p.PackageState)
 				}
 			}
+		})
+		db.Truncate(expectedOrgId, "packages")
+	}
+}
+
+func TestQueries_GetFilesByPackageId(t *testing.T) {
+	db := OpenDB(t)
+	defer db.Close()
+	expectedOrgId := 2
+
+	tests := map[string]struct {
+		testPackage *TestPackage
+		testFiles   []*TestFile
+	}{
+		"no files":  {NewTestPackage(1, 1, 1).WithType(packageType.Collection), nil},
+		"one file":  {NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2)}},
+		"two files": {NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3), NewTestFile(3)}},
+	}
+
+	ctx := context.Background()
+	for name, tt := range tests {
+
+		tt.testPackage.Insert(ctx, db, expectedOrgId)
+		for _, f := range tt.testFiles {
+			f.Insert(ctx, db, expectedOrgId)
+		}
+		store := NewQueries(db, expectedOrgId, NoLogger{})
+
+		t.Run(name, func(t *testing.T) {
+			files, err := store.GetFilesByPackageId(ctx, tt.testPackage.Id)
+			require.NoError(t, err)
+			require.Len(t, files, len(tt.testFiles))
+			for _, testFile := range tt.testFiles {
+				testFileId := testFile.IntId(t)
+				idx := slices.IndexFunc(files, func(file File) bool {
+					return testFileId == file.ID
+				})
+				require.NotEqual(t, -1, idx, "file %d not returned", testFileId)
+				assert.Equal(t, int64(testFile.PackageId), files[idx].PackageId)
+				assert.Equal(t, testFile.Size, files[idx].Size)
+				assert.Equal(t, testFile.Published, files[idx].Published)
+			}
+
 		})
 		db.Truncate(expectedOrgId, "packages")
 	}

@@ -206,6 +206,29 @@ func (q *Queries) GetPackageByNodeId(ctx context.Context, packageId string) (*pg
 	}
 }
 
+func (q *Queries) GetFilesByPackageId(ctx context.Context, packageId int64) ([]File, error) {
+	query := fmt.Sprintf(`SELECT %s from "%d".files WHERE package_id = $1`, filesScanner.ColumnNamesString, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, packageId)
+	if err != nil {
+		return nil, fmt.Errorf("error getting files by package id: %w", err)
+	}
+	defer q.closeRows(rows)
+
+	var files []File
+	for rows.Next() {
+		var file File
+		if err := filesScanner.Scan(rows, &file); err != nil {
+			return nil, fmt.Errorf("error scanning file row: %w", err)
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error on file rows iterarion: %w", err)
+	}
+
+	return files, nil
+}
+
 func (q *Queries) closeRows(rows *sql.Rows) {
 	if err := rows.Close(); err != nil {
 		q.LogWarnWithFields(log.Fields{"error": err}, "ignoring error while closing Rows")
@@ -402,5 +425,6 @@ type SQLStore interface {
 	IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error
 	IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error
 	GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error)
+	GetFilesByPackageId(ctx context.Context, parentId int64) ([]File, error)
 	logging.Logger
 }

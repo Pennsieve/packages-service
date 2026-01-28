@@ -11,15 +11,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/fileType"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/processingState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/uploadState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -545,4 +551,74 @@ func RandPackageState() packageState.State {
 		packageState.Deleted,
 		packageState.Restoring}
 	return states[rand.Intn(len(states))]
+}
+
+type TestFile struct {
+	pgdb.File
+}
+
+func NewTestFile(packageId int) *TestFile {
+	objType := randInt64Type(objectType.Source)
+	// satisfy check constraint
+	var procState processingState.ProcessingState
+	if objType == objectType.Source {
+		procState = randInt64Type(processingState.Processed)
+	} else {
+		procState = processingState.NotProcessable
+	}
+	file := pgdb.File{
+		PackageId:       packageId,
+		Name:            RandString(37),
+		FileType:        randInt64Type(fileType.ZIP),
+		S3Bucket:        RandString(15),
+		S3Key:           RandString(64),
+		ObjectType:      objType,
+		Size:            rand.Int63() + 1,
+		CheckSum:        "{}",
+		ProcessingState: procState,
+		UploadedState:   randInt64Type(uploadState.Uploaded),
+		Published:       false,
+	}
+	return &TestFile{file}
+}
+
+func (f *TestFile) WithPublished(published bool) *TestFile {
+	f.Published = published
+	return f
+}
+
+func (f *TestFile) Insert(ctx context.Context, db TestDB, orgId int) string {
+	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published) 
+                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+                          RETURNING id`, orgId)
+	var fileId string
+	require.NoError(db.t, db.QueryRowContext(ctx, query,
+		f.PackageId,
+		f.Name,
+		f.FileType.String(),
+		f.S3Bucket,
+		f.S3Key,
+		f.ObjectType.String(),
+		f.Size,
+		f.CheckSum,
+		f.ProcessingState.String(),
+		f.UploadedState.String(),
+		f.Published).
+		Scan(&fileId), "error inserting test file")
+	// Why is pgdb.File.Id defined as string?
+	f.Id = fileId
+	return fileId
+}
+
+// IntId returns the string valued pgdb.File.Id as an int instead of a string.
+// Seems to be a bug in pbdb that this is defined as a string?
+func (f *TestFile) IntId(t require.TestingT) int {
+	require.NotEmpty(t, f.Id, "File.Id is empty. Call Insert() to generate Id value")
+	intId, err := strconv.Atoi(f.Id)
+	require.NoError(t, err, "error converting File.Id to int")
+	return intId
+}
+
+func randInt64Type[T ~int64](maxValue T) T {
+	return T(rand.Int63n(int64(maxValue + 1)))
 }
