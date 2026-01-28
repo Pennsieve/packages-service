@@ -17,6 +17,7 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/packages-service/api/store/restore"
+	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
@@ -135,17 +136,28 @@ func TestHandleMessage(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&sqsMessage))
 		assert.Equal(t, jobsQueueID, sqsMessage.QueueUrl)
 
-		// cannot unmarshall message as changelog.Message because we didn't define Unmarshall for changelog.Type
-		assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"organizationId":%d`, orgId))
-		assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"datasetId":%d`, datasetId))
+		var logMsg changelog.Message
+		require.NoError(t, json.Unmarshal([]byte(sqsMessage.MessageBody), &logMsg))
+		assert.Equal(t, int64(orgId), logMsg.DatasetChangelogEventJob.OrganizationId)
+		assert.Equal(t, int64(datasetId), logMsg.DatasetChangelogEventJob.DatasetId)
+
+		assert.Len(t, logMsg.DatasetChangelogEventJob.Events, len(restoringCollectionPackages)+len(restoringFilePackages))
+		var changelogNodeIds []string
+		for _, e := range logMsg.DatasetChangelogEventJob.Events {
+			assert.Equal(t, changelog.RestorePackage, e.EventType)
+			actualDetail := requireAsType[map[string]any](t, e.EventDetail)
+			require.Contains(t, actualDetail, "nodeId")
+			actualNodeId := requireAsType[string](t, actualDetail["nodeId"])
+			changelogNodeIds = append(changelogNodeIds, actualNodeId)
+		}
 		for _, p := range untouchedPackages {
-			assert.NotContains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+			assert.NotContains(t, changelogNodeIds, p.NodeId)
 		}
 		for _, p := range restoringFilePackages {
-			assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+			assert.Contains(t, changelogNodeIds, p.NodeId)
 		}
 		for _, p := range restoringCollectionPackages {
-			assert.Contains(t, sqsMessage.MessageBody, fmt.Sprintf(`"nodeId":%q`, p.NodeId))
+			assert.Contains(t, changelogNodeIds, p.NodeId)
 		}
 	}))
 	defer mockSQSServer.Close()
@@ -279,4 +291,10 @@ func assertRestoredPackage(t *testing.T, expectedState packageState.State, initi
 	deletedNamePrefix := DeletedNamePrefix(initial.NodeId)
 	assert.False(t, strings.HasPrefix(current.Name, deletedNamePrefix))
 	assert.Equal(t, initial.Name[len(deletedNamePrefix):], current.Name)
+}
+
+func requireAsType[ExpectedType any](t *testing.T, actual any) ExpectedType {
+	var expected ExpectedType
+	require.IsType(t, expected, actual)
+	return actual.(ExpectedType)
 }

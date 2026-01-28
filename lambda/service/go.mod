@@ -14,7 +14,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.14
 	github.com/pennsieve/packages-service/api v0.0.0
-	github.com/pennsieve/pennsieve-go-core v1.13.0
+	github.com/pennsieve/pennsieve-go-core v1.13.6
 	github.com/sirupsen/logrus v1.9.0
 	github.com/stretchr/testify v1.8.1
 )
