@@ -441,6 +441,7 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 				assert.Equal(t, int64(testFile.PackageId), files[idx].PackageId)
 				assert.Equal(t, testFile.Size, files[idx].Size)
 				assert.Equal(t, testFile.Published, files[idx].Published)
+				assert.Equal(t, testFile.ObjectType, files[idx].ObjectType)
 			}
 
 		})

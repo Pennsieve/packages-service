@@ -49,7 +49,7 @@ type S3ObjectInfo struct {
 	NodeId    string `dynamodbav:"NodeId"`
 	Bucket    string `dynamodbav:"S3Bucket"`
 	Key       string `dynamodbav:"S3Key"`
-	VersionId string `dynamodbav:"S3ObjectVersion"`
+	VersionId string `dynamodbav:"S3ObjectVersion,omitempty"`
 	Size      string `dynamodbav:"ObjectSize"`
 }
 

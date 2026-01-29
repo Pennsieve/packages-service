@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
@@ -108,7 +107,7 @@ func TestHandleMessage(t *testing.T) {
 	// Insert the packages inside restoringCollection and prepare the S3 put requests.
 	bucketName := "test-bucket"
 	putObjectInputByNodeId := map[string]*s3.PutObjectInput{}
-	for i := int64(3); i < 53; i++ {
+	for i := 3; i < 53; i++ {
 		pkg := store.NewTestPackage(i, 1, 1).
 			WithParentId(restoringCollection.Id).
 			Deleted().
@@ -181,7 +180,9 @@ func TestHandleMessage(t *testing.T) {
 	for _, v := range putObjectInputByNodeId {
 		putObjectInputs = append(putObjectInputs, v)
 	}
-	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: aws.Bool(true)}).WithObjects(putObjectInputs...)
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
+		WithBucketVersioning(bucketName).
+		WithObjects(putObjectInputs...)
 	defer s3Fixture.Teardown()
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
@@ -207,21 +208,7 @@ func TestHandleMessage(t *testing.T) {
 	for _, input := range putItemInputByNodeId {
 		putItemInputs = append(putItemInputs, input)
 	}
-	createTableInput := dynamodb.CreateTableInput{TableName: aws.String(deleteRecordTableName),
-		AttributeDefinitions: []types.AttributeDefinition{
-			{
-				AttributeName: aws.String("NodeId"),
-				AttributeType: types.ScalarAttributeTypeS,
-			},
-		},
-		KeySchema: []types.KeySchemaElement{
-			{
-				AttributeName: aws.String("NodeId"),
-				KeyType:       types.KeyTypeHash,
-			},
-		},
-		BillingMode: types.BillingModePayPerRequest}
-
+	createTableInput := store.TestCreateDeleteRecordTableInput(deleteRecordTableName)
 	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
 	defer dyFixture.Teardown()
 
@@ -256,13 +243,13 @@ func TestHandleMessage(t *testing.T) {
 		for _, restoring := range restoringCollectionPackages {
 			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, CollectionRestoredState, restoring, actual)
+				assertRestoredPackage(t, CollectionRestoredState, *restoring, actual)
 			}
 		}
 		for _, restoring := range restoringFilePackages {
 			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, FileRestoredState, restoring, actual)
+				assertRestoredPackage(t, FileRestoredState, *restoring, actual)
 			}
 		}
 
@@ -286,13 +273,19 @@ func assertUntouchedPackage(t *testing.T, initial, current *pgdb.Package) {
 	assert.Equal(t, initial, current)
 }
 
-func assertRestoredPackage(t *testing.T, expectedState packageState.State, initial, current *pgdb.Package) {
-	assert.Equal(t, expectedState, current.PackageState)
-	deletedNamePrefix := DeletedNamePrefix(initial.NodeId)
-	assert.False(t, strings.HasPrefix(current.Name, deletedNamePrefix))
-	assert.Equal(t, initial.Name[len(deletedNamePrefix):], current.Name)
+func assertRestoredName(t *testing.T, nodeId string, deletedName string, currentName string) {
+	deletedNamePrefix := DeletedNamePrefix(nodeId)
+	assert.True(t, strings.HasPrefix(deletedName, deletedNamePrefix))
+	assert.False(t, strings.HasPrefix(currentName, deletedNamePrefix))
+	assert.Equal(t, deletedName[len(deletedNamePrefix):], currentName)
 }
 
+func assertRestoredPackage(t *testing.T, expectedState packageState.State, initial pgdb.Package, current *pgdb.Package) {
+	assert.Equal(t, expectedState, current.PackageState, "expected state: %s, actual state: %s", expectedState.String(), current.PackageState.String())
+	assertRestoredName(t, initial.NodeId, initial.Name, current.Name)
+}
+
+// requireAsType tests that the type of actual is ExpectedType and if so, returns actual converted to that type.
 func requireAsType[ExpectedType any](t *testing.T, actual any) ExpectedType {
 	var expected ExpectedType
 	require.IsType(t, expected, actual)

@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dytypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
@@ -230,6 +232,23 @@ func NewS3Fixture(t *testing.T, client *s3.Client, inputs ...*s3.CreateBucketInp
 	return &f
 }
 
+func (f *S3Fixture) WithBucketVersioning(versionedBuckets ...string) *S3Fixture {
+	status := types.BucketVersioningStatusEnabled
+	ctx := context.Background()
+	for _, versionedBucket := range versionedBuckets {
+
+		input := &s3.PutBucketVersioningInput{
+			Bucket: aws.String(versionedBucket),
+			VersioningConfiguration: &types.VersioningConfiguration{
+				Status: status,
+			},
+		}
+		_, err := f.Client.PutBucketVersioning(ctx, input)
+		require.NoError(f.T, err)
+	}
+	return f
+}
+
 func (f *S3Fixture) WithObjects(objectInputs ...*s3.PutObjectInput) *S3Fixture {
 	ctx := context.Background()
 	var waitInputs []s3.HeadObjectInput
@@ -293,6 +312,23 @@ func (f *S3Fixture) Teardown() {
 	}); err != nil {
 		assert.FailNow(f.T, "test bucket not deleted", err)
 	}
+}
+
+func TestCreateDeleteRecordTableInput(tableName string) dynamodb.CreateTableInput {
+	return dynamodb.CreateTableInput{TableName: aws.String(tableName),
+		AttributeDefinitions: []dytypes.AttributeDefinition{
+			{
+				AttributeName: aws.String("NodeId"),
+				AttributeType: dytypes.ScalarAttributeTypeS,
+			},
+		},
+		KeySchema: []dytypes.KeySchemaElement{
+			{
+				AttributeName: aws.String("NodeId"),
+				KeyType:       dytypes.KeyTypeHash,
+			},
+		},
+		BillingMode: dytypes.BillingModePayPerRequest}
 }
 
 type DynamoDBFixture struct {
@@ -405,7 +441,7 @@ type TestPackage struct {
 	pgdb.Package
 }
 
-func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
+func NewTestPackage(id int, datasetId int, ownerId int) *TestPackage {
 	pt := RandPackageType()
 	nodeId := NewTestPackageNodeId(pt)
 	size := sql.NullInt64{}
@@ -414,7 +450,7 @@ func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
 		size.Valid = true
 	}
 	return &TestPackage{pgdb.Package{
-		Id:           id,
+		Id:           int64(id),
 		Name:         RandString(37),
 		PackageType:  pt,
 		PackageState: RandPackageState(),
@@ -559,13 +595,7 @@ type TestFile struct {
 
 func NewTestFile(packageId int) *TestFile {
 	objType := randInt64Type(objectType.Source)
-	// satisfy check constraint
-	var procState processingState.ProcessingState
-	if objType == objectType.Source {
-		procState = randInt64Type(processingState.Processed)
-	} else {
-		procState = processingState.NotProcessable
-	}
+	procState := legalProcessingState(objType)
 	file := pgdb.File{
 		PackageId:       packageId,
 		Name:            RandString(37),
@@ -584,6 +614,17 @@ func NewTestFile(packageId int) *TestFile {
 
 func (f *TestFile) WithPublished(published bool) *TestFile {
 	f.Published = published
+	return f
+}
+
+func (f *TestFile) WithObjectType(objType objectType.ObjectType) *TestFile {
+	f.ObjectType = objType
+	f.ProcessingState = legalProcessingState(objType)
+	return f
+}
+
+func (f *TestFile) WithBucket(bucketName string) *TestFile {
+	f.S3Bucket = bucketName
 	return f
 }
 
@@ -621,4 +662,13 @@ func (f *TestFile) IntId(t require.TestingT) int {
 
 func randInt64Type[T ~int64](maxValue T) T {
 	return T(rand.Int63n(int64(maxValue + 1)))
+}
+
+// legalProcessingState returns a processingState.ProcessingState that will satisfy check constraint on object type and processing state.
+func legalProcessingState(objType objectType.ObjectType) processingState.ProcessingState {
+	procState := processingState.NotProcessable
+	if objType == objectType.Source {
+		procState = randInt64Type(processingState.Processed)
+	}
+	return procState
 }
