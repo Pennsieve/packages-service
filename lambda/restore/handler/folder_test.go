@@ -46,47 +46,57 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	datasetId := 1
 	bucketName := "test-bucket-handle-folder"
 
-	testFolderPackage := store.NewTestPackage(1, datasetId, 1).WithType(packageType.Collection).Restoring().Insert(ctx, db, orgId)
-	testSourcePackage := NewTestSourcePackage(2, datasetId, 1, func(testPackage *store.TestPackage) {
+	folderPackage := store.NewTestPackage(1, datasetId, 1).WithType(packageType.Collection).Restoring().Insert(ctx, db, orgId)
+	unpublishedSourcePackage := NewTestSourcePackage(2, datasetId, 1, func(testPackage *store.TestPackage) {
 		testPackage.Deleted()
-		testPackage.WithParentId(testFolderPackage.Id)
+		testPackage.WithParentId(folderPackage.Id)
 	}).WithSources(1, bucketName, func(testFile *store.TestFile) {
 		testFile.WithPublished(false)
 	}).Insert(ctx, db, orgId)
-	putObjectInputs := testSourcePackage.PutObjectInputs()
+	putObjectInputs := unpublishedSourcePackage.PutObjectInputs()
+
+	publishedSourcePackage := NewTestSourcePackage(3, datasetId, 1, func(testPackage *store.TestPackage) {
+		testPackage.Deleted()
+		testPackage.WithParentId(folderPackage.Id)
+	}).WithSources(2, bucketName, func(testFile *store.TestFile) {
+		testFile.WithPublished(true)
+	}).Insert(ctx, db, orgId)
 
 	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
 		WithBucketVersioning(bucketName).
 		WithObjects(putObjectInputs...)
-	defer s3Fixture.Teardown()
+	t.Cleanup(func() { s3Fixture.Teardown() })
 
-	keyToDeleteVersionId := testSourcePackage.DeleteFiles(ctx, t, s3Client)
+	keyToDeleteVersionId := unpublishedSourcePackage.DeleteFiles(ctx, t, s3Client)
 
-	putItemInputs := testSourcePackage.PutItemInputs(t, deleteRecordTableName, keyToDeleteVersionId)
+	putItemInputs := unpublishedSourcePackage.PutItemInputs(t, deleteRecordTableName, keyToDeleteVersionId)
+	putItemInputs = append(putItemInputs, publishedSourcePackage.PutItemInputs(t, deleteRecordTableName, nil)...)
 
 	createTableInput := store.TestCreateDeleteRecordTableInput(deleteRecordTableName)
 	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
-	defer dyFixture.Teardown()
+	t.Cleanup(func() { dyFixture.Teardown() })
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	dyStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
 	objectStore := store.NewS3Store(s3Client)
 	handler := NewMessageHandler(events.SQSMessage{MessageId: uuid.NewString(), Body: "{}"}, NewBaseStore(sqlFactory, dyStore, objectStore, nil))
 	restoreInfo := models.RestorePackageInfo{
-		Id:     testFolderPackage.Id,
-		NodeId: testFolderPackage.NodeId,
-		Name:   testFolderPackage.Name,
-		Type:   testFolderPackage.PackageType,
+		Id:     folderPackage.Id,
+		NodeId: folderPackage.NodeId,
+		Name:   folderPackage.Name,
+		Type:   folderPackage.PackageType,
 	}
 	changelogEvents, err := handler.handleFolderPackage(ctx, orgId, int64(datasetId), restoreInfo)
 	require.NoError(t, err)
-	assert.Len(t, changelogEvents, 2)
+	assert.Len(t, changelogEvents, 3)
 	for _, changelogEvent := range changelogEvents {
 		var expectedPackage pgdb.Package
-		if nodeId := changelogEvent.NodeId; nodeId == testFolderPackage.NodeId {
-			expectedPackage = *testFolderPackage
-		} else if nodeId == testSourcePackage.Package.NodeId {
-			expectedPackage = testSourcePackage.Package.AsPackage()
+		if nodeId := changelogEvent.NodeId; nodeId == folderPackage.NodeId {
+			expectedPackage = *folderPackage
+		} else if nodeId == unpublishedSourcePackage.Package.NodeId {
+			expectedPackage = unpublishedSourcePackage.Package.AsPackage()
+		} else if nodeId == publishedSourcePackage.Package.NodeId {
+			expectedPackage = publishedSourcePackage.Package.AsPackage()
 		} else {
 			require.FailNow(t, "unexpected node id in changelog event", nodeId)
 		}
@@ -96,14 +106,28 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 		assert.Nil(t, changelogEvent.Parent)
 	}
 
-	v := db.Queries(orgId)
-	actualFolderPackage, err := v.GetPackageByNodeId(ctx, testFolderPackage.NodeId)
-	require.NoError(t, err)
-	assertRestoredPackage(t, CollectionRestoredState, *testFolderPackage, actualFolderPackage)
+	// no storage tables values have been set up, so the storage now should just be the size of the source package
+	unpublishedPackageSize := unpublishedSourcePackage.Size()
+	actualUnpublishedPackageStorage := db.GetPackageStorage(orgId, int(unpublishedSourcePackage.Package.Id))
+	publishedPackageSize := publishedSourcePackage.Size()
+	actualPublishedPackageStorage := db.GetPackageStorage(orgId, int(unpublishedSourcePackage.Package.Id))
+	assert.Equal(t, actualUnpublishedPackageStorage, unpublishedPackageSize)
+	assert.Equal(t, actualPublishedPackageStorage, publishedPackageSize)
+	assert.Equal(t, db.GetDatasetStorage(orgId, datasetId), unpublishedPackageSize+publishedPackageSize)
+	assert.Equal(t, db.GetOrganizationStorage(orgId), unpublishedPackageSize+publishedPackageSize)
 
-	actualSourcePackage, err := v.GetPackageByNodeId(ctx, testSourcePackage.Package.NodeId)
+	v := db.Queries(orgId)
+	actualFolderPackage, err := v.GetPackageByNodeId(ctx, folderPackage.NodeId)
 	require.NoError(t, err)
-	assertRestoredPackage(t, FileRestoredState, testSourcePackage.Package.AsPackage(), actualSourcePackage)
+	assertRestoredPackage(t, CollectionRestoredState, *folderPackage, actualFolderPackage)
+
+	actualUnpublishedSourcePackage, err := v.GetPackageByNodeId(ctx, unpublishedSourcePackage.Package.NodeId)
+	require.NoError(t, err)
+	assertRestoredPackage(t, FileRestoredState, unpublishedSourcePackage.Package.AsPackage(), actualUnpublishedSourcePackage)
+
+	actualPublishedSourcePackage, err := v.GetPackageByNodeId(ctx, publishedSourcePackage.Package.NodeId)
+	require.NoError(t, err)
+	assertRestoredPackage(t, FileRestoredState, publishedSourcePackage.Package.AsPackage(), actualPublishedSourcePackage)
 
 	listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
 	require.NoError(t, err)

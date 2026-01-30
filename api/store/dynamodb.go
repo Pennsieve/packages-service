@@ -68,7 +68,7 @@ type GetDeleteMarkerVersionsResponse map[string]*S3ObjectInfo
 
 type NoSQLStore interface {
 	GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error)
-	RemoveDeleteRecords(ctx context.Context, restoring []*models.RestorePackageInfo) error
+	RemoveDeleteRecords(ctx context.Context, restoringNodeIds []string) error
 	logging.Logger
 }
 
@@ -139,16 +139,16 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 	return items, nil
 }
 
-func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoring []*models.RestorePackageInfo) error {
-	for i := 0; i < len(restoring); i += maxWriteItemBatch {
+func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoringNodeIds []string) error {
+	for i := 0; i < len(restoringNodeIds); i += maxWriteItemBatch {
 		j := i + maxWriteItemBatch
-		if j > len(restoring) {
-			j = len(restoring)
+		if j > len(restoringNodeIds) {
+			j = len(restoringNodeIds)
 		}
-		batch := restoring[i:j]
+		batch := restoringNodeIds[i:j]
 		keys := make([]types.WriteRequest, len(batch))
-		for i, r := range batch {
-			deleteRequest := types.DeleteRequest{Key: map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: r.NodeId}}}
+		for i, nodeId := range batch {
+			deleteRequest := types.DeleteRequest{Key: map[string]types.AttributeValue{"NodeId": &types.AttributeValueMemberS{Value: nodeId}}}
 			keys[i] = types.WriteRequest{DeleteRequest: &deleteRequest}
 		}
 		err := d.deleteBatchItemsSingleTable(ctx, d.deleteRecordTableName, keys)

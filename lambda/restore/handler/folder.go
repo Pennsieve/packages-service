@@ -80,7 +80,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			}
 		}
 
-		var s3RestoredFileInfos RestoreFileInfos
+		var restoredFileInfos RestoreFileInfos
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
 			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
@@ -103,23 +103,23 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			} else {
 				deletedPackages := deleteResponse.Deleted
 				for _, deletedPackage := range deletedPackages {
-					s3RestoredFileInfos = append(s3RestoredFileInfos, RestoreFileInfo{
+					restoredFileInfos = append(restoredFileInfos, RestoreFileInfo{
 						RestorePackageInfo: nonFolderNodeIdToInfos[deletedPackage.NodeId],
 						S3ObjectInfo:       deleteMarkerResp[deletedPackage.NodeId],
 					})
 				}
-				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, s3RestoredFileInfos.AsPackageInfos()); err != nil {
+				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, restoredFileInfos.PackageNodeIds()); err != nil {
 					sqlStore.LogError("error removing delete records from DynamoDB", err)
 				}
 			}
 		}
 
 		// restore dataset_storage
-		if err = h.restoreStorages(ctx, int64(orgId), datasetId, s3RestoredFileInfos, sqlStore); err != nil {
+		if err = h.restoreStorages(ctx, int64(orgId), datasetId, restoredFileInfos, sqlStore); err != nil {
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "error updating storage", err)
 		}
 		// restore states
-		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+len(folderDescRestoreInfos)+len(s3RestoredFileInfos)+1)
+		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+len(folderDescRestoreInfos)+len(restoredFileInfos)+1)
 		// add self
 		stateRestores[0] = &restoreInfo
 		i := 1
@@ -133,7 +133,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			stateRestores[i] = p
 			i++
 		}
-		for _, p := range s3RestoredFileInfos {
+		for _, p := range restoredFileInfos {
 			stateRestores[i] = p.RestorePackageInfo
 			i++
 		}

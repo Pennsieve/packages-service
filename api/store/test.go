@@ -56,13 +56,13 @@ func (tdb *TestDB) PingUntilReady() error {
 	return err
 }
 
-func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
+func OpenDB(t *testing.T, additionalOptions ...PostgresOption) *TestDB {
 	pgConfig := PostgresConfigFromEnv()
 	db, err := pgConfig.Open(additionalOptions...)
 	if err != nil {
 		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", pgConfig, err)
 	}
-	testDB := TestDB{
+	testDB := &TestDB{
 		DB: db,
 		t:  t,
 	}
@@ -70,6 +70,16 @@ func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
 		assert.FailNow(testDB.t, "cannot ping database", "config: %s, err: %v", pgConfig, err)
 	}
 	return testDB
+}
+
+// WithT returns a new *TestDB with the same underlying *sql.DB as this TestDB, but with the given *testing.T.
+// Used in sub-tests to avoid the wrong *testing.T being involved. Gets around poor design that stashes the original
+// *testing.T.
+func (tdb *TestDB) WithT(t *testing.T) *TestDB {
+	return &TestDB{
+		DB: tdb.DB,
+		t:  t,
+	}
 }
 
 func (tdb *TestDB) ExecSQLFile(sqlFile string) {
@@ -110,6 +120,24 @@ func (tdb *TestDB) TruncatePennsieve(table string) {
 	if err != nil {
 		assert.FailNowf(tdb.t, "error truncating table in pennsieve schema", "table: %s, error: %v", table, err)
 	}
+}
+
+func (tdb *TestDB) GetPackageStorage(orgID int, packageID int) (size int64) {
+	query := fmt.Sprintf(`SELECT size from "%d".package_storage where package_id = $1`, orgID)
+	require.NoError(tdb.t, tdb.QueryRow(query, packageID).Scan(&size))
+	return
+}
+
+func (tdb *TestDB) GetDatasetStorage(orgID int, datasetID int) (size int64) {
+	query := fmt.Sprintf(`SELECT size from "%d".dataset_storage where dataset_id = $1`, orgID)
+	require.NoError(tdb.t, tdb.QueryRow(query, datasetID).Scan(&size))
+	return
+}
+
+func (tdb *TestDB) GetOrganizationStorage(organizationID int) (size int64) {
+	query := `SELECT size from pennsieve.organization_storage where organization_id = $1`
+	require.NoError(tdb.t, tdb.QueryRow(query, organizationID).Scan(&size))
+	return
 }
 
 func (tdb *TestDB) Close() {
@@ -508,7 +536,7 @@ func (p *TestPackage) AsPackage() pgdb.Package {
 	return p.Package
 }
 
-func (p *TestPackage) Insert(ctx context.Context, db TestDB, orgId int) *pgdb.Package {
+func (p *TestPackage) Insert(ctx context.Context, db *TestDB, orgId int) *pgdb.Package {
 	var pkg pgdb.Package
 	query := fmt.Sprintf(`INSERT INTO "%d".packages (%[2]s)
 						  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -597,13 +625,14 @@ func NewTestFile(packageId int) *TestFile {
 	objType := randInt64Type(objectType.Source)
 	procState := legalProcessingState(objType)
 	file := pgdb.File{
-		PackageId:       packageId,
-		Name:            RandString(37),
-		FileType:        randInt64Type(fileType.ZIP),
-		S3Bucket:        RandString(15),
-		S3Key:           RandString(64),
-		ObjectType:      objType,
-		Size:            rand.Int63() + 1,
+		PackageId:  packageId,
+		Name:       RandString(37),
+		FileType:   randInt64Type(fileType.ZIP),
+		S3Bucket:   RandString(15),
+		S3Key:      RandString(64),
+		ObjectType: objType,
+		// Keep size small, because we will generate objects of this size for Minio.
+		Size:            rand.Int63n(1000) + 1,
 		CheckSum:        "{}",
 		ProcessingState: procState,
 		UploadedState:   randInt64Type(uploadState.Uploaded),
@@ -628,7 +657,7 @@ func (f *TestFile) WithBucket(bucketName string) *TestFile {
 	return f
 }
 
-func (f *TestFile) Insert(ctx context.Context, db TestDB, orgId int) string {
+func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
 	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published) 
                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
                           RETURNING id`, orgId)

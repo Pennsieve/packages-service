@@ -241,7 +241,7 @@ func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int
 	return args.Error(0)
 }
 
-func (m *MockPackagesStore) GetFilesByPackageId(_ context.Context, _ int64) ([]store.File, error) {
+func (m *MockPackagesStore) GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]store.File, error) {
 	panic("mock me if you need me")
 }
 

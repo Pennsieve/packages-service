@@ -8,6 +8,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
@@ -206,11 +207,11 @@ func (q *Queries) GetPackageByNodeId(ctx context.Context, packageId string) (*pg
 	}
 }
 
-func (q *Queries) GetFilesByPackageId(ctx context.Context, packageId int64) ([]File, error) {
-	query := fmt.Sprintf(`SELECT %s from "%d".files WHERE package_id = $1`, filesScanner.ColumnNamesString, q.OrgId)
-	rows, err := q.db.QueryContext(ctx, query, packageId)
+func (q *Queries) GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]File, error) {
+	query := fmt.Sprintf(`SELECT %s from "%d".files WHERE package_id = $1 AND object_type = $2`, filesScanner.ColumnNamesString, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, packageId, objectType.Source.String())
 	if err != nil {
-		return nil, fmt.Errorf("error getting files by package id: %w", err)
+		return nil, fmt.Errorf("error getting source files by package id: %w", err)
 	}
 	defer q.closeRows(rows)
 
@@ -425,6 +426,7 @@ type SQLStore interface {
 	IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error
 	IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error
 	GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error)
-	GetFilesByPackageId(ctx context.Context, parentId int64) ([]File, error)
+	// GetSourceFilesByPackageId returns Files that have the object type "source" for the given package.
+	GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]File, error)
 	logging.Logger
 }
