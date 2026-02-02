@@ -8,6 +8,8 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	log "github.com/sirupsen/logrus"
+	"maps"
+	"slices"
 )
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
@@ -57,7 +59,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 
 		var folderDescRestoreInfos []*models.RestorePackageInfo
 		var nonFolderDescRestoreInfos []*models.RestorePackageInfo
-		nonFolderNodeIdToInfos := map[string]*models.RestorePackageInfo{}
+		nonFolderDescNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
 			sqlStore.LogDebugWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
@@ -76,41 +78,58 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 				folderDescRestoreInfos = append(folderDescRestoreInfos, &descRestoreInfo)
 			} else {
 				nonFolderDescRestoreInfos = append(nonFolderDescRestoreInfos, &descRestoreInfo)
-				nonFolderNodeIdToInfos[descRestoreInfo.NodeId] = &descRestoreInfo
+				nonFolderDescNodeIdToInfos[descRestoreInfo.NodeId] = &descRestoreInfo
 			}
 		}
 
 		var restoredFileInfos RestoreFileInfos
 		// restore S3 objects and clean up DynamoDB
 		if len(nonFolderDescRestoreInfos) > 0 {
-			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, nonFolderDescRestoreInfos...)
+			nonFolderDescNodeIds := slices.Collect(maps.Keys(nonFolderDescNodeIdToInfos))
+			nodeIdToSourceFiles, err := sqlStore.GetSourceFilesByNodeIds(ctx, nonFolderDescNodeIds)
 			if err != nil {
-				return h.errorf("error getting delete records for descendants %s: %w", restoreInfo.NodeId, err)
+				return h.errorf("error getting source files for decendants %s: %w", restoreInfo.NodeId, err)
 			}
-			if len(deleteMarkerResp) < len(nonFolderDescRestoreInfos) {
-				return h.errorf("fewer delete records found than expected: %d expected, %d found", len(nonFolderDescRestoreInfos), len(deleteMarkerResp))
+			if len(nodeIdToSourceFiles) != len(nonFolderDescRestoreInfos) {
+				return h.errorf("unexpected number of non-folder desc packages with source files: %d expected, %d found", len(nonFolderDescRestoreInfos), len(nodeIdToSourceFiles))
 			}
-			var objectInfos []store.S3ObjectInfo
-			for _, objectInfo := range deleteMarkerResp {
-				objectInfos = append(objectInfos, *objectInfo)
-			}
-
-			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
-				return h.errorf("error restoring S3 objects: %w", err)
-			} else if len(deleteResponse.AWSErrors) > 0 {
-				sqlStore.LogError("AWS errors while restoring S3 objects", deleteResponse.AWSErrors)
-				return h.errorf("AWS error restoring S3 objects: %v. More errors may appear in server logs", deleteResponse.AWSErrors[0])
-			} else {
-				deletedPackages := deleteResponse.Deleted
-				for _, deletedPackage := range deletedPackages {
+			var unpublishedDescRestoreInfos []*models.RestorePackageInfo
+			for _, descRestoreInfo := range nonFolderDescRestoreInfos {
+				sourceFiles := nodeIdToSourceFiles[descRestoreInfo.NodeId]
+				if isPublished, err := packageIsPublished(sourceFiles); err != nil {
+					return h.errorf("error determining published state: %w", err)
+				} else {
 					restoredFileInfos = append(restoredFileInfos, RestoreFileInfo{
-						RestorePackageInfo: nonFolderNodeIdToInfos[deletedPackage.NodeId],
-						S3ObjectInfo:       deleteMarkerResp[deletedPackage.NodeId],
+						RestorePackageInfo: descRestoreInfo,
+						SourceFiles:        sourceFiles,
 					})
+					if !isPublished {
+						unpublishedDescRestoreInfos = append(unpublishedDescRestoreInfos, descRestoreInfo)
+					}
 				}
-				if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, restoredFileInfos.PackageNodeIds()); err != nil {
-					sqlStore.LogError("error removing delete records from DynamoDB", err)
+			}
+			if len(unpublishedDescRestoreInfos) > 0 {
+				deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, unpublishedDescRestoreInfos...)
+				if err != nil {
+					return h.errorf("error getting delete records for descendants %s: %w", restoreInfo.NodeId, err)
 				}
+				if len(deleteMarkerResp) < len(unpublishedDescRestoreInfos) {
+					return h.errorf("fewer delete records found than expected: %d expected, %d found", len(nonFolderDescRestoreInfos), len(deleteMarkerResp))
+				}
+				var objectInfos []store.S3ObjectInfo
+				for _, objectInfo := range deleteMarkerResp {
+					objectInfos = append(objectInfos, *objectInfo)
+				}
+
+				if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, objectInfos...); err != nil {
+					return h.errorf("error restoring S3 objects: %w", err)
+				} else if len(deleteResponse.AWSErrors) > 0 {
+					sqlStore.LogError("AWS errors while restoring S3 objects", deleteResponse.AWSErrors)
+					return h.errorf("AWS error restoring S3 objects: %v. More errors may appear in server logs", deleteResponse.AWSErrors[0])
+				}
+			}
+			if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, restoredFileInfos.PackageNodeIds()); err != nil {
+				sqlStore.LogError("error removing delete records from DynamoDB", err)
 			}
 		}
 

@@ -245,6 +245,10 @@ func (m *MockPackagesStore) GetSourceFilesByPackageId(ctx context.Context, packa
 	panic("mock me if you need me")
 }
 
+func (m *MockPackagesStore) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]store.File, error) {
+	panic("mock me if you need me")
+}
+
 func (m *MockPackagesStore) NewSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }
@@ -281,7 +285,7 @@ func (m *MockPackagesStore) TransitionPackageStateBulk(_ context.Context, _ int6
 	panic("mock me if you need me")
 }
 
-func (m *MockPackagesStore) GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error) {
+func (m *MockPackagesStore) GetPackageByNodeId(ctx context.Context, packageIds string) (*pgdb.Package, error) {
 	panic("mock me if you need me")
 }
 

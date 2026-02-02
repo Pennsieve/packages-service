@@ -33,4 +33,22 @@ func (f FilesScanner) Scan(scanner RowScanner, file *File) error {
 	return err
 }
 
+func (f FilesScanner) JoinScan(scanner RowScanner, pacakgeNodeId *string, file *File) error {
+	var objectTypeString string
+	err := scanner.Scan(
+		pacakgeNodeId,
+		&file.ID,
+		&file.PackageId,
+		&file.Size,
+		&objectTypeString,
+		&file.Published)
+	objType, ok := objectType.Dict[objectTypeString]
+	if !ok {
+		// this is the default for an unknown type in objectType.String()
+		objType = objectType.File
+	}
+	file.ObjectType = objType
+	return err
+}
+
 var filesScanner = FilesScanner{NewModelScanner("files", filesColumns)}

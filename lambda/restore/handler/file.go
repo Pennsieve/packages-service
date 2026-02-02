@@ -204,7 +204,7 @@ func (h *MessageHandler) restoreStorages(ctx context.Context, organizationId, da
 	var totalSize int64
 	sizeByParent := map[int64]int64{}
 	for _, f := range fileInfos {
-		size := h.parseSize(f.S3ObjectInfo)
+		size := sourceFileSize(f.SourceFiles)
 		totalSize += size
 		if f.ParentId != nil {
 			sizeByParent[*f.ParentId] += size
@@ -313,7 +313,6 @@ func (p *NameParts) More() bool {
 
 type RestoreFileInfo struct {
 	*models.RestorePackageInfo
-	*store.S3ObjectInfo
 	SourceFiles []store.File
 }
 
@@ -325,14 +324,6 @@ func (fs RestoreFileInfos) AsPackageInfos() []*models.RestorePackageInfo {
 		ps[i] = f.RestorePackageInfo
 	}
 	return ps
-}
-
-func (fs RestoreFileInfos) AsS3ObjectInfos() []*store.S3ObjectInfo {
-	os := make([]*store.S3ObjectInfo, len(fs))
-	for i, f := range fs {
-		os[i] = f.S3ObjectInfo
-	}
-	return os
 }
 
 func (fs RestoreFileInfos) PackageNodeIds() []string {

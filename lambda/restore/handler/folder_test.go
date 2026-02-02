@@ -110,7 +110,7 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	unpublishedPackageSize := unpublishedSourcePackage.Size()
 	actualUnpublishedPackageStorage := db.GetPackageStorage(orgId, int(unpublishedSourcePackage.Package.Id))
 	publishedPackageSize := publishedSourcePackage.Size()
-	actualPublishedPackageStorage := db.GetPackageStorage(orgId, int(unpublishedSourcePackage.Package.Id))
+	actualPublishedPackageStorage := db.GetPackageStorage(orgId, int(publishedSourcePackage.Package.Id))
 	assert.Equal(t, actualUnpublishedPackageStorage, unpublishedPackageSize)
 	assert.Equal(t, actualPublishedPackageStorage, publishedPackageSize)
 	assert.Equal(t, db.GetDatasetStorage(orgId, datasetId), unpublishedPackageSize+publishedPackageSize)

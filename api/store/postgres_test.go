@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -420,7 +421,9 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 	expectedOrgId := 2
 
-	tests := map[string]struct {
+	ctx := context.Background()
+
+	for name, tt := range map[string]struct {
 		testPackage *TestPackage
 		testFiles   []*TestFile
 	}{
@@ -428,10 +431,7 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 		"one source file":         {NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
 		"two source files":        {NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
 		"mixed object type files": {NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
-	}
-
-	ctx := context.Background()
-	for name, tt := range tests {
+	} {
 
 		tt.testPackage.Insert(ctx, db, expectedOrgId)
 		sourceTestFileById := map[int]*TestFile{}
@@ -456,6 +456,76 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 				assert.Equal(t, expectedFile.Size, returnedFile.Size)
 				assert.Equal(t, expectedFile.Published, returnedFile.Published)
 				assert.Equal(t, objectType.Source, returnedFile.ObjectType)
+			}
+
+		})
+	}
+}
+
+func TestQueries_GetFilesByNodeIds(t *testing.T) {
+	ctx := context.Background()
+
+	db := OpenDB(t)
+	t.Cleanup(func() { db.Close() })
+	expectedOrgId := 2
+
+	type packageFiles struct {
+		p *TestPackage
+		f []*TestFile
+	}
+	for name, tt := range map[string][]packageFiles{
+		"no packages": nil,
+		"no files": {packageFiles{
+			p: NewTestPackage(1, 1, 2).WithType(packageType.Collection),
+			f: nil,
+		}},
+		"some files": {
+			{NewTestPackage(1, 1, 1).WithType(packageType.Collection), nil},
+			{NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
+			{NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
+			{NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
+		},
+	} {
+
+		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			expectedSourceFilesByPackageNodeId := map[string][]*TestFile{}
+			var packageNodeIds []string
+			for _, pf := range tt {
+				pf.p.Insert(ctx, subDB, expectedOrgId)
+				packageNodeIds = append(packageNodeIds, pf.p.NodeId)
+				var expectedSourceFiles []*TestFile
+				for _, f := range pf.f {
+					f.Insert(ctx, subDB, expectedOrgId)
+					if f.ObjectType == objectType.Source {
+						expectedSourceFiles = append(expectedSourceFiles, f)
+					}
+				}
+				if len(expectedSourceFiles) > 0 {
+					expectedSourceFilesByPackageNodeId[pf.p.NodeId] = expectedSourceFiles
+				}
+			}
+
+			store := NewQueries(subDB, expectedOrgId, NoLogger{})
+
+			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "packages") })
+			returnedFiles, err := store.GetSourceFilesByNodeIds(ctx, packageNodeIds)
+			require.NoError(t, err)
+			require.Len(t, returnedFiles, len(expectedSourceFilesByPackageNodeId))
+			for actualPackageNodeId, actualSourceFiles := range returnedFiles {
+				require.Contains(t, expectedSourceFilesByPackageNodeId, actualPackageNodeId)
+				assert.Len(t, actualSourceFiles, len(expectedSourceFilesByPackageNodeId[actualPackageNodeId]))
+				for _, actualSourceFile := range actualSourceFiles {
+					expectedFileIdx := slices.IndexFunc(expectedSourceFilesByPackageNodeId[actualPackageNodeId], func(file *TestFile) bool {
+						return file.IntId(t) == actualSourceFile.ID
+					})
+					require.True(t, expectedFileIdx > -1)
+					expectedFile := expectedSourceFilesByPackageNodeId[actualPackageNodeId][expectedFileIdx]
+					assert.Equal(t, int64(expectedFile.PackageId), actualSourceFile.PackageId)
+					assert.Equal(t, expectedFile.Size, actualSourceFile.Size)
+					assert.Equal(t, expectedFile.Published, actualSourceFile.Published)
+					assert.Equal(t, objectType.Source, actualSourceFile.ObjectType)
+				}
 			}
 
 		})

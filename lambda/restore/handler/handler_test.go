@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
@@ -26,7 +23,6 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -102,26 +98,27 @@ func TestHandleMessage(t *testing.T) {
 		Restoring().
 		Insert(ctx, db, orgId)
 	untouchedPackages := []*pgdb.Package{rootCollectionPkg}
-	var restoringFilePackages []*pgdb.Package
+	var restoringFilePackages []*TestSourcePackage
 	restoringCollectionPackages := []*pgdb.Package{restoringCollection}
 	// Insert the packages inside restoringCollection and prepare the S3 put requests.
 	bucketName := "test-bucket"
-	putObjectInputByNodeId := map[string]*s3.PutObjectInput{}
 	for i := 3; i < 53; i++ {
-		pkg := store.NewTestPackage(i, 1, 1).
-			WithParentId(restoringCollection.Id).
-			Deleted().
-			Insert(ctx, db, orgId)
-		if pkg.PackageType != packageType.Collection {
-			s3Key := fmt.Sprintf("%s/%s", uuid.NewString(), uuid.NewString())
-			putObjectInputByNodeId[pkg.NodeId] = &s3.PutObjectInput{
-				Bucket: aws.String(bucketName),
-				Key:    aws.String(s3Key),
-				Body:   strings.NewReader(fmt.Sprintf("object %d content", i))}
-			restoringFilePackages = append(restoringFilePackages, pkg)
-
-		} else {
+		if i%2 == 1 {
+			pkg := store.NewTestPackage(i, 1, 1).
+				WithParentId(restoringCollection.Id).
+				WithType(packageType.Collection).
+				Deleted().
+				Insert(ctx, db, orgId)
 			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
+		} else {
+			pkg := NewTestSourcePackage(i, 1, 1, func(testPackage *store.TestPackage) {
+				testPackage.WithType(packageType.CSV)
+				testPackage.WithParentId(restoringCollection.Id)
+				testPackage.Deleted()
+			}).WithSources(rand.Intn(2)+1, bucketName, func(testFile *store.TestFile) {
+				testFile.WithPublished(i%4 == 0)
+			}).Insert(ctx, db, orgId)
+			restoringFilePackages = append(restoringFilePackages, pkg)
 		}
 	}
 
@@ -153,7 +150,7 @@ func TestHandleMessage(t *testing.T) {
 			assert.NotContains(t, changelogNodeIds, p.NodeId)
 		}
 		for _, p := range restoringFilePackages {
-			assert.Contains(t, changelogNodeIds, p.NodeId)
+			assert.Contains(t, changelogNodeIds, p.Package.NodeId)
 		}
 		for _, p := range restoringCollectionPackages {
 			assert.Contains(t, changelogNodeIds, p.NodeId)
@@ -176,9 +173,9 @@ func TestHandleMessage(t *testing.T) {
 	})
 
 	// Create the S3 fixture with the bucket and put requests
-	putObjectInputs := make([]*s3.PutObjectInput, 0, len(putObjectInputByNodeId))
-	for _, v := range putObjectInputByNodeId {
-		putObjectInputs = append(putObjectInputs, v)
+	var putObjectInputs []*s3.PutObjectInput
+	for _, v := range restoringFilePackages {
+		putObjectInputs = append(putObjectInputs, v.PutObjectInputs()...)
 	}
 	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
 		WithBucketVersioning(bucketName).
@@ -187,26 +184,10 @@ func TestHandleMessage(t *testing.T) {
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
 	deleteRecordTableName := "TestDeleteRecords"
-	putItemInputByNodeId := map[string]*dynamodb.PutItemInput{}
-	for nodeId, putObject := range putObjectInputByNodeId {
-		// Delete the object from S3
-		deleteObjectOutput, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: putObject.Key})
-		if err != nil {
-			assert.FailNow(t, "error setting up deleted object", err)
-		}
-
-		// Put a delete-record in DynamoDB for object
-		deleteRecord := store.S3ObjectInfo{Bucket: bucketName, Key: aws.ToString(putObject.Key), NodeId: nodeId, Size: strconv.Itoa(rand.Intn(1000000)), VersionId: aws.ToString(deleteObjectOutput.VersionId)}
-		deleteRecordItem, err := attributevalue.MarshalMap(deleteRecord)
-		if err != nil {
-			assert.FailNow(t, "error setting up item in delete record table", err)
-		}
-		putItemInputByNodeId[nodeId] = &dynamodb.PutItemInput{TableName: aws.String(deleteRecordTableName), Item: deleteRecordItem}
-	}
-
-	putItemInputs := make([]*dynamodb.PutItemInput, 0, len(putItemInputByNodeId))
-	for _, input := range putItemInputByNodeId {
-		putItemInputs = append(putItemInputs, input)
+	var putItemInputs []*dynamodb.PutItemInput
+	for _, fp := range restoringFilePackages {
+		keyToDeleteVersionId := fp.DeleteFiles(ctx, t, s3Client)
+		putItemInputs = append(putItemInputs, fp.PutItemInputs(t, deleteRecordTableName, keyToDeleteVersionId)...)
 	}
 	createTableInput := store.TestCreateDeleteRecordTableInput(deleteRecordTableName)
 	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
@@ -247,9 +228,9 @@ func TestHandleMessage(t *testing.T) {
 			}
 		}
 		for _, restoring := range restoringFilePackages {
-			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
+			actual, err := v.GetPackageByNodeId(ctx, restoring.Package.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, FileRestoredState, *restoring, actual)
+				assertRestoredPackage(t, FileRestoredState, restoring.Package.AsPackage(), actual)
 			}
 		}
 
