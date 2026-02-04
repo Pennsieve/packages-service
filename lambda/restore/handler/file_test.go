@@ -17,6 +17,7 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -262,14 +263,14 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 				subDB.TruncatePennsieve("organization_storage")
 			})
 			tt.sourcePackage.Insert(ctx, subDB, orgId)
-			putObjectInputs := tt.sourcePackage.PutObjectInputs()
 
 			s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
-				WithBucketVersioning(bucketName).
-				WithObjects(putObjectInputs...)
+				WithBucketVersioning(bucketName)
 			t.Cleanup(func() {
 				s3Fixture.Teardown()
 			})
+
+			putObjectResults := s3Fixture.PutObjects(tt.sourcePackage.PutObjectInputs()...)
 
 			keyToDeleteVersionId := tt.sourcePackage.DeleteFiles(ctx, t, s3Client)
 
@@ -317,7 +318,16 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			require.NoError(t, err)
 			// No more delete markers and the number of versions is the same.
 			assert.Empty(t, listOut.DeleteMarkers)
-			assert.Len(t, listOut.Versions, len(putObjectInputs))
+			if assert.Len(t, listOut.Versions, len(putObjectResults)) {
+				for _, actualVersion := range listOut.Versions {
+					expectedIdx := slices.IndexFunc(putObjectResults, func(s store.PutObjectResponse) bool {
+						return aws.ToString(s.Input.Bucket) == bucketName && aws.ToString(s.Input.Key) == aws.ToString(actualVersion.Key)
+					})
+					require.True(t, expectedIdx != -1, "expected object with key %s not found in bucket %s", aws.ToString(actualVersion.Key), bucketName)
+					expectedVersion := aws.ToString(putObjectResults[expectedIdx].Output.VersionId)
+					assert.Equal(t, expectedVersion, aws.ToString(actualVersion.VersionId))
+				}
+			}
 
 			scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 			require.NoError(t, err)

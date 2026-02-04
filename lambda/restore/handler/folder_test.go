@@ -13,6 +13,7 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"slices"
 	"testing"
 )
 
@@ -44,28 +45,29 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	})
 
 	datasetId := 1
-	bucketName := "test-bucket-handle-folder"
+	storageBucketName := "test-storage-bucket-handle-folder"
+	publishBucketName := "test-publish-bucket-handle-folder"
 
 	folderPackage := store.NewTestPackage(1, datasetId, 1).WithType(packageType.Collection).Restoring().Insert(ctx, db, orgId)
 	unpublishedSourcePackage := NewTestSourcePackage(2, datasetId, 1, func(testPackage *store.TestPackage) {
 		testPackage.Deleted()
 		testPackage.WithParentId(folderPackage.Id)
-	}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+	}).WithSources(1, storageBucketName, func(testFile *store.TestFile) {
 		testFile.WithPublished(false)
 	}).Insert(ctx, db, orgId)
-	putObjectInputs := unpublishedSourcePackage.PutObjectInputs()
 
 	publishedSourcePackage := NewTestSourcePackage(3, datasetId, 1, func(testPackage *store.TestPackage) {
 		testPackage.Deleted()
 		testPackage.WithParentId(folderPackage.Id)
-	}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+	}).WithSources(1, publishBucketName, func(testFile *store.TestFile) {
 		testFile.WithPublished(true)
 	}).Insert(ctx, db, orgId)
 
-	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
-		WithBucketVersioning(bucketName).
-		WithObjects(putObjectInputs...)
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(storageBucketName)}).
+		WithBucketVersioning(storageBucketName)
 	t.Cleanup(func() { s3Fixture.Teardown() })
+
+	putObjectResults := s3Fixture.PutObjects(unpublishedSourcePackage.PutObjectInputs()...)
 
 	keyToDeleteVersionId := unpublishedSourcePackage.DeleteFiles(ctx, t, s3Client)
 
@@ -129,11 +131,20 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	require.NoError(t, err)
 	assertRestoredPackage(t, FileRestoredState, publishedSourcePackage.Package.AsPackage(), actualPublishedSourcePackage)
 
-	listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
+	listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(storageBucketName)})
 	require.NoError(t, err)
 	// No more delete markers and the number of versions is the same.
 	assert.Empty(t, listOut.DeleteMarkers)
-	assert.Len(t, listOut.Versions, len(putObjectInputs))
+	if assert.Len(t, listOut.Versions, len(putObjectResults)) {
+		for _, actualVersion := range listOut.Versions {
+			expectedIdx := slices.IndexFunc(putObjectResults, func(s store.PutObjectResponse) bool {
+				return aws.ToString(s.Input.Bucket) == storageBucketName && aws.ToString(s.Input.Key) == aws.ToString(actualVersion.Key)
+			})
+			require.True(t, expectedIdx != -1, "expected object with key %s not found in bucket %s", aws.ToString(actualVersion.Key), storageBucketName)
+			expectedVersion := aws.ToString(putObjectResults[expectedIdx].Output.VersionId)
+			assert.Equal(t, expectedVersion, aws.ToString(actualVersion.VersionId))
+		}
+	}
 
 	scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 	require.NoError(t, err)

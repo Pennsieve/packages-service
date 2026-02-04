@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -188,17 +189,15 @@ func TestHandleMessage(t *testing.T) {
 		options.BaseEndpoint = aws.String(mockSQSServer.URL)
 	})
 
-	// Create the S3 fixture with the bucket and put requests
-	var putObjectInputs []*s3.PutObjectInput
-	for _, v := range restoringFilePackages {
-		putObjectInputs = append(putObjectInputs, v.PutObjectInputs()...)
-	}
-
 	// deliberately only creating storage bucket, since this service should not attempt to use publish bucket.
 	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(storageBucketName)}).
-		WithBucketVersioning(storageBucketName).
-		WithObjects(putObjectInputs...)
+		WithBucketVersioning(storageBucketName)
 	defer s3Fixture.Teardown()
+
+	var putObjectResults []store.PutObjectResponse
+	for _, v := range restoringFilePackages {
+		putObjectResults = append(putObjectResults, s3Fixture.PutObjects(v.PutObjectInputs()...)...)
+	}
 
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
 	deleteRecordTableName := "TestDeleteRecords"
@@ -266,7 +265,16 @@ func TestHandleMessage(t *testing.T) {
 					fmt.Println(key, versionId, isLatest)
 				}
 			}
-			assert.Len(t, listOut.Versions, len(putObjectInputs))
+			if assert.Len(t, listOut.Versions, len(putObjectResults)) {
+				for _, actualVersion := range listOut.Versions {
+					expectedIdx := slices.IndexFunc(putObjectResults, func(s store.PutObjectResponse) bool {
+						return aws.ToString(s.Input.Bucket) == storageBucketName && aws.ToString(s.Input.Key) == aws.ToString(actualVersion.Key)
+					})
+					require.True(t, expectedIdx != -1, "expected object with key %s not found in bucket %s", aws.ToString(actualVersion.Key), storageBucketName)
+					expectedVersion := aws.ToString(putObjectResults[expectedIdx].Output.VersionId)
+					assert.Equal(t, expectedVersion, aws.ToString(actualVersion.VersionId))
+				}
+			}
 		}
 		scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 		if assert.NoError(t, err) {

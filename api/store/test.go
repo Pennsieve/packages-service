@@ -277,21 +277,26 @@ func (f *S3Fixture) WithBucketVersioning(versionedBuckets ...string) *S3Fixture 
 	return f
 }
 
-func (f *S3Fixture) WithObjects(objectInputs ...*s3.PutObjectInput) *S3Fixture {
+type PutObjectResponse struct {
+	Input  *s3.PutObjectInput
+	Output *s3.PutObjectOutput
+}
+
+func (f *S3Fixture) PutObjects(objectInputs ...*s3.PutObjectInput) (responses []PutObjectResponse) {
 	ctx := context.Background()
 	var waitInputs []s3.HeadObjectInput
 	for _, input := range objectInputs {
-		if _, err := f.Client.PutObject(ctx, input); err != nil {
-			assert.FailNow(f.T, "error putting test object", "bucket: %s, key: %s, error: %v", aws.ToString(input.Bucket), aws.ToString(input.Key), err)
-		}
+		output, err := f.Client.PutObject(ctx, input)
+		require.NoError(f.T, err, "error putting test object", "bucket: %s, key: %s", aws.ToString(input.Bucket), aws.ToString(input.Key))
 		waitInputs = append(waitInputs, s3.HeadObjectInput{Bucket: input.Bucket, Key: input.Key})
+		responses = append(responses, PutObjectResponse{Input: input, Output: output})
 	}
 	if err := waitForEverything(waitInputs, func(i s3.HeadObjectInput) error {
 		return s3.NewObjectExistsWaiter(f.Client).Wait(ctx, &i, time.Minute)
 	}); err != nil {
 		assert.FailNow(f.T, "test object not created", err)
 	}
-	return f
+	return
 }
 
 func (f *S3Fixture) Teardown() {
