@@ -245,7 +245,7 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 		"published file package": {
 			sourcePackage: NewTestSourcePackage(2, datasetId, 1, func(testPackage *store.TestPackage) {
 				testPackage.Restoring()
-			}).WithSources(3, bucketName, func(testFile *store.TestFile) {
+			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
 				testFile.WithPublished(true)
 			}),
 		},

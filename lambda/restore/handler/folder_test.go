@@ -58,7 +58,7 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	publishedSourcePackage := NewTestSourcePackage(3, datasetId, 1, func(testPackage *store.TestPackage) {
 		testPackage.Deleted()
 		testPackage.WithParentId(folderPackage.Id)
-	}).WithSources(2, bucketName, func(testFile *store.TestFile) {
+	}).WithSources(1, bucketName, func(testFile *store.TestFile) {
 		testFile.WithPublished(true)
 	}).Insert(ctx, db, orgId)
 

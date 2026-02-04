@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
@@ -20,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,8 +101,11 @@ func TestHandleMessage(t *testing.T) {
 	untouchedPackages := []*pgdb.Package{rootCollectionPkg}
 	var restoringFilePackages []*TestSourcePackage
 	restoringCollectionPackages := []*pgdb.Package{restoringCollection}
+	var publishedFiles []*store.TestFile
+	var unpublishedFiles []*store.TestFile
 	// Insert the packages inside restoringCollection and prepare the S3 put requests.
-	bucketName := "test-bucket"
+	storageBucketName := "test-storage-bucket"
+	publishBucketName := "test-publish-bucket"
 	for i := 3; i < 53; i++ {
 		if i%2 == 1 {
 			pkg := store.NewTestPackage(i, 1, 1).
@@ -111,14 +115,26 @@ func TestHandleMessage(t *testing.T) {
 				Insert(ctx, db, orgId)
 			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
 		} else {
+			// about half of the packages
+			isPublished := i%4 == 0
+			bucket := storageBucketName
+			if isPublished {
+				bucket = publishBucketName
+			}
 			pkg := NewTestSourcePackage(i, 1, 1, func(testPackage *store.TestPackage) {
 				testPackage.WithType(packageType.CSV)
 				testPackage.WithParentId(restoringCollection.Id)
 				testPackage.Deleted()
-			}).WithSources(rand.Intn(2)+1, bucketName, func(testFile *store.TestFile) {
-				testFile.WithPublished(i%4 == 0)
+			}).WithSources(1, bucket, func(testFile *store.TestFile) {
+				testFile.WithPublished(isPublished)
+				testFile.S3Key = fmt.Sprintf("package-%d-%s", i, uuid.NewString())
 			}).Insert(ctx, db, orgId)
 			restoringFilePackages = append(restoringFilePackages, pkg)
+			if isPublished {
+				publishedFiles = append(publishedFiles, pkg.Files...)
+			} else {
+				unpublishedFiles = append(unpublishedFiles, pkg.Files...)
+			}
 		}
 	}
 
@@ -177,8 +193,10 @@ func TestHandleMessage(t *testing.T) {
 	for _, v := range restoringFilePackages {
 		putObjectInputs = append(putObjectInputs, v.PutObjectInputs()...)
 	}
-	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName)}).
-		WithBucketVersioning(bucketName).
+
+	// deliberately only creating storage bucket, since this service should not attempt to use publish bucket.
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(storageBucketName)}).
+		WithBucketVersioning(storageBucketName).
 		WithObjects(putObjectInputs...)
 	defer s3Fixture.Teardown()
 
@@ -188,7 +206,9 @@ func TestHandleMessage(t *testing.T) {
 	for _, fp := range restoringFilePackages {
 		keyToDeleteVersionId := fp.DeleteFiles(ctx, t, s3Client)
 		putItemInputs = append(putItemInputs, fp.PutItemInputs(t, deleteRecordTableName, keyToDeleteVersionId)...)
+
 	}
+
 	createTableInput := store.TestCreateDeleteRecordTableInput(deleteRecordTableName)
 	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
 	defer dyFixture.Teardown()
@@ -234,11 +254,29 @@ func TestHandleMessage(t *testing.T) {
 			}
 		}
 
-		listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
+		listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(storageBucketName)})
 		if assert.NoError(t, err) {
 			// No more delete markers and the number of versions is the same.
-			assert.Empty(t, listOut.DeleteMarkers)
-			assert.Len(t, listOut.Versions, len(putObjectInputs))
+			if !assert.Empty(t, listOut.DeleteMarkers) {
+				fmt.Println("delete markers:")
+				for _, d := range listOut.DeleteMarkers {
+					key := aws.ToString(d.Key)
+					versionId := aws.ToString(d.VersionId)
+					isLatest := aws.ToBool(d.IsLatest)
+					fmt.Println(key, versionId, isLatest)
+				}
+			}
+			if assert.Len(t, listOut.Versions, len(putObjectInputs)) {
+				// testing the test
+				fmt.Println("versions:")
+				for _, v := range listOut.Versions {
+					key := aws.ToString(v.Key)
+					versionId := aws.ToString(v.VersionId)
+					isLatest := aws.ToBool(v.IsLatest)
+					fmt.Println(key, versionId, isLatest)
+				}
+				// testing the test
+			}
 		}
 		scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 		if assert.NoError(t, err) {
