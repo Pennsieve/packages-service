@@ -266,17 +266,7 @@ func TestHandleMessage(t *testing.T) {
 					fmt.Println(key, versionId, isLatest)
 				}
 			}
-			if assert.Len(t, listOut.Versions, len(putObjectInputs)) {
-				// testing the test
-				fmt.Println("versions:")
-				for _, v := range listOut.Versions {
-					key := aws.ToString(v.Key)
-					versionId := aws.ToString(v.VersionId)
-					isLatest := aws.ToBool(v.IsLatest)
-					fmt.Println(key, versionId, isLatest)
-				}
-				// testing the test
-			}
+			assert.Len(t, listOut.Versions, len(putObjectInputs))
 		}
 		scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 		if assert.NoError(t, err) {
