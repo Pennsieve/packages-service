@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,6 +14,7 @@ import (
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"strconv"
@@ -339,6 +341,10 @@ type FileConfigFunc func(testFile *store.TestFile)
 func NewTestSourcePackage(packageId, datasetId, ownerId int, packageConfig ...PackageConfigFunc) *TestSourcePackage {
 	sourcePackage := TestSourcePackage{}
 	sourcePackage.Package = store.NewTestPackage(packageId, datasetId, ownerId)
+	if sourcePackage.Package.PackageType == packageType.Collection {
+		sourcePackage.Package.PackageType = packageType.Text
+		sourcePackage.Package.Size = sql.NullInt64{}
+	}
 	for _, configFunc := range packageConfig {
 		configFunc(sourcePackage.Package)
 	}
