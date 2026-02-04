@@ -432,20 +432,20 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 		"two source files":        {NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
 		"mixed object type files": {NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
 	} {
-
-		tt.testPackage.Insert(ctx, db, expectedOrgId)
-		sourceTestFileById := map[int]*TestFile{}
-		for _, f := range tt.testFiles {
-			f.Insert(ctx, db, expectedOrgId)
-			if f.ObjectType == objectType.Source {
-				sourceTestFileById[f.IntId(t)] = f
-			}
-		}
-		store := NewQueries(db, expectedOrgId, NoLogger{})
-
 		t.Run(name, func(t *testing.T) {
 			subDB := db.WithT(t)
 			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "packages") })
+
+			tt.testPackage.Insert(ctx, subDB, expectedOrgId)
+			sourceTestFileById := map[int]*TestFile{}
+			for _, f := range tt.testFiles {
+				f.Insert(ctx, subDB, expectedOrgId)
+				if f.ObjectType == objectType.Source {
+					sourceTestFileById[f.IntId(t)] = f
+				}
+			}
+			store := NewQueries(subDB, expectedOrgId, NoLogger{})
+
 			returnedFiles, err := store.GetSourceFilesByPackageId(ctx, tt.testPackage.Id)
 			require.NoError(t, err)
 			require.Len(t, returnedFiles, len(sourceTestFileById))
