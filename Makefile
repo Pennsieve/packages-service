@@ -49,6 +49,7 @@ local-services:
 # Run tests locally
 test: local-services
 	./run-tests.sh $(MODULES)
+	docker compose -f docker-compose.test.yml down --remove-orphans
 
 # Run test coverage locally
 test-coverage: local-services
