@@ -254,7 +254,7 @@ func (q *Queries) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []
 		filesByPackageId[packageNodeId] = append(filesByPackageId[packageNodeId], file)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error on file rows iterarion for package ids: %w", err)
+		return nil, fmt.Errorf("error on file rows iteration for package ids: %w", err)
 	}
 
 	return filesByPackageId, nil
