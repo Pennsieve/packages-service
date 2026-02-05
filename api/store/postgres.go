@@ -232,7 +232,7 @@ func (q *Queries) GetSourceFilesByPackageId(ctx context.Context, packageId int64
 
 func (q *Queries) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]File, error) {
 	if len(packageNodeIds) == 0 {
-		return nil, nil
+		return map[string][]File{}, nil
 	}
 	query := fmt.Sprintf(`SELECT packages.node_id, %s from "%[2]d".packages JOIN "%[2]d".files 
           ON packages.id = files.package_id				  
