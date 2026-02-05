@@ -33,10 +33,10 @@ func (f FilesScanner) Scan(scanner RowScanner, file *File) error {
 	return err
 }
 
-func (f FilesScanner) JoinScan(scanner RowScanner, pacakgeNodeId *string, file *File) error {
+func (f FilesScanner) JoinScan(scanner RowScanner, packageNodeId *string, file *File) error {
 	var objectTypeString string
 	err := scanner.Scan(
-		pacakgeNodeId,
+		packageNodeId,
 		&file.ID,
 		&file.PackageId,
 		&file.Size,
