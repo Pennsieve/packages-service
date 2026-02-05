@@ -224,7 +224,7 @@ func (q *Queries) GetSourceFilesByPackageId(ctx context.Context, packageId int64
 		files = append(files, file)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error on file rows iterarion: %w", err)
+		return nil, fmt.Errorf("error on file rows iteration: %w", err)
 	}
 
 	return files, nil
