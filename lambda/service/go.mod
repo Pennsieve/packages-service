@@ -7,19 +7,16 @@ toolchain go1.23.4
 replace github.com/pennsieve/packages-service/api => ../../api
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aws/aws-lambda-go v1.34.1
 	github.com/aws/aws-sdk-go-v2 v1.41.0
 	github.com/aws/aws-sdk-go-v2/config v1.31.19
 	github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign v1.9.13
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.90.1
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.14
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.67.0
 	github.com/pennsieve/packages-service/api v0.0.0
-	github.com/pennsieve/pennsieve-go-core v1.13.0
-	github.com/sirupsen/logrus v1.9.0
-	github.com/stretchr/testify v1.8.1
+	github.com/pennsieve/pennsieve-go-core v1.13.6
+	github.com/sirupsen/logrus v1.9.1
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
@@ -39,6 +36,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.11.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.90.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.40.1 // indirect
@@ -48,7 +46,7 @@ require (
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/lib/pq v1.10.7 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/stretchr/objx v0.5.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

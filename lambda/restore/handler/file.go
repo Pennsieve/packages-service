@@ -62,29 +62,41 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 				NodeId:       restoreInfo.NodeId})
 		}
 
-		// restore S3 and clean up DynamoDB
-		deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
+		// restore S3 if necessary and clean up DynamoDB
+		sourceFiles, err := sqlStore.GetSourceFilesByPackageId(ctx, restoreInfo.Id)
 		if err != nil {
-			return h.errorf("error getting delete record of %s: %w", restoreInfo.NodeId, err)
+			return h.errorf("error looking up source files for package %s: %w", restoreInfo.NodeId, err)
 		}
-		deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
-		if !ok {
-			return h.errorf("no delete record found for %v", restoreInfo)
+		isPublished, err := packageIsPublished(sourceFiles)
+		if err != nil {
+			return h.errorf("publish status error for package %s: %w", restoreInfo.NodeId, err)
 		}
-		sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
-		if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, *deleteMarker); err != nil {
-			return h.errorf("error restoring S3 object %s: %w", *deleteMarker, err)
-		} else if len(deleteResponse.AWSErrors) > 0 {
-			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
-			return h.errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
+		if isPublished {
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "package is published; No S3 delete")
+		} else {
+			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
+			if err != nil {
+				return h.errorf("error getting delete record of %s: %w", restoreInfo.NodeId, err)
+			}
+			deleteMarker, ok := deleteMarkerResp[restoreInfo.NodeId]
+			if !ok {
+				return h.errorf("no delete record found for %v", restoreInfo)
+			}
+			sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, *deleteMarker); err != nil {
+				return h.errorf("error restoring S3 object %s: %w", deleteMarker, err)
+			} else if len(deleteResponse.AWSErrors) > 0 {
+				sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
+				return h.errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
+			}
 		}
-		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, []*models.RestorePackageInfo{&restoreInfo}); err != nil {
+		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, []string{restoreInfo.NodeId}); err != nil {
 			// Don't think this should cause the whole restore to fail
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "error removing delete record")
 		}
 
 		// restore dataset storage
-		restoredSize := h.parseSize(deleteMarker)
+		restoredSize := sourceFileSize(sourceFiles)
 		sqlStore.LogInfo("restored size: ", restoredSize)
 		if err = h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, sqlStore); err != nil {
 			// Don't think this should fail the whole restore
@@ -192,7 +204,7 @@ func (h *MessageHandler) restoreStorages(ctx context.Context, organizationId, da
 	var totalSize int64
 	sizeByParent := map[int64]int64{}
 	for _, f := range fileInfos {
-		size := h.parseSize(f.S3ObjectInfo)
+		size := sourceFileSize(f.SourceFiles)
 		totalSize += size
 		if f.ParentId != nil {
 			sizeByParent[*f.ParentId] += size
@@ -301,7 +313,7 @@ func (p *NameParts) More() bool {
 
 type RestoreFileInfo struct {
 	*models.RestorePackageInfo
-	*store.S3ObjectInfo
+	SourceFiles []store.File
 }
 
 type RestoreFileInfos []RestoreFileInfo
@@ -314,10 +326,31 @@ func (fs RestoreFileInfos) AsPackageInfos() []*models.RestorePackageInfo {
 	return ps
 }
 
-func (fs RestoreFileInfos) AsS3ObjectInfos() []*store.S3ObjectInfo {
-	os := make([]*store.S3ObjectInfo, len(fs))
+func (fs RestoreFileInfos) PackageNodeIds() []string {
+	os := make([]string, len(fs))
 	for i, f := range fs {
-		os[i] = f.S3ObjectInfo
+		os[i] = f.RestorePackageInfo.NodeId
 	}
 	return os
+}
+
+func packageIsPublished(sourceFiles []store.File) (bool, error) {
+	if len(sourceFiles) == 0 {
+		return false, fmt.Errorf("non-collection package contains no source files")
+	}
+	isPublished := sourceFiles[0].Published
+	for i := 1; i < len(sourceFiles); i++ {
+		if isPublished != sourceFiles[i].Published {
+			return false, fmt.Errorf("package contains a mix of published and unpublished source files")
+		}
+	}
+	return isPublished, nil
+}
+
+func sourceFileSize(sourceFiles []store.File) int64 {
+	var size int64
+	for _, sourceFile := range sourceFiles {
+		size += sourceFile.Size
+	}
+	return size
 }

@@ -1,76 +1,28 @@
-version: '3'
-
-networks:
-  packages-tests:
-    driver: bridge
-
 services:
-  # Test Container for Jenkins
   ci-tests:
     build:
       context: .
       dockerfile: Dockerfile.test
-    env_file:
-      - dockertest.env
-      - .env
     depends_on:
-      - pennsievedb-ci
-      - minio-ci
-      - dynamodb-ci
+      - pennsievedb
+      - minio
+      - dynamodb
     environment:
-      - POSTGRES_HOST=pennsievedb-ci
-      - MINIO_URL=http://minio-ci:9000
-      - DYNAMODB_URL=http://dynamodb-ci:8000
+      - POSTGRES_HOST=pennsievedb
+      - MINIO_URL=http://minio:9000
+      - DYNAMODB_URL=http://dynamodb:8000
     volumes:
       - $PWD:/go/src/github.com/pennsieve/packages-service
-    networks:
-      - packages-tests
-
   pennsievedb:
-    image: pennsieve/pennsievedb:V20230315145959-seed
+    image: pennsieve/pennsievedb:V20260112110611-seed
     restart: always
-    ports:
-      - "5432:5432"
-    networks:
-      - packages-tests
-
-  pennsievedb-ci:
-    image: pennsieve/pennsievedb:V20230315145959-seed
-    restart: always
-    networks:
-      - packages-tests
-
+  #    command: [ "postgres", "-c", "log_statement=all" ]
   minio:
-    image: minio/minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
-      - MINIO_ROOT_USER=${TEST_AWS_KEY}
-      - MINIO_ROOT_PASSWORD=${TEST_AWS_SECRET}
+      - MINIO_ROOT_USER=awstestkey
+      - MINIO_ROOT_PASSWORD=awstestsecret
     command: server --console-address ":9001" /data
-    networks:
-      - packages-tests
-
-  minio-ci:
-    image: minio/minio
-    environment:
-      - MINIO_ROOT_USER=${TEST_AWS_KEY}
-      - MINIO_ROOT_PASSWORD=${TEST_AWS_SECRET}
-    command: server --console-address ":9001" /data
-    networks:
-      - packages-tests
-
   dynamodb:
     image: amazon/dynamodb-local
     restart: always
-    ports:
-      - "8000:8000"
-    networks:
-      - packages-tests
-
-  dynamodb-ci:
-    image: amazon/dynamodb-local
-    restart: always
-    networks:
-      - packages-tests

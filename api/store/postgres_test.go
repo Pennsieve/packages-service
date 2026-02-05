@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/pennsieve/packages-service/api/models"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math/rand"
+	"slices"
 	"testing"
 )
 
@@ -208,7 +212,9 @@ func TestQueries_UpdatePackageName(t *testing.T) {
 
 func TestQueries_IncrementOrganizationStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer db.Close()
+	t.Cleanup(func() {
+		db.Close()
+	})
 
 	expectedOrgId := 2
 	expectedInitialSize := int64(1023)
@@ -232,23 +238,26 @@ func TestQueries_IncrementOrganizationStorage(t *testing.T) {
 		store := NewQueries(db, expectedOrgId, NoLogger{})
 
 		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			t.Cleanup(func() {
+				subDB.TruncatePennsieve("organization_storage")
+			})
 			err := store.IncrementOrganizationStorage(context.Background(), int64(expectedOrgId), data.increment)
 			if assert.NoError(t, err) {
 				var actual int64
-				err = db.QueryRow(checkQuery, expectedOrgId).Scan(&actual)
+				err = subDB.QueryRow(checkQuery, expectedOrgId).Scan(&actual)
 				if assert.NoError(t, err) {
 					assert.Equal(t, data.initialSize+data.increment, actual)
 				}
 			}
 		})
 
-		db.TruncatePennsieve("organization_storage")
 	}
 }
 
 func TestQueries_IncrementDatasetStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 
 	expectedOrgId := 2
 	expectedDatasetId := int64(1)
@@ -273,27 +282,30 @@ func TestQueries_IncrementDatasetStorage(t *testing.T) {
 		store := NewQueries(db, expectedOrgId, NoLogger{})
 
 		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			t.Cleanup(func() {
+				subDB.Truncate(expectedOrgId, "dataset_storage")
+			})
 			err := store.IncrementDatasetStorage(context.Background(), expectedDatasetId, data.increment)
 			if assert.NoError(t, err) {
 				var actual int64
-				err = db.QueryRow(checkQuery, expectedDatasetId).Scan(&actual)
+				err = subDB.QueryRow(checkQuery, expectedDatasetId).Scan(&actual)
 				if assert.NoError(t, err) {
 					assert.Equal(t, data.initialSize+data.increment, actual)
 				}
 			}
 		})
 
-		db.Truncate(expectedOrgId, "dataset_storage")
 	}
 }
 
 func TestQueries_IncrementPackageStorage(t *testing.T) {
 	db := OpenDB(t)
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 	expectedOrgId := 2
 
 	db.ExecSQLFile("increment-package-storage-test.sql")
-	defer db.Truncate(expectedOrgId, "packages")
+	t.Cleanup(func() { db.Truncate(expectedOrgId, "packages") })
 
 	expectedPackageId := int64(1)
 	expectedInitialSize := int64(1023)
@@ -318,17 +330,18 @@ func TestQueries_IncrementPackageStorage(t *testing.T) {
 		store := NewQueries(db, expectedOrgId, NoLogger{})
 
 		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "package_storage") })
 			err := store.IncrementPackageStorage(context.Background(), expectedPackageId, data.increment)
 			if assert.NoError(t, err) {
 				var actual int64
-				err = db.QueryRow(checkQuery, expectedPackageId).Scan(&actual)
+				err = subDB.QueryRow(checkQuery, expectedPackageId).Scan(&actual)
 				if assert.NoError(t, err) {
 					assert.Equal(t, data.initialSize+data.increment, actual)
 				}
 			}
 		})
 
-		db.Truncate(expectedOrgId, "package_storage")
 	}
 }
 
@@ -378,7 +391,7 @@ func TestQueries_IncrementPackageStorageAncestors(t *testing.T) {
 
 func TestQueries_TransitionAncestorPackageState(t *testing.T) {
 	db := OpenDB(t)
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 	expectedOrgId := 2
 
 	for name, expectedAncestorIds := range map[string][]int64{
@@ -390,6 +403,8 @@ func TestQueries_TransitionAncestorPackageState(t *testing.T) {
 		db.ExecSQLFile("folder-nav-test.sql")
 		store := NewQueries(db, expectedOrgId, NoLogger{})
 		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "packages") })
 			ps, err := store.TransitionAncestorPackageState(context.Background(), expectedAncestorIds[0], packageState.Deleted, packageState.Restoring)
 			if assert.NoError(t, err) {
 				assert.Len(t, ps, len(expectedAncestorIds))
@@ -398,6 +413,121 @@ func TestQueries_TransitionAncestorPackageState(t *testing.T) {
 				}
 			}
 		})
-		db.Truncate(expectedOrgId, "packages")
+	}
+}
+
+func TestQueries_GetFilesByPackageId(t *testing.T) {
+	db := OpenDB(t)
+	t.Cleanup(func() { db.Close() })
+	expectedOrgId := 2
+
+	ctx := context.Background()
+
+	for name, tt := range map[string]struct {
+		testPackage *TestPackage
+		testFiles   []*TestFile
+	}{
+		"no files":                {NewTestPackage(1, 1, 1).WithType(packageType.Collection), nil},
+		"one source file":         {NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
+		"two source files":        {NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
+		"mixed object type files": {NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "packages") })
+
+			tt.testPackage.Insert(ctx, subDB, expectedOrgId)
+			sourceTestFileById := map[int]*TestFile{}
+			for _, f := range tt.testFiles {
+				f.Insert(ctx, subDB, expectedOrgId)
+				if f.ObjectType == objectType.Source {
+					sourceTestFileById[f.IntId(t)] = f
+				}
+			}
+			store := NewQueries(subDB, expectedOrgId, NoLogger{})
+
+			returnedFiles, err := store.GetSourceFilesByPackageId(ctx, tt.testPackage.Id)
+			require.NoError(t, err)
+			require.Len(t, returnedFiles, len(sourceTestFileById))
+			for _, returnedFile := range returnedFiles {
+				require.Contains(t, sourceTestFileById, returnedFile.ID)
+				expectedFile := sourceTestFileById[returnedFile.ID]
+				assert.Equal(t, int64(expectedFile.PackageId), returnedFile.PackageId)
+				assert.Equal(t, expectedFile.Size, returnedFile.Size)
+				assert.Equal(t, expectedFile.Published, returnedFile.Published)
+				assert.Equal(t, objectType.Source, returnedFile.ObjectType)
+			}
+
+		})
+	}
+}
+
+func TestQueries_GetFilesByNodeIds(t *testing.T) {
+	ctx := context.Background()
+
+	db := OpenDB(t)
+	t.Cleanup(func() { db.Close() })
+	expectedOrgId := 2
+
+	type packageFiles struct {
+		p *TestPackage
+		f []*TestFile
+	}
+	for name, tt := range map[string][]packageFiles{
+		"no packages": nil,
+		"no files": {packageFiles{
+			p: NewTestPackage(1, 1, 2).WithType(packageType.Collection),
+			f: nil,
+		}},
+		"some files": {
+			{NewTestPackage(1, 1, 1).WithType(packageType.Collection), nil},
+			{NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
+			{NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
+			{NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
+		},
+	} {
+
+		t.Run(name, func(t *testing.T) {
+			subDB := db.WithT(t)
+			expectedSourceFilesByPackageNodeId := map[string][]*TestFile{}
+			var packageNodeIds []string
+			for _, pf := range tt {
+				pf.p.Insert(ctx, subDB, expectedOrgId)
+				packageNodeIds = append(packageNodeIds, pf.p.NodeId)
+				var expectedSourceFiles []*TestFile
+				for _, f := range pf.f {
+					f.Insert(ctx, subDB, expectedOrgId)
+					if f.ObjectType == objectType.Source {
+						expectedSourceFiles = append(expectedSourceFiles, f)
+					}
+				}
+				if len(expectedSourceFiles) > 0 {
+					expectedSourceFilesByPackageNodeId[pf.p.NodeId] = expectedSourceFiles
+				}
+			}
+
+			store := NewQueries(subDB, expectedOrgId, NoLogger{})
+
+			t.Cleanup(func() { subDB.Truncate(expectedOrgId, "packages") })
+			returnedFiles, err := store.GetSourceFilesByNodeIds(ctx, packageNodeIds)
+			require.NoError(t, err)
+			require.Len(t, returnedFiles, len(expectedSourceFilesByPackageNodeId))
+			for actualPackageNodeId, actualSourceFiles := range returnedFiles {
+				require.Contains(t, expectedSourceFilesByPackageNodeId, actualPackageNodeId)
+				assert.Len(t, actualSourceFiles, len(expectedSourceFilesByPackageNodeId[actualPackageNodeId]))
+				for _, actualSourceFile := range actualSourceFiles {
+					expectedFileIdx := slices.IndexFunc(expectedSourceFilesByPackageNodeId[actualPackageNodeId], func(file *TestFile) bool {
+						return file.IntId(t) == actualSourceFile.ID
+					})
+					require.True(t, expectedFileIdx > -1)
+					expectedFile := expectedSourceFilesByPackageNodeId[actualPackageNodeId][expectedFileIdx]
+					assert.Equal(t, int64(expectedFile.PackageId), actualSourceFile.PackageId)
+					assert.Equal(t, expectedFile.Size, actualSourceFile.Size)
+					assert.Equal(t, expectedFile.Published, actualSourceFile.Published)
+					assert.Equal(t, objectType.Source, actualSourceFile.ObjectType)
+				}
+			}
+
+		})
 	}
 }

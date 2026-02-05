@@ -8,27 +8,30 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dytypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/fileType"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/processingState"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/uploadState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 type TestDB struct {
 	*sql.DB
@@ -53,13 +56,13 @@ func (tdb *TestDB) PingUntilReady() error {
 	return err
 }
 
-func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
+func OpenDB(t *testing.T, additionalOptions ...PostgresOption) *TestDB {
 	pgConfig := PostgresConfigFromEnv()
 	db, err := pgConfig.Open(additionalOptions...)
 	if err != nil {
 		assert.FailNowf(t, "cannot open database", "config: %s, err: %v", pgConfig, err)
 	}
-	testDB := TestDB{
+	testDB := &TestDB{
 		DB: db,
 		t:  t,
 	}
@@ -67,6 +70,16 @@ func OpenDB(t *testing.T, additionalOptions ...PostgresOption) TestDB {
 		assert.FailNow(testDB.t, "cannot ping database", "config: %s, err: %v", pgConfig, err)
 	}
 	return testDB
+}
+
+// WithT returns a new *TestDB with the same underlying *sql.DB as this TestDB, but with the given *testing.T.
+// Used in sub-tests to avoid the wrong *testing.T being involved. Gets around poor design that stashes the original
+// *testing.T.
+func (tdb *TestDB) WithT(t *testing.T) *TestDB {
+	return &TestDB{
+		DB: tdb.DB,
+		t:  t,
+	}
 }
 
 func (tdb *TestDB) ExecSQLFile(sqlFile string) {
@@ -80,7 +93,7 @@ func (tdb *TestDB) ExecSQLFile(sqlFile string) {
 			}
 		}
 	}
-	
+
 	path := filepath.Join("testdata", sqlFile)
 	sqlBytes, err := os.ReadFile(path)
 	if err != nil {
@@ -107,6 +120,24 @@ func (tdb *TestDB) TruncatePennsieve(table string) {
 	if err != nil {
 		assert.FailNowf(tdb.t, "error truncating table in pennsieve schema", "table: %s, error: %v", table, err)
 	}
+}
+
+func (tdb *TestDB) GetPackageStorage(orgID int, packageID int) (size int64) {
+	query := fmt.Sprintf(`SELECT size from "%d".package_storage where package_id = $1`, orgID)
+	require.NoError(tdb.t, tdb.QueryRow(query, packageID).Scan(&size))
+	return
+}
+
+func (tdb *TestDB) GetDatasetStorage(orgID int, datasetID int) (size int64) {
+	query := fmt.Sprintf(`SELECT size from "%d".dataset_storage where dataset_id = $1`, orgID)
+	require.NoError(tdb.t, tdb.QueryRow(query, datasetID).Scan(&size))
+	return
+}
+
+func (tdb *TestDB) GetOrganizationStorage(organizationID int) (size int64) {
+	query := `SELECT size from pennsieve.organization_storage where organization_id = $1`
+	require.NoError(tdb.t, tdb.QueryRow(query, organizationID).Scan(&size))
+	return
 }
 
 func (tdb *TestDB) Close() {
@@ -147,28 +178,28 @@ func (n NoLogger) LogInfo(_ ...any) {}
 
 func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
 
-func GetTestAWSConfig(t *testing.T, mockSqsUrl string) aws.Config {
-	awsKey := os.Getenv("TEST_AWS_KEY")
-	awsSecret := os.Getenv("TEST_AWS_SECRET")
-	minioURL := os.Getenv("MINIO_URL")
-	dynamodbURL := os.Getenv("DYNAMODB_URL")
+func GetTestAWSConfig(t *testing.T) aws.Config {
+	// awsKey and awsSecret should match MINIO_ROOT_USER and MINIO_ROOT_PASSWORD respectively.
+	awsKey := "awstestkey"
+	awsSecret := "awstestsecret"
 	awsConfig, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion("us-east-1"),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(awsKey, awsSecret, "")),
-		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			if service == s3.ServiceID {
-				return aws.Endpoint{URL: minioURL, HostnameImmutable: true}, nil
-			} else if service == dynamodb.ServiceID {
-				return aws.Endpoint{URL: dynamodbURL}, nil
-			} else if service == sqs.ServiceID {
-				return aws.Endpoint{URL: mockSqsUrl}, nil
-			}
-			return aws.Endpoint{}, fmt.Errorf("unknown test endpoint requested for service: %s", service)
-		})))
+	)
 	if err != nil {
 		assert.FailNow(t, "error creating AWS config", err)
 	}
 	return awsConfig
+}
+
+func GetTestMinioURL() string {
+	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
+	return getEnvOrDefault("MINIO_URL", "http://localhost:9000")
+}
+
+func GetTestDynamoDBURL() string {
+	// when tests are run in Docker on CI, the env vars are set. Otherwise, we are running the tests locally, so use localhost.
+	return getEnvOrDefault("DYNAMODB_URL", "http://localhost:8000")
 }
 
 type Fixture struct {
@@ -229,21 +260,43 @@ func NewS3Fixture(t *testing.T, client *s3.Client, inputs ...*s3.CreateBucketInp
 	return &f
 }
 
-func (f *S3Fixture) WithObjects(objectInputs ...*s3.PutObjectInput) *S3Fixture {
+func (f *S3Fixture) WithBucketVersioning(versionedBuckets ...string) *S3Fixture {
+	status := types.BucketVersioningStatusEnabled
+	ctx := context.Background()
+	for _, versionedBucket := range versionedBuckets {
+
+		input := &s3.PutBucketVersioningInput{
+			Bucket: aws.String(versionedBucket),
+			VersioningConfiguration: &types.VersioningConfiguration{
+				Status: status,
+			},
+		}
+		_, err := f.Client.PutBucketVersioning(ctx, input)
+		require.NoError(f.T, err)
+	}
+	return f
+}
+
+type PutObjectResponse struct {
+	Input  *s3.PutObjectInput
+	Output *s3.PutObjectOutput
+}
+
+func (f *S3Fixture) PutObjects(objectInputs ...*s3.PutObjectInput) (responses []PutObjectResponse) {
 	ctx := context.Background()
 	var waitInputs []s3.HeadObjectInput
 	for _, input := range objectInputs {
-		if _, err := f.Client.PutObject(ctx, input); err != nil {
-			assert.FailNow(f.T, "error putting test object", "bucket: %s, key: %s, error: %v", aws.ToString(input.Bucket), aws.ToString(input.Key), err)
-		}
+		output, err := f.Client.PutObject(ctx, input)
+		require.NoError(f.T, err, "error putting test object", "bucket: %s, key: %s", aws.ToString(input.Bucket), aws.ToString(input.Key))
 		waitInputs = append(waitInputs, s3.HeadObjectInput{Bucket: input.Bucket, Key: input.Key})
+		responses = append(responses, PutObjectResponse{Input: input, Output: output})
 	}
 	if err := waitForEverything(waitInputs, func(i s3.HeadObjectInput) error {
 		return s3.NewObjectExistsWaiter(f.Client).Wait(ctx, &i, time.Minute)
 	}); err != nil {
 		assert.FailNow(f.T, "test object not created", err)
 	}
-	return f
+	return
 }
 
 func (f *S3Fixture) Teardown() {
@@ -292,6 +345,23 @@ func (f *S3Fixture) Teardown() {
 	}); err != nil {
 		assert.FailNow(f.T, "test bucket not deleted", err)
 	}
+}
+
+func TestCreateDeleteRecordTableInput(tableName string) dynamodb.CreateTableInput {
+	return dynamodb.CreateTableInput{TableName: aws.String(tableName),
+		AttributeDefinitions: []dytypes.AttributeDefinition{
+			{
+				AttributeName: aws.String("NodeId"),
+				AttributeType: dytypes.ScalarAttributeTypeS,
+			},
+		},
+		KeySchema: []dytypes.KeySchemaElement{
+			{
+				AttributeName: aws.String("NodeId"),
+				KeyType:       dytypes.KeyTypeHash,
+			},
+		},
+		BillingMode: dytypes.BillingModePayPerRequest}
 }
 
 type DynamoDBFixture struct {
@@ -404,7 +474,7 @@ type TestPackage struct {
 	pgdb.Package
 }
 
-func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
+func NewTestPackage(id int, datasetId int, ownerId int) *TestPackage {
 	pt := RandPackageType()
 	nodeId := NewTestPackageNodeId(pt)
 	size := sql.NullInt64{}
@@ -413,7 +483,7 @@ func NewTestPackage(id int64, datasetId int, ownerId int) *TestPackage {
 		size.Valid = true
 	}
 	return &TestPackage{pgdb.Package{
-		Id:           id,
+		Id:           int64(id),
 		Name:         RandString(37),
 		PackageType:  pt,
 		PackageState: RandPackageState(),
@@ -471,7 +541,7 @@ func (p *TestPackage) AsPackage() pgdb.Package {
 	return p.Package
 }
 
-func (p *TestPackage) Insert(ctx context.Context, db TestDB, orgId int) *pgdb.Package {
+func (p *TestPackage) Insert(ctx context.Context, db *TestDB, orgId int) *pgdb.Package {
 	var pkg pgdb.Package
 	query := fmt.Sprintf(`INSERT INTO "%d".packages (%[2]s)
 						  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -550,4 +620,89 @@ func RandPackageState() packageState.State {
 		packageState.Deleted,
 		packageState.Restoring}
 	return states[rand.Intn(len(states))]
+}
+
+type TestFile struct {
+	pgdb.File
+}
+
+func NewTestFile(packageId int) *TestFile {
+	objType := randInt64Type(objectType.Source)
+	procState := legalProcessingState(objType)
+	file := pgdb.File{
+		PackageId:  packageId,
+		Name:       RandString(37),
+		FileType:   randInt64Type(fileType.ZIP),
+		S3Bucket:   RandString(15),
+		S3Key:      RandString(64),
+		ObjectType: objType,
+		// Keep size small, because we will generate objects of this size for Minio.
+		Size:            rand.Int63n(1000) + 1,
+		CheckSum:        "{}",
+		ProcessingState: procState,
+		UploadedState:   randInt64Type(uploadState.Uploaded),
+		Published:       false,
+	}
+	return &TestFile{file}
+}
+
+func (f *TestFile) WithPublished(published bool) *TestFile {
+	f.Published = published
+	return f
+}
+
+func (f *TestFile) WithObjectType(objType objectType.ObjectType) *TestFile {
+	f.ObjectType = objType
+	f.ProcessingState = legalProcessingState(objType)
+	return f
+}
+
+func (f *TestFile) WithBucket(bucketName string) *TestFile {
+	f.S3Bucket = bucketName
+	return f
+}
+
+func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
+	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published) 
+                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+                          RETURNING id`, orgId)
+	var fileId string
+	require.NoError(db.t, db.QueryRowContext(ctx, query,
+		f.PackageId,
+		f.Name,
+		f.FileType.String(),
+		f.S3Bucket,
+		f.S3Key,
+		f.ObjectType.String(),
+		f.Size,
+		f.CheckSum,
+		f.ProcessingState.String(),
+		f.UploadedState.String(),
+		f.Published).
+		Scan(&fileId), "error inserting test file")
+	// Why is pgdb.File.Id defined as string?
+	f.Id = fileId
+	return fileId
+}
+
+// IntId returns the string valued pgdb.File.Id as an int instead of a string.
+// Seems to be a bug in pbdb that this is defined as a string?
+func (f *TestFile) IntId(t require.TestingT) int {
+	require.NotEmpty(t, f.Id, "File.Id is empty. Call Insert() to generate Id value")
+	intId, err := strconv.Atoi(f.Id)
+	require.NoError(t, err, "error converting File.Id to int")
+	return intId
+}
+
+func randInt64Type[T ~int64](maxValue T) T {
+	return T(rand.Int63n(int64(maxValue + 1)))
+}
+
+// legalProcessingState returns a processingState.ProcessingState that will satisfy check constraint on object type and processing state.
+func legalProcessingState(objType objectType.ObjectType) processingState.ProcessingState {
+	procState := processingState.NotProcessable
+	if objType == objectType.Source {
+		procState = randInt64Type(processingState.Processed)
+	}
+	return procState
 }

@@ -69,20 +69,20 @@ func (c *PostgresConfig) Open(additionalOptions ...PostgresOption) (*sql.DB, err
 	return sql.Open("postgres", b.String())
 }
 
-func (c *PostgresConfig) OpenAtSchema(schema string) (*sql.DB, error) {
-	// Setting search_path in the connection string is a lib/pq driver extension.
-	// Might not be available with other drivers.
-	connStr := fmt.Sprintf("%s search_path=%s", c, schema)
-	return sql.Open("postgres", connStr)
-}
-
 func PostgresConfigFromEnv() *PostgresConfig {
 	return &PostgresConfig{
-		Host:     os.Getenv("POSTGRES_HOST"),
-		Port:     os.Getenv("POSTGRES_PORT"),
-		User:     os.Getenv("POSTGRES_USER"),
-		Password: os.Getenv("POSTGRES_PASSWORD"),
-		DBName:   os.Getenv("PENNSIEVE_DB"),
-		SSLMode:  os.Getenv("POSTGRES_SSL_MODE"),
+		Host:     getEnvOrDefault("POSTGRES_HOST", "localhost"),
+		Port:     getEnvOrDefault("POSTGRES_PORT", "5432"),
+		User:     getEnvOrDefault("POSTGRES_USER", "postgres"),
+		Password: getEnvOrDefault("POSTGRES_PASSWORD", "password"),
+		DBName:   getEnvOrDefault("PENNSIEVE_DB", "postgres"),
+		SSLMode:  getEnvOrDefault("POSTGRES_SSL_MODE", "disable"),
 	}
+}
+
+func getEnvOrDefault(varName string, defaultValue string) string {
+	if value, set := os.LookupEnv(varName); set {
+		return value
+	}
+	return defaultValue
 }

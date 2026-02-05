@@ -11,17 +11,22 @@ type RowScanner interface {
 }
 
 type ModelScanner struct {
-	ColumnNames       []string
-	ColumnNamesString string
+	ColumnNames                []string
+	ColumnNamesString          string
+	QualifiedColumnNamesString string
 }
 
-func NewModelScanner(columnNames []string) *ModelScanner {
-	return &ModelScanner{ColumnNames: columnNames, ColumnNamesString: strings.Join(packagesColumns, ", ")}
+func NewModelScanner(qualifier string, columnNames []string) *ModelScanner {
+	return &ModelScanner{
+		ColumnNames:                columnNames,
+		ColumnNamesString:          strings.Join(columnNames, ", "),
+		QualifiedColumnNamesString: qualifiedColumnNamesString(qualifier, columnNames),
+	}
 }
 
-func (ms *ModelScanner) QualifiedColumnNamesString(qualifier string) string {
-	q := make([]string, len(ms.ColumnNames))
-	for i, c := range ms.ColumnNames {
+func qualifiedColumnNamesString(qualifier string, columnNames []string) string {
+	q := make([]string, len(columnNames))
+	for i, c := range columnNames {
 		q[i] = fmt.Sprintf("%s.%s", qualifier, c)
 	}
 	return strings.Join(q, ", ")
@@ -29,15 +34,12 @@ func (ms *ModelScanner) QualifiedColumnNamesString(qualifier string) string {
 
 type PackageScanner struct {
 	*ModelScanner
-	QualifiedColumnNamesString string
 }
 
 func NewPackageScanner(columnNames []string) *PackageScanner {
-	ms := NewModelScanner(columnNames)
-	q := ms.QualifiedColumnNamesString("packages")
+	ms := NewModelScanner("packages", columnNames)
 	return &PackageScanner{
-		ModelScanner:               ms,
-		QualifiedColumnNamesString: q,
+		ModelScanner: ms,
 	}
 }
 

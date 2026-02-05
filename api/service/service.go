@@ -10,6 +10,7 @@ import (
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
+	"os"
 )
 
 type PackagesService interface {
@@ -35,7 +36,7 @@ func (s *packagesService) withQueueStore(queueStore store.QueueStore) *packagesS
 func NewPackagesService(db *sql.DB, sqsClient *sqs.Client, orgId int, logger logging.Logger) PackagesService {
 	str := store.NewPostgresStoreFactory(db).WithLogging(logger)
 	svc := newPackagesServiceWithFactory(str, orgId, logger)
-	queueStore := store.NewQueueStore(sqsClient)
+	queueStore := store.NewQueueStore(sqsClient, os.Getenv(store.RestorePackageQueueURLEnvKey))
 	return svc.withQueueStore(queueStore)
 }
 

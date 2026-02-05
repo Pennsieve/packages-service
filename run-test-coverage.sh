@@ -1,27 +1,16 @@
 #!/usr/bin/env sh
 
-if [ -n "$1" ]; then
-  env_file=$1
-  export $(grep -v '^#' "$env_file" | xargs)
+if [ $# -eq 0 ]; then
+    echo "Error: No modules specified. Pass modules as arguments."
+    exit 1
 fi
 
-root_dir=$(pwd)
-
 exit_status=0
-echo "RUNNING lambda/service TEST COVERAGE"
-cd "$root_dir/lambda/service"
-go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))
-go tool cover -func=coverage.out
 
-echo "RUNNING lambda/restore TEST COVERAGE"
-cd "$root_dir/lambda/restore"
-go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))
-go tool cover -func=coverage.out
-
-cd "$root_dir/api"
-echo "RUNNING api TEST COVERAGE"
-go test -coverprofile=coverage.out -v ./...; exit_status=$((exit_status || $? ))
-go tool cover -func=coverage.out
+for mod in "$@"; do
+    echo "RUNNING $mod TEST COVERAGE"
+    go -C "$mod" test -coverprofile=coverage.out -v ./... || exit_status=1
+    go -C "$mod" tool cover -func=coverage.out
+done
 
 exit $exit_status
-

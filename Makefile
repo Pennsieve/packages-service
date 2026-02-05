@@ -1,4 +1,4 @@
-.PHONY: help clean test test-ci package publish
+.PHONY: help clean test test-ci package publish vet tidy fmt
 
 LAMBDA_BUCKET ?= "pennsieve-cc-lambda-functions-use1"
 WORKING_DIR   ?= "$(shell pwd)"
@@ -24,6 +24,8 @@ KEY_ROTATION_PACKAGE_NAME  ?= "${KEY_ROTATION_NAME}-${IMAGE_TAG}.zip"
 
 .DEFAULT: help
 
+MODULES := lambda/service lambda/restore lambda/key-rotation api
+
 help:
 	@echo "Make Help for $(SERVICE_NAME)"
 	@echo ""
@@ -32,30 +34,33 @@ help:
 	@echo "make test-ci			- run dockerized tests for Jenkins"
 	@echo "make package			- create venv and package lambda function"
 	@echo "make publish			- package and publish lambda function"
+	@echo "make tidy            - run go mod tidy on all modules"
+	@echo "make vet             - run go vet on all modules"
+	@echo "make fmt             - run go fmt on all modules"
+
 
 # Start the local versions of docker services
 local-services:
 	docker compose -f docker-compose.test.yml down --remove-orphans
-	docker compose -f docker-compose.test.yml up -d pennsievedb minio dynamodb
+	docker compose -f docker-compose.test.yml -f docker-compose.test.local.override.yml up -d pennsievedb minio dynamodb
 	@echo "Waiting for database to be ready..."
-	@timeout 30 sh -c 'until PGPASSWORD=password psql -h localhost -p 5432 -U postgres -d postgres -c "SELECT 1;" > /dev/null 2>&1; do sleep 1; done'
+	@until docker compose -f docker-compose.test.yml exec pennsievedb pg_isready -U postgres; do sleep 1; done
 
 # Run tests locally
 test: local-services
-	./run-tests.sh localtest.env .env
+	./run-tests.sh $(MODULES)
 	docker compose -f docker-compose.test.yml down --remove-orphans
-	make clean
 
 # Run test coverage locally
 test-coverage: local-services
-	./run-test-coverage.sh localtest.env
+	./run-test-coverage.sh $(MODULES)
 	docker compose -f docker-compose.test.yml down --remove-orphans
 	make clean
 
 # Run dockerized tests (used on Jenkins)
 test-ci:
 	docker compose -f docker-compose.test.yml down --remove-orphans
-	@IMAGE_TAG=$(IMAGE_TAG) docker-compose -f docker-compose.test.yml up --exit-code-from=ci-tests ci-tests
+	@IMAGE_TAG=$(IMAGE_TAG) docker compose -f docker-compose.test.yml run --rm ci-tests $(MODULES)
 
 clean: docker-clean
 	rm -fR lambda/bin
@@ -120,8 +125,10 @@ publish: package
 
 # Run go mod tidy on modules
 tidy:
-	cd ${WORKING_DIR}/lambda/service; go mod tidy
-	cd ${WORKING_DIR}/lambda/restore; go mod tidy
-	cd ${WORKING_DIR}/lambda/key-rotation; go mod tidy
-	cd ${WORKING_DIR}/api; go mod tidy
+	@for mod in $(MODULES); do echo "==> tidy $$mod"; go -C $$mod mod tidy; done
 
+vet:
+	@for mod in $(MODULES); do echo "==> vet $$mod"; go -C $$mod vet ./...; done
+
+fmt:
+	@for mod in $(MODULES); do echo "==> fmt $$mod"; go -C $$mod fmt ./...; done

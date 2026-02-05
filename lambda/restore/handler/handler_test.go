@@ -2,13 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
@@ -16,16 +15,16 @@ import (
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/packages-service/api/store/restore"
+	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"math/rand"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strconv"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -81,16 +80,7 @@ func TestHandleMessage(t *testing.T) {
 	ctx := context.Background()
 
 	orgId := 2
-	mockSQSServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
-		fmt.Println("TODO: verify expectations", r)
-	}))
-	defer mockSQSServer.Close()
-
-	awsConfig := store.GetTestAWSConfig(t, mockSQSServer.URL)
-
-	s3Client := s3.NewFromConfig(awsConfig)
-	dyClient := dynamodb.NewFromConfig(awsConfig)
-	sqsClient := sqs.NewFromConfig(awsConfig)
+	datasetId := 1
 
 	db := store.OpenDB(t)
 	defer db.Close()
@@ -100,92 +90,132 @@ func TestHandleMessage(t *testing.T) {
 	defer db.Truncate(orgId, "dataset_storage")
 	defer db.TruncatePennsieve("organization_storage")
 
-	rootCollectionPkg := store.NewTestPackage(1, 1, 1).
+	rootCollectionPkg := store.NewTestPackage(1, datasetId, 1).
 		WithType(packageType.Collection).
 		WithState(packageState.Ready).
 		Insert(ctx, db, orgId)
-	restoringCollection := store.NewTestPackage(2, 1, 1).
+	restoringCollection := store.NewTestPackage(2, datasetId, 1).
 		WithParentId(rootCollectionPkg.Id).
 		WithType(packageType.Collection).
 		Restoring().
 		Insert(ctx, db, orgId)
 	untouchedPackages := []*pgdb.Package{rootCollectionPkg}
-	var restoringFilePackages []*pgdb.Package
+	var restoringFilePackages []*TestSourcePackage
 	restoringCollectionPackages := []*pgdb.Package{restoringCollection}
+	var publishedFiles []*store.TestFile
+	var unpublishedFiles []*store.TestFile
 	// Insert the packages inside restoringCollection and prepare the S3 put requests.
-	bucketName := "test-bucket"
-	putObjectInputByNodeId := map[string]*s3.PutObjectInput{}
-	for i := int64(3); i < 53; i++ {
-		pkg := store.NewTestPackage(i, 1, 1).
-			WithParentId(restoringCollection.Id).
-			Deleted().
-			Insert(ctx, db, orgId)
-		if pkg.PackageType != packageType.Collection {
-			s3Key := fmt.Sprintf("%s/%s", uuid.NewString(), uuid.NewString())
-			putObjectInputByNodeId[pkg.NodeId] = &s3.PutObjectInput{
-				Bucket: aws.String(bucketName),
-				Key:    aws.String(s3Key),
-				Body:   strings.NewReader(fmt.Sprintf("object %d content", i))}
-			restoringFilePackages = append(restoringFilePackages, pkg)
-
-		} else {
+	storageBucketName := "test-storage-bucket"
+	publishBucketName := "test-publish-bucket"
+	for i := 3; i < 53; i++ {
+		if i%2 == 1 {
+			pkg := store.NewTestPackage(i, 1, 1).
+				WithParentId(restoringCollection.Id).
+				WithType(packageType.Collection).
+				Deleted().
+				Insert(ctx, db, orgId)
 			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
+		} else {
+			// about half of the packages
+			isPublished := i%4 == 0
+			bucket := storageBucketName
+			if isPublished {
+				bucket = publishBucketName
+			}
+			pkg := NewTestSourcePackage(i, 1, 1, func(testPackage *store.TestPackage) {
+				testPackage.WithType(packageType.CSV)
+				testPackage.WithParentId(restoringCollection.Id)
+				testPackage.Deleted()
+			}).WithSources(1, bucket, func(testFile *store.TestFile) {
+				testFile.WithPublished(isPublished)
+				testFile.S3Key = fmt.Sprintf("package-%d-%s", i, uuid.NewString())
+			}).Insert(ctx, db, orgId)
+			restoringFilePackages = append(restoringFilePackages, pkg)
+			if isPublished {
+				publishedFiles = append(publishedFiles, pkg.Files...)
+			} else {
+				unpublishedFiles = append(unpublishedFiles, pkg.Files...)
+			}
 		}
 	}
 
-	// Create the S3 fixture with the bucket and put requests
-	putObjectInputs := make([]*s3.PutObjectInput, 0, len(putObjectInputByNodeId))
-	for _, v := range putObjectInputByNodeId {
-		putObjectInputs = append(putObjectInputs, v)
-	}
-	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(bucketName), ObjectLockEnabledForBucket: aws.Bool(true)}).WithObjects(putObjectInputs...)
+	jobsQueueID := "TestJobsQueueUrl"
+
+	mockSQSServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
+		var sqsMessage struct {
+			MessageBody string
+			QueueUrl    string
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&sqsMessage))
+		assert.Equal(t, jobsQueueID, sqsMessage.QueueUrl)
+
+		var logMsg changelog.Message
+		require.NoError(t, json.Unmarshal([]byte(sqsMessage.MessageBody), &logMsg))
+		assert.Equal(t, int64(orgId), logMsg.DatasetChangelogEventJob.OrganizationId)
+		assert.Equal(t, int64(datasetId), logMsg.DatasetChangelogEventJob.DatasetId)
+
+		assert.Len(t, logMsg.DatasetChangelogEventJob.Events, len(restoringCollectionPackages)+len(restoringFilePackages))
+		var changelogNodeIds []string
+		for _, e := range logMsg.DatasetChangelogEventJob.Events {
+			assert.Equal(t, changelog.RestorePackage, e.EventType)
+			actualDetail := requireAsType[map[string]any](t, e.EventDetail)
+			require.Contains(t, actualDetail, "nodeId")
+			actualNodeId := requireAsType[string](t, actualDetail["nodeId"])
+			changelogNodeIds = append(changelogNodeIds, actualNodeId)
+		}
+		for _, p := range untouchedPackages {
+			assert.NotContains(t, changelogNodeIds, p.NodeId)
+		}
+		for _, p := range restoringFilePackages {
+			assert.Contains(t, changelogNodeIds, p.Package.NodeId)
+		}
+		for _, p := range restoringCollectionPackages {
+			assert.Contains(t, changelogNodeIds, p.NodeId)
+		}
+	}))
+	defer mockSQSServer.Close()
+
+	awsConfig := store.GetTestAWSConfig(t)
+
+	s3Client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(store.GetTestMinioURL())
+		// by default minio expects path style
+		options.UsePathStyle = true
+	})
+	dyClient := dynamodb.NewFromConfig(awsConfig, func(options *dynamodb.Options) {
+		options.BaseEndpoint = aws.String(store.GetTestDynamoDBURL())
+	})
+	sqsClient := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) {
+		options.BaseEndpoint = aws.String(mockSQSServer.URL)
+	})
+
+	// deliberately only creating storage bucket, since this service should not attempt to use publish bucket.
+	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(storageBucketName)}).
+		WithBucketVersioning(storageBucketName)
 	defer s3Fixture.Teardown()
 
+	var putObjectResults []store.PutObjectResponse
+	for _, v := range restoringFilePackages {
+		putObjectResults = append(putObjectResults, s3Fixture.PutObjects(v.PutObjectInputs()...)...)
+	}
+
 	// Delete the S3 objects and prepare put requests for the delete-records in Dynamo
-	deleteRecordTableName := os.Getenv(store.DeleteRecordTableNameEnvKey)
-	putItemInputByNodeId := map[string]*dynamodb.PutItemInput{}
-	for nodeId, putObject := range putObjectInputByNodeId {
-		// Delete the object from S3
-		deleteObjectOutput, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucketName), Key: putObject.Key})
-		if err != nil {
-			assert.FailNow(t, "error setting up deleted object", err)
-		}
+	deleteRecordTableName := "TestDeleteRecords"
+	var putItemInputs []*dynamodb.PutItemInput
+	for _, fp := range restoringFilePackages {
+		keyToDeleteVersionId := fp.DeleteFiles(ctx, t, s3Client)
+		putItemInputs = append(putItemInputs, fp.PutItemInputs(t, deleteRecordTableName, keyToDeleteVersionId)...)
 
-		// Put a delete-record in DynamoDB for object
-		deleteRecord := store.S3ObjectInfo{Bucket: bucketName, Key: aws.ToString(putObject.Key), NodeId: nodeId, Size: strconv.Itoa(rand.Intn(1000000)), VersionId: aws.ToString(deleteObjectOutput.VersionId)}
-		deleteRecordItem, err := attributevalue.MarshalMap(deleteRecord)
-		if err != nil {
-			assert.FailNow(t, "error setting up item in delete record table", err)
-		}
-		putItemInputByNodeId[nodeId] = &dynamodb.PutItemInput{TableName: aws.String(deleteRecordTableName), Item: deleteRecordItem}
 	}
 
-	putItemInputs := make([]*dynamodb.PutItemInput, 0, len(putItemInputByNodeId))
-	for _, input := range putItemInputByNodeId {
-		putItemInputs = append(putItemInputs, input)
-	}
-	createTableInput := dynamodb.CreateTableInput{TableName: aws.String(deleteRecordTableName),
-		AttributeDefinitions: []types.AttributeDefinition{
-			{
-				AttributeName: aws.String("NodeId"),
-				AttributeType: types.ScalarAttributeTypeS,
-			},
-		},
-		KeySchema: []types.KeySchemaElement{
-			{
-				AttributeName: aws.String("NodeId"),
-				KeyType:       types.KeyTypeHash,
-			},
-		},
-		BillingMode: types.BillingModePayPerRequest}
-
+	createTableInput := store.TestCreateDeleteRecordTableInput(deleteRecordTableName)
 	dyFixture := store.NewDynamoDBFixture(t, dyClient, &createTableInput).WithItems(putItemInputs...)
 	defer dyFixture.Teardown()
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	objectStore := store.NewS3Store(s3Client)
-	nosqlStore := store.NewDynamoDBStore(dyClient)
-	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient)
+	nosqlStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
+	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient, jobsQueueID)
 	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore)
 	expectedMessageId := "handle-message-message-id"
 	message := events.SQSMessage{
@@ -213,21 +243,38 @@ func TestHandleMessage(t *testing.T) {
 		for _, restoring := range restoringCollectionPackages {
 			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, CollectionRestoredState, restoring, actual)
+				assertRestoredPackage(t, CollectionRestoredState, *restoring, actual)
 			}
 		}
 		for _, restoring := range restoringFilePackages {
-			actual, err := v.GetPackageByNodeId(ctx, restoring.NodeId)
+			actual, err := v.GetPackageByNodeId(ctx, restoring.Package.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, FileRestoredState, restoring, actual)
+				assertRestoredPackage(t, FileRestoredState, restoring.Package.AsPackage(), actual)
 			}
 		}
 
-		listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
+		listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(storageBucketName)})
 		if assert.NoError(t, err) {
 			// No more delete markers and the number of versions is the same.
-			assert.Empty(t, listOut.DeleteMarkers)
-			assert.Len(t, listOut.Versions, len(putObjectInputs))
+			if !assert.Empty(t, listOut.DeleteMarkers) {
+				fmt.Println("delete markers:")
+				for _, d := range listOut.DeleteMarkers {
+					key := aws.ToString(d.Key)
+					versionId := aws.ToString(d.VersionId)
+					isLatest := aws.ToBool(d.IsLatest)
+					fmt.Println(key, versionId, isLatest)
+				}
+			}
+			if assert.Len(t, listOut.Versions, len(putObjectResults)) {
+				for _, actualVersion := range listOut.Versions {
+					expectedIdx := slices.IndexFunc(putObjectResults, func(s store.PutObjectResponse) bool {
+						return aws.ToString(s.Input.Bucket) == storageBucketName && aws.ToString(s.Input.Key) == aws.ToString(actualVersion.Key)
+					})
+					require.True(t, expectedIdx != -1, "expected object with key %s not found in bucket %s", aws.ToString(actualVersion.Key), storageBucketName)
+					expectedVersion := aws.ToString(putObjectResults[expectedIdx].Output.VersionId)
+					assert.Equal(t, expectedVersion, aws.ToString(actualVersion.VersionId))
+				}
+			}
 		}
 		scanOut, err := dyFixture.Client.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(deleteRecordTableName)})
 		if assert.NoError(t, err) {
@@ -243,9 +290,21 @@ func assertUntouchedPackage(t *testing.T, initial, current *pgdb.Package) {
 	assert.Equal(t, initial, current)
 }
 
-func assertRestoredPackage(t *testing.T, expectedState packageState.State, initial, current *pgdb.Package) {
-	assert.Equal(t, expectedState, current.PackageState)
-	deletedNamePrefix := DeletedNamePrefix(initial.NodeId)
-	assert.False(t, strings.HasPrefix(current.Name, deletedNamePrefix))
-	assert.Equal(t, initial.Name[len(deletedNamePrefix):], current.Name)
+func assertRestoredName(t *testing.T, nodeId string, deletedName string, currentName string) {
+	deletedNamePrefix := DeletedNamePrefix(nodeId)
+	assert.True(t, strings.HasPrefix(deletedName, deletedNamePrefix))
+	assert.False(t, strings.HasPrefix(currentName, deletedNamePrefix))
+	assert.Equal(t, deletedName[len(deletedNamePrefix):], currentName)
+}
+
+func assertRestoredPackage(t *testing.T, expectedState packageState.State, initial pgdb.Package, current *pgdb.Package) {
+	assert.Equal(t, expectedState, current.PackageState, "expected state: %s, actual state: %s", expectedState.String(), current.PackageState.String())
+	assertRestoredName(t, initial.NodeId, initial.Name, current.Name)
+}
+
+// requireAsType tests that the type of actual is ExpectedType and if so, returns actual converted to that type.
+func requireAsType[ExpectedType any](t *testing.T, actual any) ExpectedType {
+	var expected ExpectedType
+	require.IsType(t, expected, actual)
+	return actual.(ExpectedType)
 }

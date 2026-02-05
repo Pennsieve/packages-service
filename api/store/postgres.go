@@ -8,6 +8,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
@@ -206,6 +207,59 @@ func (q *Queries) GetPackageByNodeId(ctx context.Context, packageId string) (*pg
 	}
 }
 
+func (q *Queries) GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]File, error) {
+	query := fmt.Sprintf(`SELECT %s from "%d".files WHERE package_id = $1 AND object_type = $2`, filesScanner.ColumnNamesString, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, packageId, objectType.Source.String())
+	if err != nil {
+		return nil, fmt.Errorf("error getting source files by package id: %w", err)
+	}
+	defer q.closeRows(rows)
+
+	var files []File
+	for rows.Next() {
+		var file File
+		if err := filesScanner.Scan(rows, &file); err != nil {
+			return nil, fmt.Errorf("error scanning file row: %w", err)
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error on file rows iteration: %w", err)
+	}
+
+	return files, nil
+}
+
+func (q *Queries) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]File, error) {
+	if len(packageNodeIds) == 0 {
+		return map[string][]File{}, nil
+	}
+	query := fmt.Sprintf(`SELECT packages.node_id, %s from "%[2]d".packages JOIN "%[2]d".files 
+          ON packages.id = files.package_id				  
+          WHERE packages.node_id = ANY($1) AND files.object_type = $2`,
+		filesScanner.QualifiedColumnNamesString, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, pq.Array(packageNodeIds), objectType.Source.String())
+	if err != nil {
+		return nil, fmt.Errorf("error getting source files by package ids: %w", err)
+	}
+	defer q.closeRows(rows)
+
+	filesByPackageId := map[string][]File{}
+	for rows.Next() {
+		var packageNodeId string
+		var file File
+		if err := filesScanner.JoinScan(rows, &packageNodeId, &file); err != nil {
+			return nil, fmt.Errorf("error scanning file row for package ids: %w", err)
+		}
+		filesByPackageId[packageNodeId] = append(filesByPackageId[packageNodeId], file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error on file rows iteration for package ids: %w", err)
+	}
+
+	return filesByPackageId, nil
+}
+
 func (q *Queries) closeRows(rows *sql.Rows) {
 	if err := rows.Close(); err != nil {
 		q.LogWarnWithFields(log.Fields{"error": err}, "ignoring error while closing Rows")
@@ -402,5 +456,8 @@ type SQLStore interface {
 	IncrementPackageStorage(ctx context.Context, packageId int64, sizeIncrement int64) error
 	IncrementPackageStorageAncestors(ctx context.Context, parentId int64, size int64) error
 	GetPackageByNodeId(ctx context.Context, packageId string) (*pgdb.Package, error)
+	// GetSourceFilesByPackageId returns Files that have the object type "source" for the given package.
+	GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]File, error)
+	GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]File, error)
 	logging.Logger
 }

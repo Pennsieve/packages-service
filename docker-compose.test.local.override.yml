@@ -1,0 +1,11 @@
+services:
+  pennsievedb:
+    ports:
+      - "5432:5432"
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+  dynamodb:
+    ports:
+      - "8000:8000"

@@ -241,6 +241,14 @@ func (m *MockPackagesStore) UpdatePackageName(ctx context.Context, packageId int
 	return args.Error(0)
 }
 
+func (m *MockPackagesStore) GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]store.File, error) {
+	panic("mock me if you need me")
+}
+
+func (m *MockPackagesStore) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]store.File, error) {
+	panic("mock me if you need me")
+}
+
 func (m *MockPackagesStore) NewSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }
