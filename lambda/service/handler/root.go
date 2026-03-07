@@ -16,6 +16,9 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 		// Authenticated endpoint for generating CloudFront signed URLs
 		cloudfrontHandler := CloudFrontSignedURLHandler{RequestHandler: *h}
 		return cloudfrontHandler.handle(ctx)
+	case "/download-manifest":
+		downloadHandler := DownloadManifestHandler{RequestHandler: *h}
+		return downloadHandler.handle(ctx)
 	default:
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}

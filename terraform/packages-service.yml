@@ -65,6 +65,46 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
+  /download-manifest:
+    post:
+      summary: Get download manifest with presigned S3 URLs
+      description: |
+        Returns file metadata and presigned S3 URLs for the requested packages.
+        Resolves package hierarchies (including collections) into individual files
+        with their S3 download URLs.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: downloadManifest
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Packages Service
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      requestBody:
+        description: package node IDs to resolve
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/downloadRequest'
+      responses:
+        '200':
+          description: Download manifest with presigned URLs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/downloadManifestResponse'
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+
   /cloudfront/sign:
     get:
       summary: Generate CloudFront signed URLs for assets
@@ -284,4 +324,51 @@ components:
           description: ISO 8601 formatted expiration time
           example: "2025-12-23T01:11:32Z"
 
+    downloadRequest:
+      type: object
+      required:
+        - nodeIds
+      properties:
+        nodeIds:
+          type: array
+          items:
+            type: string
+          description: Package node IDs to resolve into downloadable files
 
+    downloadManifestResponse:
+      type: object
+      properties:
+        header:
+          type: object
+          properties:
+            count:
+              type: integer
+              description: Number of files in the manifest
+            size:
+              type: integer
+              format: int64
+              description: Total size in bytes
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              nodeId:
+                type: string
+              fileName:
+                type: string
+              packageName:
+                type: string
+              path:
+                type: array
+                items:
+                  type: string
+                description: Hierarchical folder path
+              url:
+                type: string
+                description: Presigned S3 download URL (valid for 180 minutes)
+              size:
+                type: integer
+                format: int64
+              fileExtension:
+                type: string
