@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
@@ -431,6 +432,7 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 		"one source file":         {NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
 		"two source files":        {NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
 		"mixed object type files": {NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
+		"published file":          {NewTestPackage(5, 1, 1), []*TestFile{NewTestFile(5).WithObjectType(objectType.Source).WithPublished(StringPtr(uuid.NewString()))}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			subDB := db.WithT(t)
@@ -482,7 +484,7 @@ func TestQueries_GetFilesByNodeIds(t *testing.T) {
 		"some files": {
 			{NewTestPackage(1, 1, 1).WithType(packageType.Collection), nil},
 			{NewTestPackage(2, 1, 1), []*TestFile{NewTestFile(2).WithObjectType(objectType.Source)}},
-			{NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source), NewTestFile(3).WithObjectType(objectType.Source)}},
+			{NewTestPackage(3, 1, 1), []*TestFile{NewTestFile(3).WithObjectType(objectType.Source).WithPublished(StringPtr(uuid.NewString())), NewTestFile(3).WithObjectType(objectType.Source)}},
 			{NewTestPackage(4, 1, 1), []*TestFile{NewTestFile(4).WithObjectType(objectType.Source), NewTestFile(4).WithObjectType(objectType.View)}},
 		},
 	} {
