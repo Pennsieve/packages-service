@@ -117,9 +117,12 @@ func TestHandleMessage(t *testing.T) {
 			restoringCollectionPackages = append(restoringCollectionPackages, pkg)
 		} else {
 			// about half of the packages
-			isPublished := i%4 == 0
+			var publishedS3VersionID *string
+			if i%4 == 0 {
+				publishedS3VersionID = store.StringPtr(uuid.NewString())
+			}
 			bucket := storageBucketName
-			if isPublished {
+			if publishedS3VersionID != nil {
 				bucket = publishBucketName
 			}
 			pkg := NewTestSourcePackage(i, 1, 1, func(testPackage *store.TestPackage) {
@@ -127,11 +130,11 @@ func TestHandleMessage(t *testing.T) {
 				testPackage.WithParentId(restoringCollection.Id)
 				testPackage.Deleted()
 			}).WithSources(1, bucket, func(testFile *store.TestFile) {
-				testFile.WithPublished(isPublished)
+				testFile.WithPublished(publishedS3VersionID)
 				testFile.S3Key = fmt.Sprintf("package-%d-%s", i, uuid.NewString())
 			}).Insert(ctx, db, orgId)
 			restoringFilePackages = append(restoringFilePackages, pkg)
-			if isPublished {
+			if publishedS3VersionID != nil {
 				publishedFiles = append(publishedFiles, pkg.Files...)
 			} else {
 				unpublishedFiles = append(unpublishedFiles, pkg.Files...)

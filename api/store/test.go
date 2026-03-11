@@ -637,17 +637,17 @@ func NewTestFile(packageId int) *TestFile {
 		S3Key:      RandString(64),
 		ObjectType: objType,
 		// Keep size small, because we will generate objects of this size for Minio.
-		Size:            rand.Int63n(1000) + 1,
-		CheckSum:        "{}",
-		ProcessingState: procState,
-		UploadedState:   randInt64Type(uploadState.Uploaded),
-		Published:       false,
+		Size:                 rand.Int63n(1000) + 1,
+		CheckSum:             "{}",
+		ProcessingState:      procState,
+		UploadedState:        randInt64Type(uploadState.Uploaded),
+		PublishedS3VersionId: nil,
 	}
 	return &TestFile{file}
 }
 
-func (f *TestFile) WithPublished(published bool) *TestFile {
-	f.Published = published
+func (f *TestFile) WithPublished(publishedS3VersionID *string) *TestFile {
+	f.PublishedS3VersionId = publishedS3VersionID
 	return f
 }
 
@@ -663,7 +663,7 @@ func (f *TestFile) WithBucket(bucketName string) *TestFile {
 }
 
 func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
-	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published) 
+	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published_s3_version_id) 
                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
                           RETURNING id`, orgId)
 	var fileId string
@@ -678,7 +678,7 @@ func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
 		f.CheckSum,
 		f.ProcessingState.String(),
 		f.UploadedState.String(),
-		f.Published).
+		f.PublishedS3VersionId).
 		Scan(&fileId), "error inserting test file")
 	// Why is pgdb.File.Id defined as string?
 	f.Id = fileId
@@ -705,4 +705,8 @@ func legalProcessingState(objType objectType.ObjectType) processingState.Process
 		procState = randInt64Type(processingState.Processed)
 	}
 	return procState
+}
+
+func StringPtr(value string) *string {
+	return &value
 }

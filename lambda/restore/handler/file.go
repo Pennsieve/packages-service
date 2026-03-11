@@ -338,9 +338,9 @@ func packageIsPublished(sourceFiles []store.File) (bool, error) {
 	if len(sourceFiles) == 0 {
 		return false, fmt.Errorf("non-collection package contains no source files")
 	}
-	isPublished := sourceFiles[0].Published
+	isPublished := sourceFiles[0].IsPublished()
 	for i := 1; i < len(sourceFiles); i++ {
-		if isPublished != sourceFiles[i].Published {
+		if isPublished != sourceFiles[i].IsPublished() {
 			return false, fmt.Errorf("package contains a mix of published and unpublished source files")
 		}
 	}

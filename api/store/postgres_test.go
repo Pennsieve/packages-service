@@ -454,7 +454,7 @@ func TestQueries_GetFilesByPackageId(t *testing.T) {
 				expectedFile := sourceTestFileById[returnedFile.ID]
 				assert.Equal(t, int64(expectedFile.PackageId), returnedFile.PackageId)
 				assert.Equal(t, expectedFile.Size, returnedFile.Size)
-				assert.Equal(t, expectedFile.Published, returnedFile.Published)
+				assert.Equal(t, expectedFile.PublishedS3VersionId, returnedFile.PublishedS3VersionID)
 				assert.Equal(t, objectType.Source, returnedFile.ObjectType)
 			}
 
@@ -523,7 +523,7 @@ func TestQueries_GetFilesByNodeIds(t *testing.T) {
 					expectedFile := expectedSourceFilesByPackageNodeId[actualPackageNodeId][expectedFileIdx]
 					assert.Equal(t, int64(expectedFile.PackageId), actualSourceFile.PackageId)
 					assert.Equal(t, expectedFile.Size, actualSourceFile.Size)
-					assert.Equal(t, expectedFile.Published, actualSourceFile.Published)
+					assert.Equal(t, expectedFile.PublishedS3VersionId, actualSourceFile.PublishedS3VersionID)
 					assert.Equal(t, objectType.Source, actualSourceFile.ObjectType)
 				}
 			}
