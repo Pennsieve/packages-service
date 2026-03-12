@@ -242,14 +242,14 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			sourcePackage: NewTestSourcePackage(1, datasetId, 1, func(testPackage *store.TestPackage) {
 				testPackage.Restoring()
 			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
-				testFile.WithPublished(false)
+				testFile.WithPublished(nil)
 			}),
 		},
 		"published file package": {
 			sourcePackage: NewTestSourcePackage(2, datasetId, 1, func(testPackage *store.TestPackage) {
 				testPackage.Restoring()
 			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
-				testFile.WithPublished(true)
+				testFile.WithPublished(store.StringPtr(uuid.NewString()))
 			}),
 		},
 	} {
@@ -388,7 +388,7 @@ func (s *TestSourcePackage) Insert(ctx context.Context, db *store.TestDB, orgId 
 func (s *TestSourcePackage) PutObjectInputs() []*s3.PutObjectInput {
 	var inputs []*s3.PutObjectInput
 	for _, f := range s.Files {
-		if !f.Published {
+		if f.PublishedS3VersionId == nil {
 			inputs = append(inputs, &s3.PutObjectInput{
 				Bucket: aws.String(f.S3Bucket),
 				Key:    aws.String(f.S3Key),
@@ -403,7 +403,7 @@ func (s *TestSourcePackage) PutObjectInputs() []*s3.PutObjectInput {
 func (s *TestSourcePackage) DeleteFiles(ctx context.Context, t require.TestingT, s3Client *s3.Client) map[string]string {
 	s3KeyToDeleteMarkerVersion := map[string]string{}
 	for _, f := range s.Files {
-		if !f.Published {
+		if f.PublishedS3VersionId == nil {
 			// Delete the object from S3
 			deleteObjectOutput, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(f.S3Bucket), Key: aws.String(f.S3Key)})
 			require.NoError(t, err, "error setting up deleted objects")

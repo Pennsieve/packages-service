@@ -53,14 +53,14 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 		testPackage.Deleted()
 		testPackage.WithParentId(folderPackage.Id)
 	}).WithSources(1, storageBucketName, func(testFile *store.TestFile) {
-		testFile.WithPublished(false)
+		testFile.WithPublished(nil)
 	}).Insert(ctx, db, orgId)
 
 	publishedSourcePackage := NewTestSourcePackage(3, datasetId, 1, func(testPackage *store.TestPackage) {
 		testPackage.Deleted()
 		testPackage.WithParentId(folderPackage.Id)
 	}).WithSources(1, publishBucketName, func(testFile *store.TestFile) {
-		testFile.WithPublished(true)
+		testFile.WithPublished(store.StringPtr(uuid.NewString()))
 	}).Insert(ctx, db, orgId)
 
 	s3Fixture := store.NewS3Fixture(t, s3Client, &s3.CreateBucketInput{Bucket: aws.String(storageBucketName)}).
