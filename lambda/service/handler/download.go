@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
 	"path/filepath"
@@ -85,6 +86,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 			Bucket:                     aws.String(row.S3Bucket),
 			Key:                        aws.String(row.S3Key),
 			VersionId:                  row.PublishedS3VersionId,
+			RequestPayer:               types.RequestPayerRequester,
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
 		}, s3.WithPresignExpires(180*time.Minute),
 			func(options *s3.PresignOptions) {
