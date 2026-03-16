@@ -163,6 +163,37 @@ func TestDownloadManifest_DeletedPackagesExcluded(t *testing.T) {
 	assert.Equal(t, "N:package:dl-standalone", manifest.Data[0].NodeId)
 }
 
+func TestDownloadManifest_PublishedPackage(t *testing.T) {
+	setupDownloadTestDB(t)
+	setupS3Client(t)
+
+	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-published"}})
+	req := newTestRequest("POST", "/download-manifest", "test-req-4",
+		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
+	handler := NewHandler(req, editorClaims(2, "N:dataset:dl-test")).WithDefaultService()
+
+	resp, err := handler.handle(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var manifest models.DownloadManifestResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &manifest))
+
+	assert.Equal(t, 1, manifest.Header.Count)
+	assert.Equal(t, int64(8192), manifest.Header.Size)
+	require.Len(t, manifest.Data, 1)
+
+	entry := manifest.Data[0]
+	assert.Equal(t, "N:package:dl-published", entry.NodeId)
+	assert.Equal(t, "published-image.ome.tiff", entry.FileName)
+	assert.Equal(t, "published-file", entry.PackageName)
+	assert.Equal(t, "ome.tiff", entry.FileExtension)
+	assert.Contains(t, entry.URL, "pennsieve-test-publish")
+	assert.Contains(t, entry.URL, "versionId=Pu_BlishedVersionId")
+	// Single-file package: path should be empty (no parents)
+	assert.Empty(t, entry.Path)
+}
+
 func TestDownloadManifest_EmptyNodeIds(t *testing.T) {
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-4",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -72,13 +73,25 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	var entries []models.DownloadManifestEntry
 	var totalSize int64
+	bucketNameToRegion := map[string]string{}
 
 	for _, row := range rows {
+		region, found := bucketNameToRegion[row.S3Bucket]
+		if !found {
+			region = regions.ForBucket(row.S3Bucket)
+			bucketNameToRegion[row.S3Bucket] = region
+		}
 		presignResult, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 			Bucket:                     aws.String(row.S3Bucket),
 			Key:                        aws.String(row.S3Key),
+			VersionId:                  row.PublishedS3VersionId,
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
-		}, s3.WithPresignExpires(180*time.Minute))
+		}, s3.WithPresignExpires(180*time.Minute),
+			func(options *s3.PresignOptions) {
+				options.ClientOptions = append(options.ClientOptions, func(options *s3.Options) {
+					options.Region = region
+				})
+			})
 		if err != nil {
 			h.logger.Errorf("failed to generate presigned URL for bucket=%s key=%s: %v", row.S3Bucket, row.S3Key, err)
 			return nil, fmt.Errorf("failed to generate presigned URL: %w", err)
@@ -158,7 +171,8 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 			f.size,
 			f.file_type,
 			f.s3_bucket,
-			f.s3_key
+			f.s3_key,
+            f.published_s3_version_id
 		FROM parents
 		JOIN "%[1]d".files f ON f.package_id = parents.id
 		JOIN (
@@ -197,6 +211,7 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 			&row.FileType,
 			&row.S3Bucket,
 			&row.S3Key,
+			&row.PublishedS3VersionId,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan hierarchy row: %w", err)
 		}
