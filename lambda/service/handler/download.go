@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
 	"os"
@@ -36,11 +37,6 @@ func ExternalBucketConfigFromEnv() (ExternalBucketConfig, error) {
 		return nil, fmt.Errorf("parsing %s value [%s]: %w", ExternalBucketsRoleMapKey, raw, err)
 	}
 	return m, nil
-}
-
-type BucketOptions struct {
-	Region              string
-	CredentialsProvider *aws.CredentialsCache
 }
 
 type DownloadManifestHandler struct {
@@ -103,8 +99,9 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	var entries []models.DownloadManifestEntry
 	var totalSize int64
-	bucketNameToOptions := map[string]BucketOptions{}
+
 	presignDuration := 180 * time.Minute
+	bucketOptionsCache := NewBucketOptionsCache(STSClient, presignDuration, h.externalBucketConfig)
 
 	for _, row := range rows {
 		s3Bucket := row.S3Bucket
@@ -114,31 +111,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 			VersionId:                  row.PublishedS3VersionId,
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
 		}
-		bucketOptions, found := bucketNameToOptions[s3Bucket]
-		if !found {
-			bucketOptions = BucketOptions{Region: regions.ForBucket(s3Bucket)}
-			if roleARN, isExternal := h.externalBucketConfig[s3Bucket]; isExternal {
-				credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(STSClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
-					options.RoleSessionName = "packages-service-presign-session"
-					options.Duration = presignDuration
-					options.Policy = aws.String(`{
-        				"Version": "2012-10-17",
-        				"Statement": [
-            				{
-                				"Effect": "Allow",
-                				"Action": [
-                    				"s3:GetObject",
-                    				"s3:GetObjectVersion"
-                				],
-								"Resource": "*"
-            				}
-        				]
-					}`)
-				}))
-				bucketOptions.CredentialsProvider = credentialsProvider
-			}
-			bucketNameToOptions[s3Bucket] = bucketOptions
-		}
+		bucketOptions := bucketOptionsCache.Get(s3Bucket)
 		// it's an external bucket, so set RequestPayer
 		if bucketOptions.CredentialsProvider != nil {
 			getObjectInput.RequestPayer = types.RequestPayerRequester
@@ -146,12 +119,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 		presignResult, err := presignClient.PresignGetObject(ctx, &getObjectInput, s3.WithPresignExpires(presignDuration),
 			func(options *s3.PresignOptions) {
-				options.ClientOptions = append(options.ClientOptions, func(options *s3.Options) {
-					options.Region = bucketOptions.Region
-					if bucketOptions.CredentialsProvider != nil {
-						options.Credentials = bucketOptions.CredentialsProvider
-					}
-				})
+				options.ClientOptions = append(options.ClientOptions, bucketOptions.S3Options())
 			})
 		if err != nil {
 			h.logger.Errorf("failed to generate presigned URL for bucket=%s key=%s: %v", s3Bucket, row.S3Key, err)
@@ -283,6 +251,65 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 	}
 
 	return results, nil
+}
+
+type BucketOptions struct {
+	Region              string
+	CredentialsProvider *aws.CredentialsCache
+}
+
+func (o BucketOptions) S3Options() func(s3Options *s3.Options) {
+	return func(s3Options *s3.Options) {
+		s3Options.Region = o.Region
+		if o.CredentialsProvider != nil {
+			s3Options.Credentials = o.CredentialsProvider
+		}
+	}
+}
+
+type BucketOptionsCache struct {
+	cache                map[string]BucketOptions
+	stsClient            *sts.Client
+	presignDuration      time.Duration
+	externalBucketConfig ExternalBucketConfig
+}
+
+func NewBucketOptionsCache(stsClient *sts.Client, presignDuration time.Duration, externalBucketConfig ExternalBucketConfig) *BucketOptionsCache {
+	return &BucketOptionsCache{
+		cache:                make(map[string]BucketOptions),
+		stsClient:            stsClient,
+		presignDuration:      presignDuration,
+		externalBucketConfig: externalBucketConfig,
+	}
+}
+
+func (c *BucketOptionsCache) Get(bucketName string) BucketOptions {
+	bucketOptions, found := c.cache[bucketName]
+	if !found {
+		bucketOptions = BucketOptions{Region: regions.ForBucket(bucketName)}
+		if roleARN, isExternal := c.externalBucketConfig[bucketName]; isExternal {
+			credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(c.stsClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
+				options.RoleSessionName = "packages-service-presign-session"
+				options.Duration = c.presignDuration
+				options.Policy = aws.String(`{
+        				"Version": "2012-10-17",
+        				"Statement": [
+            				{
+                				"Effect": "Allow",
+                				"Action": [
+                    				"s3:GetObject",
+                    				"s3:GetObjectVersion"
+                				],
+								"Resource": "*"
+            				}
+        				]
+					}`)
+			}))
+			bucketOptions.CredentialsProvider = credentialsProvider
+		}
+		c.cache[bucketName] = bucketOptions
+	}
+	return bucketOptions
 }
 
 // Common multi-dot extensions from the Pennsieve file type map.
