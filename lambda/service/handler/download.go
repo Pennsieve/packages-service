@@ -105,19 +105,15 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	for _, row := range rows {
 		s3Bucket := row.S3Bucket
-		getObjectInput := s3.GetObjectInput{
+		bucketOptions := bucketOptionsCache.Get(s3Bucket)
+
+		presignResult, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 			Bucket:                     aws.String(s3Bucket),
 			Key:                        aws.String(row.S3Key),
 			VersionId:                  row.PublishedS3VersionId,
+			RequestPayer:               bucketOptions.RequestPayer(),
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
-		}
-		bucketOptions := bucketOptionsCache.Get(s3Bucket)
-		// it's an external bucket, so set RequestPayer
-		if bucketOptions.CredentialsProvider != nil {
-			getObjectInput.RequestPayer = types.RequestPayerRequester
-		}
-
-		presignResult, err := presignClient.PresignGetObject(ctx, &getObjectInput, s3.WithPresignExpires(presignDuration),
+		}, s3.WithPresignExpires(presignDuration),
 			func(options *s3.PresignOptions) {
 				options.ClientOptions = append(options.ClientOptions, bucketOptions.S3Options())
 			})
@@ -265,6 +261,13 @@ func (o BucketOptions) S3Options() func(s3Options *s3.Options) {
 			s3Options.Credentials = o.CredentialsProvider
 		}
 	}
+}
+
+func (o BucketOptions) RequestPayer() types.RequestPayer {
+	if o.CredentialsProvider == nil {
+		return ""
+	}
+	return types.RequestPayerRequester
 }
 
 type BucketOptionsCache struct {
