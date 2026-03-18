@@ -48,5 +48,18 @@ locals {
     aws_region       = data.aws_region.current_region.name
     environment_name = var.environment_name
   }
-  cors_allowed_origins  = var.environment_name == "prod" ? ["https://discover.pennsieve.io", "https://app.pennsieve.io"] : ["http://localhost:3000", "https://discover.pennsieve.net", "https://app.pennsieve.net"]
+  cors_allowed_origins = (var.environment_name == "prod" ? ["https://discover.pennsieve.io", "https://app.pennsieve.io"]
+    : ["http://localhost:3000", "https://discover.pennsieve.net", "https://app.pennsieve.net"])
+  external_bucket_roles = {
+    // NIH account SPARC publish bucket to role
+    (data.terraform_remote_state.platform_infrastructure.outputs.sparc_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.sparc_bucket_role_arn
+    // AOD account SPARC publish bucket to role
+    (data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_bucket_role_arn
+    // REJOIN account RE-JOIN publish bucket to role
+    (data.terraform_remote_state.platform_infrastructure.outputs.rejoin_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.rejoin_bucket_role_arn
+    // REJOIN account PRECISION publish bucket to role (same as RE-JOIN bucket's role)
+    (data.terraform_remote_state.platform_infrastructure.outputs.precision_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.rejoin_bucket_role_arn
+    // AOD account Epilepsy.Science publish bucket to role. (TODO is this role correct)
+    (data.terraform_remote_state.platform_infrastructure.outputs.awsod_edots_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_bucket_role_arn
+  }
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,13 +22,40 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/permissions"
 )
 
+type ExternalBucketConfig map[string]string
+
+const ExternalBucketsRoleMapKey = "EXTERNAL_BUCKETS_ROLE_MAP"
+
+func ExternalBucketConfigFromEnv() (ExternalBucketConfig, error) {
+	raw := os.Getenv(ExternalBucketsRoleMapKey)
+	if raw == "" {
+		return nil, fmt.Errorf("%s not set", ExternalBucketsRoleMapKey)
+	}
+	m := make(map[string]string)
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, fmt.Errorf("parsing %s value [%s]: %w", ExternalBucketsRoleMapKey, raw, err)
+	}
+	return m, nil
+}
+
+type BucketOptions struct {
+	Region              string
+	CredentialsProvider *aws.CredentialsCache
+}
+
 type DownloadManifestHandler struct {
 	RequestHandler
+	externalBucketConfig ExternalBucketConfig
 }
 
 func (h *DownloadManifestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	switch h.method {
 	case "POST":
+		externalBucketConfig, err := ExternalBucketConfigFromEnv()
+		if err != nil {
+			return h.logAndBuildError(err.Error(), http.StatusInternalServerError), nil
+		}
+		h.externalBucketConfig = externalBucketConfig
 		return h.post(ctx)
 	default:
 		return h.logAndBuildError("method not allowed: "+h.method, http.StatusMethodNotAllowed), nil
@@ -74,28 +103,58 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	var entries []models.DownloadManifestEntry
 	var totalSize int64
-	bucketNameToRegion := map[string]string{}
+	bucketNameToOptions := map[string]BucketOptions{}
+	presignDuration := 180 * time.Minute
 
 	for _, row := range rows {
-		region, found := bucketNameToRegion[row.S3Bucket]
-		if !found {
-			region = regions.ForBucket(row.S3Bucket)
-			bucketNameToRegion[row.S3Bucket] = region
-		}
-		presignResult, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-			Bucket:                     aws.String(row.S3Bucket),
+		s3Bucket := row.S3Bucket
+		getObjectInput := s3.GetObjectInput{
+			Bucket:                     aws.String(s3Bucket),
 			Key:                        aws.String(row.S3Key),
 			VersionId:                  row.PublishedS3VersionId,
-			RequestPayer:               types.RequestPayerRequester,
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
-		}, s3.WithPresignExpires(180*time.Minute),
+		}
+		bucketOptions, found := bucketNameToOptions[s3Bucket]
+		if !found {
+			bucketOptions = BucketOptions{Region: regions.ForBucket(s3Bucket)}
+			if roleARN, isExternal := h.externalBucketConfig[s3Bucket]; isExternal {
+				credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(STSClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
+					options.RoleSessionName = "packages-service-presign-session"
+					options.Duration = presignDuration
+					options.Policy = aws.String(`{
+        				"Version": "2012-10-17",
+        				"Statement": [
+            				{
+                				"Effect": "Allow",
+                				"Action": [
+                    				"s3:GetObject",
+                    				"s3:GetObjectVersion"
+                				],
+								"Resource": "*"
+            				}
+        				]
+					}`)
+				}))
+				bucketOptions.CredentialsProvider = credentialsProvider
+			}
+			bucketNameToOptions[s3Bucket] = bucketOptions
+		}
+		// it's an external bucket, so set RequestPayer
+		if bucketOptions.CredentialsProvider != nil {
+			getObjectInput.RequestPayer = types.RequestPayerRequester
+		}
+
+		presignResult, err := presignClient.PresignGetObject(ctx, &getObjectInput, s3.WithPresignExpires(presignDuration),
 			func(options *s3.PresignOptions) {
 				options.ClientOptions = append(options.ClientOptions, func(options *s3.Options) {
-					options.Region = region
+					options.Region = bucketOptions.Region
+					if bucketOptions.CredentialsProvider != nil {
+						options.Credentials = bucketOptions.CredentialsProvider
+					}
 				})
 			})
 		if err != nil {
-			h.logger.Errorf("failed to generate presigned URL for bucket=%s key=%s: %v", row.S3Bucket, row.S3Key, err)
+			h.logger.Errorf("failed to generate presigned URL for bucket=%s key=%s: %v", s3Bucket, row.S3Key, err)
 			return nil, fmt.Errorf("failed to generate presigned URL: %w", err)
 		}
 

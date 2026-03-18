@@ -72,9 +72,16 @@ func setupS3Client(t *testing.T) {
 	t.Cleanup(func() { S3Client = originalS3 })
 }
 
+func setupExternalBucketConfig(t *testing.T, externalBucketConfig ExternalBucketConfig) {
+	bytes, err := json.Marshal(externalBucketConfig)
+	require.NoError(t, err)
+	t.Setenv(ExternalBucketsRoleMapKey, string(bytes))
+}
+
 func TestDownloadManifest_SinglePackage(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-1",
@@ -105,6 +112,7 @@ func TestDownloadManifest_SinglePackage(t *testing.T) {
 func TestDownloadManifest_Collection(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	// Request the collection — should return all child files (not the collection itself)
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:collection:dl-root"}})
@@ -144,6 +152,7 @@ func TestDownloadManifest_Collection(t *testing.T) {
 func TestDownloadManifest_DeletedPackagesExcluded(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	// Request both a valid and a deleted package
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone", "N:package:dl-deleted"}})
@@ -166,6 +175,7 @@ func TestDownloadManifest_DeletedPackagesExcluded(t *testing.T) {
 func TestDownloadManifest_PublishedPackage(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-published"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-4",
@@ -195,6 +205,7 @@ func TestDownloadManifest_PublishedPackage(t *testing.T) {
 }
 
 func TestDownloadManifest_EmptyNodeIds(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-4",
 		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
@@ -206,6 +217,8 @@ func TestDownloadManifest_EmptyNodeIds(t *testing.T) {
 }
 
 func TestDownloadManifest_MissingDatasetId(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
+
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-5",
 		map[string]string{}, string(body))
@@ -217,6 +230,8 @@ func TestDownloadManifest_MissingDatasetId(t *testing.T) {
 }
 
 func TestDownloadManifest_Unauthorized(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
+
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-6",
 		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
@@ -241,6 +256,7 @@ func TestDownloadManifest_Unauthorized(t *testing.T) {
 func TestDownloadManifest_NonexistentPackage(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:does-not-exist"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-7",

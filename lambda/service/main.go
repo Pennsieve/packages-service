@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/pennsieve/packages-service/service/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
 	log "github.com/sirupsen/logrus"
@@ -34,6 +35,7 @@ func init() {
 
 	handler.SQSClient = sqs.NewFromConfig(cfg)
 	handler.S3Client = s3.NewFromConfig(cfg)
+	handler.STSClient = sts.NewFromConfig(cfg)
 }
 
 func main() {
