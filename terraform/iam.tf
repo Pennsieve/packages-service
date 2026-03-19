@@ -36,8 +36,8 @@ resource "aws_iam_policy" "packages_service_lambda_iam_policy" {
 data "aws_iam_policy_document" "packages_service_iam_policy_document" {
 
   statement {
-    sid     = "PackagesServiceLambdaLogsPermissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaLogsPermissions"
+    effect = "Allow"
     actions = [
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
@@ -49,8 +49,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid     = "PackagesServiceLambdaEC2Permissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaEC2Permissions"
+    effect = "Allow"
     actions = [
       "ec2:CreateNetworkInterface",
       "ec2:DescribeNetworkInterfaces",
@@ -62,8 +62,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid     = "PackagesServiceLambdaRDSPermissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaRDSPermissions"
+    effect = "Allow"
     actions = [
       "rds-db:connect"
     ]
@@ -85,21 +85,34 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid     = "PackagesServiceLambdaS3Permissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaS3Permissions"
+    effect = "Allow"
     actions = [
       "s3:GetObject",
       "s3:HeadObject"
     ]
     resources = [
-      "arn:aws:s3:::pennsieve-*-storage-*/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.rejoin_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.rejoin_storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn}/*",
+      data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn,
+      "${data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.ember_pennsieve_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.ember_pennsieve_storage_bucket_arn}/*",
+      data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn,
+      "${data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn}/*",
       "arn:aws:s3:::pennsieve-*-package-*/*"
     ]
   }
 
   statement {
-    sid     = "PackagesServiceLambdaSSMPermissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaSSMPermissions"
+    effect = "Allow"
     actions = [
       "ssm:GetParameter",
       "ssm:GetParameters",
@@ -111,8 +124,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid     = "PackagesServiceLambdaSecretsManagerPermissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaSecretsManagerPermissions"
+    effect = "Allow"
     actions = [
       "secretsmanager:GetSecretValue",
       "secretsmanager:DescribeSecret"
@@ -123,8 +136,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid     = "PackagesServiceLambdaKMSDecryptPermissions"
-    effect  = "Allow"
+    sid    = "PackagesServiceLambdaKMSDecryptPermissions"
+    effect = "Allow"
     actions = [
       "kms:Decrypt"
     ]
@@ -174,8 +187,8 @@ resource "aws_iam_policy" "restore_package_lambda_iam_policy" {
 data "aws_iam_policy_document" "restore_package_iam_policy_document" {
 
   statement {
-    sid     = "RestorePackageLambdaLogsPermissions"
-    effect  = "Allow"
+    sid    = "RestorePackageLambdaLogsPermissions"
+    effect = "Allow"
     actions = [
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
@@ -187,8 +200,8 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
   }
 
   statement {
-    sid     = "RestorePackageLambdaEC2Permissions"
-    effect  = "Allow"
+    sid    = "RestorePackageLambdaEC2Permissions"
+    effect = "Allow"
     actions = [
       "ec2:CreateNetworkInterface",
       "ec2:DescribeNetworkInterfaces",
@@ -200,8 +213,8 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
   }
 
   statement {
-    sid     = "RestorePackageLambdaRDSPermissions"
-    effect  = "Allow"
+    sid    = "RestorePackageLambdaRDSPermissions"
+    effect = "Allow"
     actions = [
       "rds-db:connect"
     ]
@@ -258,6 +271,8 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
       "${data.terraform_remote_state.platform_infrastructure.outputs.rejoin_storage_bucket_arn}/*",
       data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn,
       "${data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.ember_pennsieve_storage_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.ember_pennsieve_storage_bucket_arn}/*",
       data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn,
       "${data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn}/*",
       data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn,
