@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
 	"os"
@@ -101,7 +100,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 	var totalSize int64
 
 	presignDuration := 180 * time.Minute
-	bucketOptionsCache := NewBucketOptionsCache(STSClient, presignDuration, h.externalBucketConfig)
+	bucketOptionsCache := NewBucketOptionsCache(AssumeRoleClient, presignDuration, h.externalBucketConfig)
 
 	for _, row := range rows {
 		s3Bucket := row.S3Bucket
@@ -272,15 +271,15 @@ func (o BucketOptions) RequestPayer() types.RequestPayer {
 
 type BucketOptionsCache struct {
 	cache                map[string]BucketOptions
-	stsClient            *sts.Client
+	assumeRoleClient     stscreds.AssumeRoleAPIClient
 	presignDuration      time.Duration
 	externalBucketConfig ExternalBucketConfig
 }
 
-func NewBucketOptionsCache(stsClient *sts.Client, presignDuration time.Duration, externalBucketConfig ExternalBucketConfig) *BucketOptionsCache {
+func NewBucketOptionsCache(assumeRoleClient stscreds.AssumeRoleAPIClient, presignDuration time.Duration, externalBucketConfig ExternalBucketConfig) *BucketOptionsCache {
 	return &BucketOptionsCache{
 		cache:                make(map[string]BucketOptions),
-		stsClient:            stsClient,
+		assumeRoleClient:     assumeRoleClient,
 		presignDuration:      presignDuration,
 		externalBucketConfig: externalBucketConfig,
 	}
@@ -291,7 +290,7 @@ func (c *BucketOptionsCache) Get(bucketName string) BucketOptions {
 	if !found {
 		bucketOptions = BucketOptions{Region: regions.ForBucket(bucketName)}
 		if roleARN, isExternal := c.externalBucketConfig[bucketName]; isExternal {
-			credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(c.stsClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
+			credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(c.assumeRoleClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
 				options.RoleSessionName = "packages-service-presign-session"
 				options.Duration = c.presignDuration
 				options.Policy = aws.String(`{

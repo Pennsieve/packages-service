@@ -35,7 +35,7 @@ func init() {
 
 	handler.SQSClient = sqs.NewFromConfig(cfg)
 	handler.S3Client = s3.NewFromConfig(cfg)
-	handler.STSClient = sts.NewFromConfig(cfg)
+	handler.AssumeRoleClient = sts.NewFromConfig(cfg)
 }
 
 func main() {

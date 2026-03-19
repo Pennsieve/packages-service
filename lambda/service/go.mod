@@ -16,6 +16,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.14
 	github.com/aws/aws-sdk-go-v2/service/sts v1.40.1
+	github.com/google/uuid v1.3.0
 	github.com/lib/pq v1.10.7
 	github.com/pennsieve/packages-service/api v0.0.0
 	github.com/pennsieve/pennsieve-go-core v1.15.0
@@ -44,7 +45,6 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	golang.org/x/sys v0.21.0 // indirect

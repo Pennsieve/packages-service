@@ -12,7 +12,8 @@ ON CONFLICT (id) DO NOTHING;
 --   └── child-multi-file  (CSV, id=3002, 2 source files)
 -- standalone-file (Text, id=3003, 1 source file)
 -- deleted-file (Text, id=3004, DELETED, 1 source file — should NOT appear)
--- published-file (Text, id-3005, 1 published source file, so need to use S3 versionId when creating presigned URL)
+-- published-file (Text, id=3005, 1 published source file, so need to use S3 versionId when creating presigned URL)
+-- non-us-file (Text, id=3006, 1 source file in a non us-east-1 bucket
 
 INSERT INTO "2".packages (id, name, type, state, dataset_id, parent_id, updated_at, created_at, attributes, node_id, size, owner_id, import_id) VALUES
 (3000, 'root-collection', 'Collection', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:collection:dl-root', null, 1, '00000000-0000-0000-0000-000000003000'),
@@ -20,7 +21,8 @@ INSERT INTO "2".packages (id, name, type, state, dataset_id, parent_id, updated_
 (3002, 'child-multi-file', 'CSV', 'READY', 300, 3000, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-child-multi', null, 1, '00000000-0000-0000-0000-000000003002'),
 (3003, 'standalone-file', 'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-standalone', null, 1, '00000000-0000-0000-0000-000000003003'),
 (3004, 'deleted-file', 'Text', 'DELETED', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-deleted', null, 1, '00000000-0000-0000-0000-000000003004'),
-(3005, 'published-file', 'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-published', null, 1, '00000000-0000-0000-0000-000000003005')
+(3005, 'published-file', 'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-published', null, 1, '00000000-0000-0000-0000-000000003005'),
+(3006, 'non-us-file', 'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-non-us', null, 1, '00000000-0000-0000-0000-000000003006')
 ON CONFLICT (id) DO NOTHING;
 
 -- Files: object_type = 'source' for downloadable files
@@ -48,4 +50,9 @@ ON CONFLICT (id) DO NOTHING;
 -- published-file has 1 source file (with non-null versionId for publishedd file test)
 INSERT INTO "2".files (id, package_id, name, file_type, s3_bucket, s3_key, published_s3_version_id, object_type, size, checksum, uuid, processing_state, uploaded_state, created_at, updated_at) VALUES
     (5006, 3005, 'published-image.ome.tiff', 'OMETIFF', 'pennsieve-test-publish', '14/files/published-image.ome.tiff', 'Pu_BlishedVersionId','source', 8192, '{}', '00000000-0000-0000-0000-000000005006', 'unprocessed', 'uploaded', '2023-01-01 00:00:00', '2023-01-01 00:00:00')
+ON CONFLICT (id) DO NOTHING;
+
+-- nob-us-file has 1 source file in a bucket not in us-east-1
+INSERT INTO "2".files (id, package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, uuid, processing_state, uploaded_state, created_at, updated_at) VALUES
+    (5007, 3006, 'non-us-image.ome.tiff', 'OMETIFF', 'pennsieve-test-storage-afs1', '15/files/non-us-image.ome.tiff','source', 8192, '{}', '00000000-0000-0000-0000-000000005007', 'unprocessed', 'uploaded', '2023-01-01 00:00:00', '2023-01-01 00:00:00')
 ON CONFLICT (id) DO NOTHING;
