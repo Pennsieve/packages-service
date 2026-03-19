@@ -89,7 +89,7 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     effect = "Allow"
     actions = [
       "s3:GetObject",
-      "s3:HeadObject"
+      "s3:GetObjectVersion"
     ]
     resources = [
       data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn,
