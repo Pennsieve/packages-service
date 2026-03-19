@@ -6,9 +6,8 @@ A serverless microservice that provides secure access to package assets and data
 
 The Packages Service handles:
 - **Package restoration** from deleted/archived state
-- **Presigned URL generation** for secure S3 access
+- **Download manifest generation** for secure S3 access
 - **CloudFront signed URLs** for optimized content delivery
-- **Unauthenticated proxy** for cross-origin requests
 
 ## Architecture
 
@@ -55,23 +54,46 @@ POST /packages/restore?dataset_id=N:dataset:123
 }
 ```
 
-### 2. S3 Presigned URLs (`GET /presign/s3`)
-Generates presigned URLs for direct S3 access to package files and viewer assets.
+### 2. Download manifest with S3 Presigned URLs (`POST /download-manifest`)
+Generates a download manifest that includes presigned URLs for direct S3 access to package files.
 
 **Authentication**: Required (dataset-level permissions)
 
 **Request**:
 ```bash
-GET /packages/presign/s3?dataset_id=N:dataset:123&package_id=N:package:456&path=preview/thumbnail.jpg
+POST /packages/download-manifest?dataset_id=N:dataset:123
+{
+  "nodeIds": [
+    "string"
+  ]
+}
 ```
 
-**Response**: HTTP 307 redirect to presigned S3 URL
+**Response**:
+```json
+{
+  "header": {
+    "count": 0,
+    "size": 0
+  },
+  "data": [
+    {
+      "nodeId": "string",
+      "fileName": "string",
+      "packageName": "string",
+      "path": [
+        "string"
+      ],
+      "url": "string",
+      "size": 0,
+      "fileExtension": "string"
+    }
+  ]
+}
+```
 
 **Query Parameters**:
 - `dataset_id` (required): Dataset node ID
-- `package_id` (required): Package node ID  
-- `path` (optional): Path to viewer asset within package
-- `redirect` (optional): `false` to return JSON instead of redirect
 
 ### 3. CloudFront Signed URLs (`GET /cloudfront/sign`)
 Generates CloudFront signed URLs for optimized content delivery with CDN caching.
@@ -96,24 +118,6 @@ GET /packages/cloudfront/sign?dataset_id=N:dataset:123&package_id=N:package:456&
 - Optimized caching for Parquet files (30 days)
 - Private distribution (signed URLs required)
 - Better performance than direct S3 access
-
-### 4. S3 Proxy (`GET /proxy/s3`)
-Unauthenticated proxy for S3 requests using presigned URLs. Handles CORS for browser clients.
-
-**Authentication**: None required (validates presigned URL)
-
-**Request**:
-```bash
-GET /packages/proxy/s3?presigned_url=https://bucket.s3.amazonaws.com/key?X-Amz-Signature=...
-```
-
-**Response**: HTTP 307 redirect to presigned URL with CORS headers
-
-**Features**:
-- Validates presigned URL signatures
-- Bucket allowlist support via `PROXY_ALLOWED_BUCKETS` env var
-- CORS headers for browser compatibility
-- HEAD request support for metadata
 
 ## Infrastructure
 
