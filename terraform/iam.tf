@@ -102,6 +102,10 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
       "${data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn}/*",
       data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn,
       "${data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_publish50_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_publish50_bucket_arn}/*",
+      data.terraform_remote_state.platform_infrastructure.outputs.awsod_edots_publish50_bucket_arn,
+      "${data.terraform_remote_state.platform_infrastructure.outputs.awsod_edots_publish50_bucket_arn}/*",
       data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn,
       "${data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn}/*",
       "arn:aws:s3:::pennsieve-*-package-*/*"
