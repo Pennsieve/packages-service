@@ -25,7 +25,7 @@ resource "aws_lambda_function" "service_lambda" {
       CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
       CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
-      EXTERNAL_BUCKETS_ROLE_MAP = jsondecode(local.external_bucket_roles)
+      EXTERNAL_BUCKETS_ROLE_MAP = jsonencode(local.external_bucket_roles)
     }
   }
 }

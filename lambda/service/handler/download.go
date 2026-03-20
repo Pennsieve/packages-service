@@ -26,16 +26,18 @@ type ExternalBucketConfig map[string]string
 
 const ExternalBucketsRoleMapKey = "EXTERNAL_BUCKETS_ROLE_MAP"
 
-func ExternalBucketConfigFromEnv() (ExternalBucketConfig, error) {
+func (h *DownloadManifestHandler) LoadExternalBucketConfigFromEnv() error {
 	raw := os.Getenv(ExternalBucketsRoleMapKey)
 	if raw == "" {
-		return nil, fmt.Errorf("%s not set", ExternalBucketsRoleMapKey)
+		return fmt.Errorf("%s not set", ExternalBucketsRoleMapKey)
 	}
 	m := make(map[string]string)
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return nil, fmt.Errorf("parsing %s value [%s]: %w", ExternalBucketsRoleMapKey, raw, err)
+		return fmt.Errorf("parsing %s value [%s]: %w", ExternalBucketsRoleMapKey, raw, err)
 	}
-	return m, nil
+	h.externalBucketConfig = m
+	h.logger.Debugf("set %s: %s", ExternalBucketsRoleMapKey, m)
+	return nil
 }
 
 type DownloadManifestHandler struct {
@@ -46,11 +48,9 @@ type DownloadManifestHandler struct {
 func (h *DownloadManifestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	switch h.method {
 	case "POST":
-		externalBucketConfig, err := ExternalBucketConfigFromEnv()
-		if err != nil {
+		if err := h.LoadExternalBucketConfigFromEnv(); err != nil {
 			return h.logAndBuildError(err.Error(), http.StatusInternalServerError), nil
 		}
-		h.externalBucketConfig = externalBucketConfig
 		return h.post(ctx)
 	default:
 		return h.logAndBuildError("method not allowed: "+h.method, http.StatusMethodNotAllowed), nil
