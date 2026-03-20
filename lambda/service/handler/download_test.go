@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,7 +126,13 @@ func TestDownloadManifest_SinglePackage(t *testing.T) {
 	assert.Equal(t, "image.ome.tiff", entry.FileName)
 	assert.Equal(t, "standalone-file", entry.PackageName)
 	assert.Equal(t, "ome.tiff", entry.FileExtension)
-	assert.Contains(t, entry.URL, "pennsieve-test-storage")
+	presignedURL, err := url.Parse(entry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(presignedURL.Host, "pennsieve-test-storage"))
+	assert.Equal(t, "/org2/image.ome.tiff", presignedURL.Path)
+	assert.Empty(t, presignedURL.Query().Get("versionId"))
+	assert.Empty(t, presignedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, presignedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, entry.Path)
 }
@@ -219,8 +226,13 @@ func TestDownloadManifest_PublishedPackage(t *testing.T) {
 	assert.Equal(t, "published-image.ome.tiff", entry.FileName)
 	assert.Equal(t, "published-file", entry.PackageName)
 	assert.Equal(t, "ome.tiff", entry.FileExtension)
-	assert.Contains(t, entry.URL, "pennsieve-test-publish")
-	assert.Contains(t, entry.URL, "versionId=Pu_BlishedVersionId")
+	presignedURL, err := url.Parse(entry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(presignedURL.Host, "pennsieve-test-publish"))
+	assert.Equal(t, "/14/files/published-image.ome.tiff", presignedURL.Path)
+	assert.Equal(t, "Pu_BlishedVersionId", presignedURL.Query().Get("versionId"))
+	assert.Empty(t, presignedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, presignedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, entry.Path)
 }
@@ -254,11 +266,13 @@ func TestDownloadManifest_NonUSPackage(t *testing.T) {
 	assert.Equal(t, "non-us-image.ome.tiff", entry.FileName)
 	assert.Equal(t, "non-us-file", entry.PackageName)
 	assert.Equal(t, "ome.tiff", entry.FileExtension)
-	assert.Contains(t, entry.URL, "pennsieve-test-storage-afs1")
 	u, err := url.Parse(entry.URL)
 	require.NoError(t, err)
-	credential := u.Query().Get("X-Amz-Credential")
-	assert.Contains(t, credential, "/af-south-1/s3/")
+	assert.True(t, strings.HasPrefix(u.Host, "pennsieve-test-storage-afs1"))
+	assert.Contains(t, u.Query().Get("X-Amz-Credential"), "/af-south-1/s3/")
+	assert.Equal(t, "/15/files/non-us-image.ome.tiff", u.Path)
+	assert.Empty(t, u.Query().Get("versionId"))
+	assert.Empty(t, u.Query().Get("x-amz-request-payer"))
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, entry.Path)
 }
@@ -322,8 +336,13 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 	assert.Equal(t, "published-image.ome.tiff", publishedEntry.FileName)
 	assert.Equal(t, "published-file", publishedEntry.PackageName)
 	assert.Equal(t, "ome.tiff", publishedEntry.FileExtension)
-	assert.Contains(t, publishedEntry.URL, "pennsieve-test-publish")
-	assert.Contains(t, publishedEntry.URL, "versionId=Pu_BlishedVersionId")
+	publishedURL, err := url.Parse(publishedEntry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(publishedURL.Host, "pennsieve-test-publish"))
+	assert.Equal(t, "/14/files/published-image.ome.tiff", publishedURL.Path)
+	assert.Equal(t, "Pu_BlishedVersionId", publishedURL.Query().Get("versionId"))
+	assert.Equal(t, "requester", publishedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, publishedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, publishedEntry.Path)
 
@@ -336,7 +355,13 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 	assert.Equal(t, "image.ome.tiff", standaloneEntry.FileName)
 	assert.Equal(t, "standalone-file", standaloneEntry.PackageName)
 	assert.Equal(t, "ome.tiff", standaloneEntry.FileExtension)
-	assert.Contains(t, standaloneEntry.URL, "pennsieve-test-storage")
+	standaloneURL, err := url.Parse(standaloneEntry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(standaloneURL.Host, "pennsieve-test-storage"))
+	assert.Equal(t, "/org2/image.ome.tiff", standaloneURL.Path)
+	assert.Empty(t, standaloneURL.Query().Get("versionId"))
+	assert.Empty(t, standaloneURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, standaloneURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, standaloneEntry.Path)
 
