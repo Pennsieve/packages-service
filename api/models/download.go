@@ -28,19 +28,20 @@ type DownloadManifestEntry struct {
 
 // PackageHierarchyRow represents a single row from the recursive package hierarchy query.
 type PackageHierarchyRow struct {
-	DatasetId        int
-	NodeIdPath       []string
-	PackageId        int64
-	NodeId           string
-	PackageType      string
-	PackageState     string
-	PackageNamePath  []string
-	PackageName      string
-	PackageFileCount int
-	FileId           int64
-	FileName         string
-	Size             int64
-	FileType         string
-	S3Bucket         string
-	S3Key            string
+	DatasetId            int
+	NodeIdPath           []string
+	PackageId            int64
+	NodeId               string
+	PackageType          string
+	PackageState         string
+	PackageNamePath      []string
+	PackageName          string
+	PackageFileCount     int
+	FileId               int64
+	FileName             string
+	Size                 int64
+	FileType             string
+	S3Bucket             string
+	S3Key                string
+	PublishedS3VersionId *string
 }

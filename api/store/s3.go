@@ -7,6 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/pennsieve/packages-service/api/logging"
+	"github.com/pennsieve/packages-service/api/regions"
 )
 
 const maxDeleteObjects = 1000
@@ -101,6 +102,7 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 		}
 	}
 	for bucket, batches := range byBucket {
+		bucketRegion := regions.ForBucket(bucket)
 		for i, batch := range batches {
 			input := s3.DeleteObjectsInput{
 				Bucket: aws.String(bucket),
@@ -108,7 +110,9 @@ func (s *s3Store) DeleteObjectsVersion(ctx context.Context, objInfos ...S3Object
 					Objects: batch,
 				},
 			}
-			if output, err := s.Client.DeleteObjects(ctx, &input); err != nil {
+			if output, err := s.Client.DeleteObjects(ctx, &input, func(options *s3.Options) {
+				options.Region = bucketRegion
+			}); err != nil {
 				return response, fmt.Errorf("api/store/s3: error deleting batch %d of %d for bucket %s: %w", i, len(batches), bucket, err)
 			} else {
 				for _, success := range output.Deleted {
