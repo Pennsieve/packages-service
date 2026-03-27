@@ -10,7 +10,7 @@ resource "aws_lambda_function" "service_lambda" {
   s3_key        = "${var.service_name}/packages-service-${var.image_tag}.zip"
 
   vpc_config {
-    subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
+    subnet_ids = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
     security_group_ids = [data.terraform_remote_state.platform_infrastructure.outputs.upload_v2_security_group_id]
   }
 
@@ -25,6 +25,7 @@ resource "aws_lambda_function" "service_lambda" {
       CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
       CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
+      EXTERNAL_BUCKETS_ROLE_MAP = jsonencode(local.external_bucket_roles)
     }
   }
 }
@@ -41,7 +42,7 @@ resource "aws_lambda_function" "restore_package_lambda" {
   s3_key        = "${var.service_name}/restore-package-${var.image_tag}.zip"
 
   vpc_config {
-    subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
+    subnet_ids = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
     security_group_ids = [data.terraform_remote_state.platform_infrastructure.outputs.upload_v2_security_group_id]
   }
 
@@ -72,8 +73,8 @@ resource "aws_lambda_function" "key_rotation" {
 
   environment {
     variables = {
-      ENVIRONMENT                    = var.environment_name
-      CLOUDFRONT_KEY_GROUP_ID        = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
+      ENVIRONMENT                     = var.environment_name
+      CLOUDFRONT_KEY_GROUP_ID         = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       KEY_ROTATION_GRACE_PERIOD_HOURS = "48"  # Grace period before removing old keys from CloudFront
     }
   }

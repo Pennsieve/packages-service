@@ -3,8 +3,18 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/pennsieve/packages-service/api/models"
@@ -49,6 +59,7 @@ func viewerClaims(orgId int64, datasetNodeId string) *authorizer.Claims {
 }
 
 func setupDownloadTestDB(t *testing.T) *store.TestDB {
+	t.Helper()
 	db := store.OpenDB(t)
 	db.ExecSQLFile("download-manifest-test.sql")
 
@@ -66,15 +77,33 @@ func setupDownloadTestDB(t *testing.T) *store.TestDB {
 }
 
 func setupS3Client(t *testing.T) {
+	t.Helper()
 	awsConfig := store.GetTestAWSConfig(t)
 	originalS3 := S3Client
 	S3Client = s3.NewFromConfig(awsConfig)
 	t.Cleanup(func() { S3Client = originalS3 })
 }
 
+func setupExternalBucketConfig(t *testing.T, externalBucketConfig ExternalBucketConfig) {
+	t.Helper()
+	bytes, err := json.Marshal(externalBucketConfig)
+	require.NoError(t, err)
+	t.Setenv(ExternalBucketsRoleMapKey, string(bytes))
+}
+
+func setupAssumeRoleClient(t *testing.T, assumeRoleClient stscreds.AssumeRoleAPIClient) {
+	t.Helper()
+	originalAssumeRoleClient := AssumeRoleClient
+	AssumeRoleClient = assumeRoleClient
+	t.Cleanup(func() {
+		AssumeRoleClient = originalAssumeRoleClient
+	})
+}
+
 func TestDownloadManifest_SinglePackage(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-1",
@@ -97,7 +126,13 @@ func TestDownloadManifest_SinglePackage(t *testing.T) {
 	assert.Equal(t, "image.ome.tiff", entry.FileName)
 	assert.Equal(t, "standalone-file", entry.PackageName)
 	assert.Equal(t, "ome.tiff", entry.FileExtension)
-	assert.Contains(t, entry.URL, "pennsieve-test-storage")
+	presignedURL, err := url.Parse(entry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(presignedURL.Host, "pennsieve-test-storage"))
+	assert.Equal(t, "/org2/image.ome.tiff", presignedURL.Path)
+	assert.Empty(t, presignedURL.Query().Get("versionId"))
+	assert.Empty(t, presignedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, presignedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, entry.Path)
 }
@@ -105,6 +140,7 @@ func TestDownloadManifest_SinglePackage(t *testing.T) {
 func TestDownloadManifest_Collection(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	// Request the collection — should return all child files (not the collection itself)
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:collection:dl-root"}})
@@ -144,6 +180,7 @@ func TestDownloadManifest_Collection(t *testing.T) {
 func TestDownloadManifest_DeletedPackagesExcluded(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	// Request both a valid and a deleted package
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone", "N:package:dl-deleted"}})
@@ -163,7 +200,175 @@ func TestDownloadManifest_DeletedPackagesExcluded(t *testing.T) {
 	assert.Equal(t, "N:package:dl-standalone", manifest.Data[0].NodeId)
 }
 
+func TestDownloadManifest_PublishedPackage(t *testing.T) {
+	setupDownloadTestDB(t)
+	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
+
+	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-published"}})
+	req := newTestRequest("POST", "/download-manifest", "test-req-40",
+		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
+	handler := NewHandler(req, editorClaims(2, "N:dataset:dl-test")).WithDefaultService()
+
+	resp, err := handler.handle(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var manifest models.DownloadManifestResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &manifest))
+
+	assert.Equal(t, 1, manifest.Header.Count)
+	assert.Equal(t, int64(8192), manifest.Header.Size)
+	require.Len(t, manifest.Data, 1)
+
+	entry := manifest.Data[0]
+	assert.Equal(t, "N:package:dl-published", entry.NodeId)
+	assert.Equal(t, "published-image.ome.tiff", entry.FileName)
+	assert.Equal(t, "published-file", entry.PackageName)
+	assert.Equal(t, "ome.tiff", entry.FileExtension)
+	presignedURL, err := url.Parse(entry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(presignedURL.Host, "pennsieve-test-publish"))
+	assert.Equal(t, "/14/files/published-image.ome.tiff", presignedURL.Path)
+	assert.Equal(t, "Pu_BlishedVersionId", presignedURL.Query().Get("versionId"))
+	assert.Empty(t, presignedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, presignedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
+	// Single-file package: path should be empty (no parents)
+	assert.Empty(t, entry.Path)
+}
+
+// TestDownloadManifest_NonUSPackage indirectly tests that we are setting the
+// region based on bucket name suffix by looking at a query param in the presigned URL.
+// Best option without a mockable S3 or presign client.
+func TestDownloadManifest_NonUSPackage(t *testing.T) {
+	setupDownloadTestDB(t)
+	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
+
+	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-non-us"}})
+	req := newTestRequest("POST", "/download-manifest", "test-req-40",
+		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
+	handler := NewHandler(req, editorClaims(2, "N:dataset:dl-test")).WithDefaultService()
+
+	resp, err := handler.handle(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var manifest models.DownloadManifestResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &manifest))
+
+	assert.Equal(t, 1, manifest.Header.Count)
+	assert.Equal(t, int64(8192), manifest.Header.Size)
+	require.Len(t, manifest.Data, 1)
+
+	entry := manifest.Data[0]
+	assert.Equal(t, "N:package:dl-non-us", entry.NodeId)
+	assert.Equal(t, "non-us-image.ome.tiff", entry.FileName)
+	assert.Equal(t, "non-us-file", entry.PackageName)
+	assert.Equal(t, "ome.tiff", entry.FileExtension)
+	u, err := url.Parse(entry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(u.Host, "pennsieve-test-storage-afs1"))
+	assert.Contains(t, u.Query().Get("X-Amz-Credential"), "/af-south-1/s3/")
+	assert.Equal(t, "/15/files/non-us-image.ome.tiff", u.Path)
+	assert.Empty(t, u.Query().Get("versionId"))
+	assert.Empty(t, u.Query().Get("x-amz-request-payer"))
+	// Single-file package: path should be empty (no parents)
+	assert.Empty(t, entry.Path)
+}
+
+func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
+	setupDownloadTestDB(t)
+	setupS3Client(t)
+	// treat pennsieve-test-publish as an external bucket
+	bucketConfig := ExternalBucketConfig(map[string]string{"pennsieve-test-publish": "pennsieve-test-role-arn"})
+	setupExternalBucketConfig(t, bucketConfig)
+
+	expectedDuration := 180 * time.Minute
+	mockAssumeRoleClient := new(MockAssumeRoleClient)
+	mockAssumeRoleClient.On("AssumeRole", mock.Anything, mock.MatchedBy(func(input *sts.AssumeRoleInput) bool {
+		return assert.Equal(t, "pennsieve-test-role-arn", *input.RoleArn) &&
+			assert.Equal(t, "packages-service-presign-session", *input.RoleSessionName) &&
+			assert.Equal(t, int32(expectedDuration.Seconds()), *input.DurationSeconds) &&
+			assert.NotNil(t, input.Policy) &&
+			assert.Contains(t, *input.Policy, "s3:GetObject") &&
+			assert.Contains(t, *input.Policy, "s3:GetObjectVersion") &&
+			assert.NotContains(t, *input.Policy, "s3:PutObject")
+	}), mock.Anything).Return(&sts.AssumeRoleOutput{
+		AssumedRoleUser: &types.AssumedRoleUser{},
+		Credentials: &types.Credentials{
+			AccessKeyId:     aws.String(uuid.NewString()),
+			Expiration:      aws.Time(time.Now().Add(expectedDuration)),
+			SecretAccessKey: aws.String(uuid.NewString()),
+			SessionToken:    aws.String(uuid.NewString()),
+		},
+		PackedPolicySize: nil,
+		SourceIdentity:   nil,
+	}, nil)
+	setupAssumeRoleClient(t, mockAssumeRoleClient)
+
+	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-published", "N:package:dl-standalone"}})
+	req := newTestRequest("POST", "/download-manifest", "test-req-400",
+		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
+	handler := NewHandler(req, editorClaims(2, "N:dataset:dl-test")).WithDefaultService()
+
+	resp, err := handler.handle(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var manifest models.DownloadManifestResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &manifest))
+
+	// Assume role should only be called once since only one package with external bucket
+	mockAssumeRoleClient.AssertNumberOfCalls(t, "AssumeRole", 1)
+
+	assert.Equal(t, 2, manifest.Header.Count)
+	assert.Equal(t, int64(8192+8192), manifest.Header.Size)
+	require.Len(t, manifest.Data, 2)
+
+	publishedEntryIdx := slices.IndexFunc(manifest.Data, func(entry models.DownloadManifestEntry) bool {
+		return entry.NodeId == "N:package:dl-published"
+	})
+	require.True(t, publishedEntryIdx > -1)
+
+	publishedEntry := manifest.Data[publishedEntryIdx]
+	assert.Equal(t, "N:package:dl-published", publishedEntry.NodeId)
+	assert.Equal(t, "published-image.ome.tiff", publishedEntry.FileName)
+	assert.Equal(t, "published-file", publishedEntry.PackageName)
+	assert.Equal(t, "ome.tiff", publishedEntry.FileExtension)
+	publishedURL, err := url.Parse(publishedEntry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(publishedURL.Host, "pennsieve-test-publish"))
+	assert.Equal(t, "/14/files/published-image.ome.tiff", publishedURL.Path)
+	assert.Equal(t, "Pu_BlishedVersionId", publishedURL.Query().Get("versionId"))
+	assert.Equal(t, "requester", publishedURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, publishedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
+	// Single-file package: path should be empty (no parents)
+	assert.Empty(t, publishedEntry.Path)
+
+	standaloneEntryIdx := slices.IndexFunc(manifest.Data, func(entry models.DownloadManifestEntry) bool {
+		return entry.NodeId == "N:package:dl-standalone"
+	})
+	require.True(t, standaloneEntryIdx > -1)
+	standaloneEntry := manifest.Data[standaloneEntryIdx]
+	assert.Equal(t, "N:package:dl-standalone", standaloneEntry.NodeId)
+	assert.Equal(t, "image.ome.tiff", standaloneEntry.FileName)
+	assert.Equal(t, "standalone-file", standaloneEntry.PackageName)
+	assert.Equal(t, "ome.tiff", standaloneEntry.FileExtension)
+	standaloneURL, err := url.Parse(standaloneEntry.URL)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(standaloneURL.Host, "pennsieve-test-storage"))
+	assert.Equal(t, "/org2/image.ome.tiff", standaloneURL.Path)
+	assert.Empty(t, standaloneURL.Query().Get("versionId"))
+	assert.Empty(t, standaloneURL.Query().Get("x-amz-request-payer"))
+	assert.Contains(t, standaloneURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
+	// Single-file package: path should be empty (no parents)
+	assert.Empty(t, standaloneEntry.Path)
+
+}
+
 func TestDownloadManifest_EmptyNodeIds(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-4",
 		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
@@ -175,6 +380,8 @@ func TestDownloadManifest_EmptyNodeIds(t *testing.T) {
 }
 
 func TestDownloadManifest_MissingDatasetId(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
+
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-5",
 		map[string]string{}, string(body))
@@ -186,6 +393,8 @@ func TestDownloadManifest_MissingDatasetId(t *testing.T) {
 }
 
 func TestDownloadManifest_Unauthorized(t *testing.T) {
+	setupExternalBucketConfig(t, nil)
+
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:dl-standalone"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-6",
 		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
@@ -210,6 +419,7 @@ func TestDownloadManifest_Unauthorized(t *testing.T) {
 func TestDownloadManifest_NonexistentPackage(t *testing.T) {
 	setupDownloadTestDB(t)
 	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
 
 	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{"N:package:does-not-exist"}})
 	req := newTestRequest("POST", "/download-manifest", "test-req-7",
@@ -246,4 +456,13 @@ func TestGetFullExtension(t *testing.T) {
 			assert.Equal(t, tt.expected, getFullExtension(tt.input))
 		})
 	}
+}
+
+type MockAssumeRoleClient struct {
+	mock.Mock
+}
+
+func (m *MockAssumeRoleClient) AssumeRole(ctx context.Context, params *sts.AssumeRoleInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
+	args := m.Called(ctx, params, optFns)
+	return args.Get(0).(*sts.AssumeRoleOutput), args.Error(1)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pennsieve/packages-service/api/logging"
@@ -19,6 +20,7 @@ import (
 var PennsieveDB *sql.DB
 var SQSClient *sqs.Client
 var S3Client *s3.Client
+var AssumeRoleClient stscreds.AssumeRoleAPIClient
 var ViewerAssetsBucket string
 
 func init() {
