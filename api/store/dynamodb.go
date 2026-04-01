@@ -75,10 +75,7 @@ type NoSQLStore interface {
 func (d *dynamodbStore) GetDeleteMarkerVersions(ctx context.Context, restoring ...*models.RestorePackageInfo) (GetDeleteMarkerVersionsResponse, error) {
 	deleteMarkerVersions := GetDeleteMarkerVersionsResponse{}
 	for i := 0; i < len(restoring); i += maxGetItemBatch {
-		j := i + maxGetItemBatch
-		if j > len(restoring) {
-			j = len(restoring)
-		}
+		j := min(i+maxGetItemBatch, len(restoring))
 		batch := restoring[i:j]
 		keys := make([]map[string]types.AttributeValue, len(batch))
 		for i, r := range batch {
@@ -141,10 +138,7 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 
 func (d *dynamodbStore) RemoveDeleteRecords(ctx context.Context, restoringNodeIds []string) error {
 	for i := 0; i < len(restoringNodeIds); i += maxWriteItemBatch {
-		j := i + maxWriteItemBatch
-		if j > len(restoringNodeIds) {
-			j = len(restoringNodeIds)
-		}
+		j := min(i+maxWriteItemBatch, len(restoringNodeIds))
 		batch := restoringNodeIds[i:j]
 		keys := make([]types.WriteRequest, len(batch))
 		for i, nodeId := range batch {

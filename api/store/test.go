@@ -45,7 +45,7 @@ type TestDB struct {
 func (tdb *TestDB) PingUntilReady() error {
 	var err error
 	wait := 100 * time.Millisecond
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err = tdb.Ping(); err == nil {
 			return nil
 		}

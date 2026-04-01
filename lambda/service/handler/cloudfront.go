@@ -229,7 +229,7 @@ func (h *CloudFrontSignedURLHandler) getS3PrefixForPackage(ctx context.Context, 
 	var packageIntId, datasetIntId int64
 	err := PennsieveDB.QueryRowContext(ctx, query, packageNodeId, datasetNodeId).Scan(&packageIntId, &datasetIntId)
 	if err != nil {
-		h.logger.WithError(err).WithFields(map[string]interface{}{
+		h.logger.WithError(err).WithFields(map[string]any{
 			"packageNodeId": packageNodeId,
 			"datasetNodeId": datasetNodeId,
 		}).Error("failed to get integer IDs for package and dataset or package does not belong to dataset")
