@@ -324,3 +324,13 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
 
 }
 
+
+resource "aws_iam_role_policy_attachment" "storage_bucket_read" {
+  role       = aws_iam_role.packages_service_lambda_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_read_policy_arn
+}
+
+resource "aws_iam_role_policy_attachment" "restore_storage_bucket_write" {
+  role       = aws_iam_role.restore_package_lambda_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_write_policy_arn
+}
