@@ -675,7 +675,7 @@ func TestCloudFrontSignedURLHandler_ResponseFormat(t *testing.T) {
 	jsonStr = strings.TrimSuffix(jsonStr, "\n")
 
 	// Verify the structure
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err = json.Unmarshal([]byte(jsonStr), &decoded)
 	require.NoError(t, err)
 

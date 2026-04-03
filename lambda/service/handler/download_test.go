@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -284,12 +285,12 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 	bucketConfig := ExternalBucketConfig(map[string]string{"pennsieve-test-publish": "pennsieve-test-role-arn"})
 	setupExternalBucketConfig(t, bucketConfig)
 
-	expectedDuration := 180 * time.Minute
+	expectedSTSCredentialsDuration := stsCredentialsDuration
 	mockAssumeRoleClient := new(MockAssumeRoleClient)
 	mockAssumeRoleClient.On("AssumeRole", mock.Anything, mock.MatchedBy(func(input *sts.AssumeRoleInput) bool {
 		return assert.Equal(t, "pennsieve-test-role-arn", *input.RoleArn) &&
 			assert.Equal(t, "packages-service-presign-session", *input.RoleSessionName) &&
-			assert.Equal(t, int32(expectedDuration.Seconds()), *input.DurationSeconds) &&
+			assert.Equal(t, int32(expectedSTSCredentialsDuration.Seconds()), *input.DurationSeconds) &&
 			assert.NotNil(t, input.Policy) &&
 			assert.Contains(t, *input.Policy, "s3:GetObject") &&
 			assert.Contains(t, *input.Policy, "s3:GetObjectVersion") &&
@@ -298,7 +299,7 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 		AssumedRoleUser: &types.AssumedRoleUser{},
 		Credentials: &types.Credentials{
 			AccessKeyId:     aws.String(uuid.NewString()),
-			Expiration:      aws.Time(time.Now().Add(expectedDuration)),
+			Expiration:      aws.Time(time.Now().Add(expectedSTSCredentialsDuration)),
 			SecretAccessKey: aws.String(uuid.NewString()),
 			SessionToken:    aws.String(uuid.NewString()),
 		},
@@ -343,6 +344,8 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 	assert.Equal(t, "Pu_BlishedVersionId", publishedURL.Query().Get("versionId"))
 	assert.Equal(t, "requester", publishedURL.Query().Get("x-amz-request-payer"))
 	assert.Contains(t, publishedURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
+	expectedPublishedURLDuration := strconv.FormatInt(int64(stsCredentialsDuration/time.Second), 10)
+	assert.Equal(t, expectedPublishedURLDuration, publishedURL.Query().Get("X-Amz-Expires"))
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, publishedEntry.Path)
 
@@ -362,6 +365,8 @@ func TestDownloadManifest_ExternalPublishBucket(t *testing.T) {
 	assert.Empty(t, standaloneURL.Query().Get("versionId"))
 	assert.Empty(t, standaloneURL.Query().Get("x-amz-request-payer"))
 	assert.Contains(t, standaloneURL.Query().Get("X-Amz-Credential"), "/us-east-1/s3/")
+	expectedStandaloneURLDuration := strconv.FormatInt(int64(maxPresignDuration/time.Second), 10)
+	assert.Equal(t, expectedStandaloneURLDuration, standaloneURL.Query().Get("X-Amz-Expires"))
 	// Single-file package: path should be empty (no parents)
 	assert.Empty(t, standaloneEntry.Path)
 

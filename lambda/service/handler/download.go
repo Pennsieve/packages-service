@@ -22,6 +22,18 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/permissions"
 )
 
+// maxPresignDuration is the maximum duration we will set on a presigned URL.
+// The duration of a presigned URL will be lower than this if the bucket requires us
+// to assume a role for signing. In that case the duration of the presigned URL will be stsCredentialsDuration
+// since the URL will only be usable while the STS credentials used to sign it are valid.
+const maxPresignDuration = 3 * time.Hour
+
+// stsCredentialsDuration is the duration of the STS credentials when we need to assume a role in an external account
+// in order to have the external account pay for a requester pays bucket.
+// The max value for this is one hour since AWS imposes this as a hard limit when one role (Lambda execution role)
+// is assuming another (external publish bucket role).
+const stsCredentialsDuration = 1 * time.Hour
+
 type ExternalBucketConfig map[string]string
 
 const ExternalBucketsRoleMapKey = "EXTERNAL_BUCKETS_ROLE_MAP"
@@ -99,8 +111,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 	var entries []models.DownloadManifestEntry
 	var totalSize int64
 
-	presignDuration := 180 * time.Minute
-	bucketOptionsCache := NewBucketOptionsCache(AssumeRoleClient, presignDuration, h.externalBucketConfig)
+	bucketOptionsCache := NewBucketOptionsCache(AssumeRoleClient, stsCredentialsDuration, h.externalBucketConfig)
 
 	for _, row := range rows {
 		s3Bucket := row.S3Bucket
@@ -110,9 +121,9 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 			Bucket:                     aws.String(s3Bucket),
 			Key:                        aws.String(row.S3Key),
 			VersionId:                  row.PublishedS3VersionId,
-			RequestPayer:               bucketOptions.RequestPayer(),
+			RequestPayer:               bucketOptions.RequestPayer,
 			ResponseContentDisposition: aws.String(fmt.Sprintf(`attachment; filename="%s"`, row.PackageName)),
-		}, s3.WithPresignExpires(presignDuration),
+		}, s3.WithPresignExpires(bucketOptions.PresignDuration),
 			func(options *s3.PresignOptions) {
 				options.ClientOptions = append(options.ClientOptions, bucketOptions.S3Options())
 			})
@@ -251,6 +262,8 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 type BucketOptions struct {
 	Region              string
 	CredentialsProvider *aws.CredentialsCache
+	RequestPayer        types.RequestPayer
+	PresignDuration     time.Duration
 }
 
 func (o BucketOptions) S3Options() func(s3Options *s3.Options) {
@@ -262,37 +275,30 @@ func (o BucketOptions) S3Options() func(s3Options *s3.Options) {
 	}
 }
 
-func (o BucketOptions) RequestPayer() types.RequestPayer {
-	if o.CredentialsProvider == nil {
-		return ""
-	}
-	return types.RequestPayerRequester
-}
-
 type BucketOptionsCache struct {
-	cache                map[string]BucketOptions
-	assumeRoleClient     stscreds.AssumeRoleAPIClient
-	presignDuration      time.Duration
-	externalBucketConfig ExternalBucketConfig
+	cache                  map[string]BucketOptions
+	assumeRoleClient       stscreds.AssumeRoleAPIClient
+	stsCredentialsDuration time.Duration
+	externalBucketConfig   ExternalBucketConfig
 }
 
-func NewBucketOptionsCache(assumeRoleClient stscreds.AssumeRoleAPIClient, presignDuration time.Duration, externalBucketConfig ExternalBucketConfig) *BucketOptionsCache {
+func NewBucketOptionsCache(assumeRoleClient stscreds.AssumeRoleAPIClient, stsCredentialsDuration time.Duration, externalBucketConfig ExternalBucketConfig) *BucketOptionsCache {
 	return &BucketOptionsCache{
-		cache:                make(map[string]BucketOptions),
-		assumeRoleClient:     assumeRoleClient,
-		presignDuration:      presignDuration,
-		externalBucketConfig: externalBucketConfig,
+		cache:                  make(map[string]BucketOptions),
+		assumeRoleClient:       assumeRoleClient,
+		stsCredentialsDuration: stsCredentialsDuration,
+		externalBucketConfig:   externalBucketConfig,
 	}
 }
 
 func (c *BucketOptionsCache) Get(bucketName string) BucketOptions {
 	bucketOptions, found := c.cache[bucketName]
 	if !found {
-		bucketOptions = BucketOptions{Region: regions.ForBucket(bucketName)}
+		bucketOptions = BucketOptions{Region: regions.ForBucket(bucketName), PresignDuration: maxPresignDuration}
 		if roleARN, isExternal := c.externalBucketConfig[bucketName]; isExternal {
 			credentialsProvider := aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(c.assumeRoleClient, roleARN, func(options *stscreds.AssumeRoleOptions) {
 				options.RoleSessionName = "packages-service-presign-session"
-				options.Duration = c.presignDuration
+				options.Duration = c.stsCredentialsDuration
 				options.Policy = aws.String(`{
         				"Version": "2012-10-17",
         				"Statement": [
@@ -308,6 +314,8 @@ func (c *BucketOptionsCache) Get(bucketName string) BucketOptions {
 					}`)
 			}))
 			bucketOptions.CredentialsProvider = credentialsProvider
+			bucketOptions.RequestPayer = types.RequestPayerRequester
+			bucketOptions.PresignDuration = stsCredentialsDuration
 		}
 		c.cache[bucketName] = bucketOptions
 	}
