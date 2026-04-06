@@ -105,6 +105,52 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
+  /discover/cloudfront/sign:
+    get:
+      summary: Generate CloudFront signed URLs for published discover packages
+      description: |
+        Unauthenticated endpoint that generates CloudFront signed URLs for published
+        package viewer assets on Pennsieve Discover. Looks up the dataset from the
+        discover database using the source package ID.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: discoverCloudfrontSign
+      tags:
+        - Packages Service
+      parameters:
+        - in: query
+          name: package_id
+          schema:
+            type: string
+          required: true
+          description: source package node id (e.g. N:package:uuid)
+        - in: query
+          name: path
+          schema:
+            type: string
+          required: false
+          description: Optional path to a specific asset within the package
+        - in: query
+          name: include_components
+          schema:
+            type: boolean
+            default: false
+          required: false
+          description: Include URL components in response for client-side URL construction
+      responses:
+        '200':
+          description: Successfully generated CloudFront signed URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/cloudfrontSignedURLResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Error'
+
   /cloudfront/sign:
     get:
       summary: Generate CloudFront signed URLs for assets

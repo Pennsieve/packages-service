@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -18,6 +21,7 @@ import (
 )
 
 var PennsieveDB *sql.DB
+var DiscoverDB *sql.DB
 var SQSClient *sqs.Client
 var S3Client *s3.Client
 var AssumeRoleClient stscreds.AssumeRoleAPIClient
@@ -47,6 +51,14 @@ func init() {
 }
 
 func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTPRequest) (*events.APIGatewayV2HTTPResponse, error) {
+	path := request.RequestContext.HTTP.Path
+
+	// Discover endpoints are unauthenticated — skip claim parsing
+	if strings.HasPrefix(path, "/discover/") {
+		handler := NewDiscoverHandler(&request)
+		return handler.handleDiscover(ctx)
+	}
+
 	// For authenticated endpoints, parse claims and create service
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
 	handler := NewHandler(&request, claims).WithDefaultService()
@@ -155,4 +167,43 @@ func buildResponseFromString(body string, status int) *events.APIGatewayV2HTTPRe
 		StatusCode: status,
 	}
 	return &response
+}
+
+// NewDiscoverHandler creates a RequestHandler for unauthenticated discover endpoints.
+// No claims are parsed since these routes don't require authentication.
+func NewDiscoverHandler(request *events.APIGatewayV2HTTPRequest) *RequestHandler {
+	method := request.RequestContext.HTTP.Method
+	path := request.RequestContext.HTTP.Path
+	reqID := request.RequestContext.RequestID
+	logger := log.WithFields(log.Fields{
+		"requestID": reqID,
+	})
+	requestHandler := RequestHandler{
+		request:   request,
+		requestID: reqID,
+
+		method:      method,
+		path:        path,
+		queryParams: request.QueryStringParameters,
+		body:        request.Body,
+
+		logger: logger,
+	}
+	logger.WithFields(log.Fields{
+		"method":      requestHandler.method,
+		"path":        requestHandler.path,
+		"queryParams": requestHandler.queryParams,
+	}).Info("creating discover RequestHandler (unauthenticated)")
+
+	return &requestHandler
+}
+
+func (h *RequestHandler) handleDiscover(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
+	switch h.path {
+	case "/discover/cloudfront/sign":
+		discoverCFHandler := DiscoverCloudFrontSignedURLHandler{RequestHandler: *h}
+		return discoverCFHandler.handle(ctx)
+	default:
+		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
+	}
 }
