@@ -38,7 +38,7 @@ paths:
       security:
         - token_dataset_auth: [ ]
       tags:
-        - Packages Service
+        - Packages
       parameters:
         - in: query
           name: dataset_id
@@ -78,7 +78,7 @@ paths:
       security:
         - token_dataset_auth: [ ]
       tags:
-        - Packages Service
+        - Packages
       parameters:
         - in: query
           name: dataset_id
@@ -107,7 +107,7 @@ paths:
 
   /discover/cloudfront/sign:
     get:
-      summary: Generate CloudFront signed URLs for published discover packages
+      summary: Generate CloudFront signed URLs for published assets
       description: |
         Unauthenticated endpoint that generates CloudFront signed URLs for published
         package viewer assets on Pennsieve Discover. Looks up the dataset from the
@@ -116,7 +116,7 @@ paths:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: discoverCloudfrontSign
       tags:
-        - Packages Service
+        - Discover
       parameters:
         - in: query
           name: package_id
@@ -164,7 +164,7 @@ paths:
       security:
         - token_dataset_auth: [ ]
       tags:
-        - Packages Service
+        - Packages
       parameters:
         - in: query
           name: dataset_id
