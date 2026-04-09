@@ -162,6 +162,39 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
     ]
   }
 
+  statement {
+    sid    = "PackagesServiceAssumeUploadCredentialsRole"
+    effect = "Allow"
+    actions   = ["sts:AssumeRole"]
+    resources = [aws_iam_role.viewer_assets_upload_credentials_role.arn]
+  }
+
+}
+
+#
+# Viewer Assets Upload Credentials Role
+#
+
+resource "aws_iam_role" "viewer_assets_upload_credentials_role" {
+  name = "${var.environment_name}-viewer-assets-upload-creds-role-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.packages_service_lambda_role.arn
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "viewer_assets_upload_credentials_storage_write" {
+  role       = aws_iam_role.viewer_assets_upload_credentials_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_write_policy_arn
 }
 
 #
@@ -325,9 +358,97 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
 }
 
 
+#
+# Asset Cleanup Lambda Role
+#
+
+resource "aws_iam_role" "asset_cleanup_lambda_role" {
+  name = "${var.environment_name}-asset-cleanup-lambda-role-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "asset_cleanup_lambda_iam_policy_attachment" {
+  role       = aws_iam_role.asset_cleanup_lambda_role.name
+  policy_arn = aws_iam_policy.asset_cleanup_lambda_iam_policy.arn
+}
+
+resource "aws_iam_policy" "asset_cleanup_lambda_iam_policy" {
+  name   = "${var.environment_name}-asset-cleanup-lambda-iam-policy-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+  path   = "/"
+  policy = data.aws_iam_policy_document.asset_cleanup_iam_policy_document.json
+}
+
+data "aws_iam_policy_document" "asset_cleanup_iam_policy_document" {
+
+  statement {
+    sid    = "AssetCleanupLambdaLogsPermissions"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutDestination",
+      "logs:PutLogEvents",
+      "logs:DescribeLogStreams"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AssetCleanupLambdaEC2Permissions"
+    effect = "Allow"
+    actions = [
+      "ec2:CreateNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DeleteNetworkInterface",
+      "ec2:AssignPrivateIpAddresses",
+      "ec2:UnassignPrivateIpAddresses"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AssetCleanupLambdaRDSPermissions"
+    effect = "Allow"
+    actions = [
+      "rds-db:connect"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "asset_cleanup_storage_write" {
+  role       = aws_iam_role.asset_cleanup_lambda_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_write_policy_arn
+}
+
+resource "aws_iam_role_policy_attachment" "asset_cleanup_storage_read" {
+  role       = aws_iam_role.asset_cleanup_lambda_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_read_policy_arn
+}
+
 resource "aws_iam_role_policy_attachment" "storage_bucket_read" {
   role       = aws_iam_role.packages_service_lambda_role.name
   policy_arn = data.terraform_remote_state.account_service.outputs.storage_read_policy_arn
+}
+
+resource "aws_iam_role_policy_attachment" "storage_bucket_write" {
+  role       = aws_iam_role.packages_service_lambda_role.name
+  policy_arn = data.terraform_remote_state.account_service.outputs.storage_write_policy_arn
 }
 
 resource "aws_iam_role_policy_attachment" "restore_storage_bucket_write" {

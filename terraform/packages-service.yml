@@ -151,6 +151,159 @@ paths:
         '500':
           $ref: '#/components/responses/Error'
 
+  /assets:
+    post:
+      summary: Create a viewer asset and get upload credentials
+      description: |
+        Creates a viewer asset record and returns temporary AWS credentials
+        scoped to the asset's S3 prefix for direct upload to the storage bucket.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: createViewerAsset
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Viewer Assets
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/createViewerAssetRequest'
+      responses:
+        '201':
+          description: Asset created with upload credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/createViewerAssetResponse'
+        '409':
+          description: Conflict
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+    get:
+      summary: List viewer assets for a package
+      description: |
+        Returns viewer assets linked to a package along with a CloudFront
+        signed policy for accessing the assets.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: listViewerAssets
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Viewer Assets
+      parameters:
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+        - in: query
+          name: package_id
+          schema:
+            type: string
+          required: true
+          description: package node id
+      responses:
+        '200':
+          description: List of viewer assets with CloudFront access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/listViewerAssetsResponse'
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+
+  /assets/{asset_id}:
+    patch:
+      summary: Update a viewer asset
+      description: |
+        Updates status, properties, or package links for an existing viewer asset.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: updateViewerAsset
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Viewer Assets
+      parameters:
+        - in: path
+          name: asset_id
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: viewer asset UUID
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/updateViewerAssetRequest'
+      responses:
+        '200':
+          description: Updated viewer asset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/viewerAsset'
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+    delete:
+      summary: Delete a viewer asset and its S3 objects
+      description: |
+        Deletes the viewer asset record and all associated S3 objects
+        under the asset's prefix.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: deleteViewerAsset
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Viewer Assets
+      parameters:
+        - in: path
+          name: asset_id
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: viewer asset UUID
+        - in: query
+          name: dataset_id
+          schema:
+            type: string
+          required: true
+          description: dataset node id
+      responses:
+        '204':
+          description: Asset deleted
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+
   /cloudfront/sign:
     get:
       summary: Generate CloudFront signed URLs for assets
@@ -369,6 +522,104 @@ components:
           format: date-time
           description: ISO 8601 formatted expiration time
           example: "2025-12-23T01:11:32Z"
+
+    createViewerAssetRequest:
+      type: object
+      required:
+        - name
+        - asset_type
+      properties:
+        name:
+          type: string
+          description: Display name for the asset
+        asset_type:
+          type: string
+          description: Type of viewer asset (e.g. ome-zarr, neuroglancer-precomputed)
+        properties:
+          type: object
+          additionalProperties: true
+          description: Arbitrary metadata
+        package_ids:
+          type: array
+          items:
+            type: string
+          description: Package node IDs to attach the asset to
+
+    createViewerAssetResponse:
+      type: object
+      properties:
+        asset:
+          $ref: '#/components/schemas/viewerAsset'
+        upload_credentials:
+          $ref: '#/components/schemas/uploadCredentials'
+
+    viewerAsset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        dataset_id:
+          type: string
+        name:
+          type: string
+        asset_type:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+        package_ids:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    updateViewerAssetRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [created, ready]
+        properties:
+          type: object
+          additionalProperties: true
+        package_ids:
+          type: array
+          items:
+            type: string
+
+    uploadCredentials:
+      type: object
+      properties:
+        access_key_id:
+          type: string
+        secret_access_key:
+          type: string
+        session_token:
+          type: string
+        expiration:
+          type: string
+          format: date-time
+        bucket:
+          type: string
+        region:
+          type: string
+        key_prefix:
+          type: string
+
+    listViewerAssetsResponse:
+      type: object
+      properties:
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/viewerAsset'
+        cloudfront:
+          $ref: '#/components/schemas/cloudfrontURLComponents'
 
     downloadRequest:
       type: object

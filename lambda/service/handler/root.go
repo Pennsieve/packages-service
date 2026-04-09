@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
-	"github.com/aws/aws-lambda-go/events"
 	"net/http"
+	"strings"
+
+	"github.com/aws/aws-lambda-go/events"
 )
 
 func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
@@ -20,6 +22,10 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 		downloadHandler := DownloadManifestHandler{RequestHandler: *h}
 		return downloadHandler.handle(ctx)
 	default:
+		if h.path == "/assets" || strings.HasPrefix(h.path, "/assets/") {
+			assetsHandler := ViewerAssetsHandler{RequestHandler: *h}
+			return assetsHandler.handle(ctx)
+		}
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}
 }

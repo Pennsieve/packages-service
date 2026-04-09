@@ -22,9 +22,15 @@ KEY_ROTATION_EXEC  ?= "bootstrap"
 KEY_ROTATION_PACK  ?= "keyRotation"
 KEY_ROTATION_PACKAGE_NAME  ?= "${KEY_ROTATION_NAME}-${IMAGE_TAG}.zip"
 
+# Asset Cleanup Lambda
+ASSET_CLEANUP_NAME  ?= "asset-cleanup"
+ASSET_CLEANUP_EXEC  ?= "bootstrap"
+ASSET_CLEANUP_PACK  ?= "assetCleanup"
+ASSET_CLEANUP_PACKAGE_NAME  ?= "${ASSET_CLEANUP_NAME}-${IMAGE_TAG}.zip"
+
 .DEFAULT: help
 
-MODULES := lambda/service lambda/restore lambda/key-rotation api
+MODULES := lambda/service lambda/restore lambda/key-rotation lambda/asset-cleanup api
 
 help:
 	@echo "Make Help for $(SERVICE_NAME)"
@@ -98,6 +104,15 @@ package:
   		env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_EXEC); \
 		cd $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/ ; \
 			zip -r $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME) .
+	@echo ""
+	@echo "**************************************"
+	@echo "*   Building asset cleanup lambda    *"
+	@echo "**************************************"
+	@echo ""
+	cd ${WORKING_DIR}/lambda/asset-cleanup; \
+  		env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(WORKING_DIR)/lambda/bin/$(ASSET_CLEANUP_PACK)/$(ASSET_CLEANUP_EXEC); \
+		cd $(WORKING_DIR)/lambda/bin/$(ASSET_CLEANUP_PACK)/ ; \
+			zip -r $(WORKING_DIR)/lambda/bin/$(ASSET_CLEANUP_PACK)/$(ASSET_CLEANUP_PACKAGE_NAME) .
 
 # Copy Service lambda to S3 location
 publish: package
@@ -122,6 +137,13 @@ publish: package
 	@echo ""
 	aws s3 cp $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
 	rm -rf $(WORKING_DIR)/lambda/bin/$(KEY_ROTATION_PACK)/$(KEY_ROTATION_PACKAGE_NAME)
+	@echo ""
+	@echo "****************************************"
+	@echo "*   Publishing asset cleanup lambda    *"
+	@echo "****************************************"
+	@echo ""
+	aws s3 cp $(WORKING_DIR)/lambda/bin/$(ASSET_CLEANUP_PACK)/$(ASSET_CLEANUP_PACKAGE_NAME) s3://$(LAMBDA_BUCKET)/$(SERVICE_NAME)/
+	rm -rf $(WORKING_DIR)/lambda/bin/$(ASSET_CLEANUP_PACK)/$(ASSET_CLEANUP_PACKAGE_NAME)
 
 # Run go mod tidy on modules
 tidy:
