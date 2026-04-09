@@ -17,56 +17,50 @@ var (
 )
 
 type cleanupEntry struct {
-	ID        int64
-	OrgID     int64
-	DatasetID int64
-	AssetID   string
-	S3Bucket  string
+	ID       int64
+	S3Bucket string
+	S3Prefix string
 }
 
 func HandleCleanup(ctx context.Context) error {
-	entries, err := fetchCleanupEntries(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch cleanup entries: %w", err)
-	}
-
-	if len(entries) == 0 {
-		log.Info("no viewer asset cleanup entries to process")
-		return nil
-	}
-
-	log.Infof("processing %d viewer asset cleanup entries", len(entries))
-
-	for _, entry := range entries {
-		prefix := fmt.Sprintf("viewer-assets/O%d/D%d/%s/", entry.OrgID, entry.DatasetID, entry.AssetID)
-
-		log.WithFields(log.Fields{
-			"entryID":  entry.ID,
-			"orgID":    entry.OrgID,
-			"assetID":  entry.AssetID,
-			"s3Bucket": entry.S3Bucket,
-			"prefix":   prefix,
-		}).Info("cleaning up S3 objects for deleted viewer asset")
-
-		if err := deleteS3Prefix(ctx, entry.S3Bucket, prefix); err != nil {
-			log.WithError(err).WithField("entryID", entry.ID).Error("failed to delete S3 objects, will retry next run")
-			continue
+	for {
+		entries, err := fetchCleanupEntries(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch cleanup entries: %w", err)
 		}
 
-		if err := removeCleanupEntry(ctx, entry.ID); err != nil {
-			log.WithError(err).WithField("entryID", entry.ID).Error("failed to remove cleanup entry")
-			continue
+		if len(entries) == 0 {
+			log.Info("no more viewer asset cleanup entries to process")
+			return nil
 		}
 
-		log.WithField("entryID", entry.ID).Info("cleanup complete")
-	}
+		log.Infof("processing %d viewer asset cleanup entries", len(entries))
 
-	return nil
+		for _, entry := range entries {
+			log.WithFields(log.Fields{
+				"entryID":  entry.ID,
+				"s3Bucket": entry.S3Bucket,
+				"s3Prefix": entry.S3Prefix,
+			}).Info("cleaning up S3 objects for deleted viewer asset")
+
+			if err := deleteS3Prefix(ctx, entry.S3Bucket, entry.S3Prefix); err != nil {
+				log.WithError(err).WithField("entryID", entry.ID).Error("failed to delete S3 objects, will retry next run")
+				continue
+			}
+
+			if err := removeCleanupEntry(ctx, entry.ID); err != nil {
+				log.WithError(err).WithField("entryID", entry.ID).Error("failed to remove cleanup entry")
+				continue
+			}
+
+			log.WithField("entryID", entry.ID).Info("cleanup complete")
+		}
+	}
 }
 
 func fetchCleanupEntries(ctx context.Context) ([]cleanupEntry, error) {
 	rows, err := PennsieveDB.QueryContext(ctx,
-		`SELECT id, org_id, dataset_id, asset_id, s3_bucket
+		`SELECT id, s3_bucket, s3_prefix
 		 FROM pennsieve.viewer_asset_cleanup_queue
 		 ORDER BY created_at ASC
 		 LIMIT 100`)
@@ -78,7 +72,7 @@ func fetchCleanupEntries(ctx context.Context) ([]cleanupEntry, error) {
 	var entries []cleanupEntry
 	for rows.Next() {
 		var e cleanupEntry
-		if err := rows.Scan(&e.ID, &e.OrgID, &e.DatasetID, &e.AssetID, &e.S3Bucket); err != nil {
+		if err := rows.Scan(&e.ID, &e.S3Bucket, &e.S3Prefix); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

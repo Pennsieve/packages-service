@@ -21,9 +21,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Table and column constants
+const (
+	viewerAssetsTable         = "viewer_assets"
+	viewerAssetPackagesTable  = "viewer_asset_packages"
+	viewerAssetsS3Prefix      = "viewer-assets"
+)
+
+// ViewerAssetS3Prefix returns the S3 key prefix for a viewer asset.
+func ViewerAssetS3Prefix(orgID, datasetID int64, assetID string) string {
+	return fmt.Sprintf("%s/O%d/D%d/%s/", viewerAssetsS3Prefix, orgID, datasetID, assetID)
+}
+
 type ViewerAssetsHandler struct {
 	RequestHandler
 }
+
+// Request/response types
 
 type viewerAssetRow struct {
 	ID         string          `json:"id"`
@@ -71,9 +85,9 @@ type viewerAssetResponse struct {
 	CreatedAt  string           `json:"created_at"`
 }
 
-type createViewerAssetResponse struct {
-	Asset             viewerAssetResponse        `json:"asset"`
-	UploadCredentials *uploadCredentialsResponse  `json:"upload_credentials"`
+type createViewerAssetResponseBody struct {
+	Asset             viewerAssetResponse       `json:"asset"`
+	UploadCredentials *uploadCredentialsResponse `json:"upload_credentials"`
 }
 
 type listViewerAssetsResponse struct {
@@ -81,34 +95,7 @@ type listViewerAssetsResponse struct {
 	CloudFront *CloudFrontURLComponents `json:"cloudfront,omitempty"`
 }
 
-func (h *ViewerAssetsHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	// /assets or /assets/{asset_id}
-	if h.path == "/assets" {
-		switch h.method {
-		case http.MethodPost:
-			return h.handleCreate(ctx)
-		case http.MethodGet:
-			return h.handleList(ctx)
-		default:
-			return h.logAndBuildError(fmt.Sprintf("method %s not allowed", h.method), http.StatusMethodNotAllowed), nil
-		}
-	}
-
-	// /assets/{asset_id}
-	assetID := strings.TrimPrefix(h.path, "/assets/")
-	if assetID == "" {
-		return h.logAndBuildError("missing asset_id", http.StatusBadRequest), nil
-	}
-
-	switch h.method {
-	case http.MethodPatch:
-		return h.handleUpdate(ctx, assetID)
-	case http.MethodDelete:
-		return h.handleDelete(ctx, assetID)
-	default:
-		return h.logAndBuildError(fmt.Sprintf("method %s not allowed", h.method), http.StatusMethodNotAllowed), nil
-	}
-}
+// Handlers
 
 func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	if !authorizer.HasRole(*h.claims, permissions.EditFiles) {
@@ -126,19 +113,26 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 	orgID := h.claims.OrgClaim.IntId
 	datasetNodeID := h.queryParams["dataset_id"]
 
-	// Resolve dataset node ID to integer ID
 	datasetIntID, err := h.resolveDatasetID(ctx, orgID, datasetNodeID)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset: %v", err), http.StatusBadRequest), nil
 	}
 
-	// Resolve storage bucket for this org
+	// Batch-resolve package IDs upfront (validates they belong to the dataset)
+	var resolvedPkgIDs []int64
+	var attachedNodeIDs []string
+	if len(req.PackageIDs) > 0 {
+		resolvedPkgIDs, attachedNodeIDs, err = h.resolvePackageIDs(ctx, orgID, datasetIntID, req.PackageIDs)
+		if err != nil {
+			return h.logAndBuildError(fmt.Sprintf("failed to resolve packages: %v", err), http.StatusBadRequest), nil
+		}
+	}
+
 	storageBucket, err := h.resolveStorageBucket(ctx, orgID)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve storage bucket: %v", err), http.StatusInternalServerError), nil
 	}
 
-	// Insert viewer_assets row
 	props := json.RawMessage("{}")
 	if req.Properties != nil {
 		props = *req.Properties
@@ -146,10 +140,10 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 
 	var asset viewerAssetRow
 	insertQuery := fmt.Sprintf(`
-		INSERT INTO "%d".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		INSERT INTO "%d".%s (dataset_id, name, asset_type, properties, s3_bucket, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, dataset_id, name, asset_type, properties, s3_bucket, status, created_by, created_at
-	`, orgID)
+	`, orgID, viewerAssetsTable)
 
 	err = PennsieveDB.QueryRowContext(ctx, insertQuery,
 		datasetIntID, req.Name, req.AssetType, props, storageBucket, h.claims.UserClaim.Id,
@@ -160,24 +154,21 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 		return h.logAndBuildError("failed to create viewer asset", http.StatusInternalServerError), nil
 	}
 
-	// Attach to packages if provided
-	var packageNodeIDs []string
-	if len(req.PackageIDs) > 0 {
-		packageNodeIDs, err = h.attachPackages(ctx, orgID, datasetIntID, asset.ID, req.PackageIDs)
-		if err != nil {
+	// Batch insert package links
+	if len(resolvedPkgIDs) > 0 {
+		if err := h.batchInsertPackageLinks(ctx, orgID, asset.ID, resolvedPkgIDs); err != nil {
 			h.logger.WithError(err).Error("failed to attach packages")
 		}
 	}
 
-	// Generate STS upload credentials
-	keyPrefix := fmt.Sprintf("viewer-assets/O%d/D%d/%s/", orgID, datasetIntID, asset.ID)
+	keyPrefix := ViewerAssetS3Prefix(orgID, datasetIntID, asset.ID)
 	creds, err := h.generateUploadCredentials(ctx, storageBucket, keyPrefix)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to generate upload credentials")
 		return h.logAndBuildError("failed to generate upload credentials", http.StatusInternalServerError), nil
 	}
 
-	resp := createViewerAssetResponse{
+	resp := createViewerAssetResponseBody{
 		Asset: viewerAssetResponse{
 			ID:         asset.ID,
 			DatasetID:  datasetNodeID,
@@ -185,7 +176,7 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 			AssetType:  asset.AssetType,
 			Properties: &asset.Properties,
 			Status:     asset.Status,
-			PackageIDs: packageNodeIDs,
+			PackageIDs: attachedNodeIDs,
 			CreatedAt:  asset.CreatedAt.Format(time.RFC3339),
 		},
 		UploadCredentials: creds,
@@ -212,20 +203,18 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset: %v", err), http.StatusBadRequest), nil
 	}
 
-	// Resolve package to int ID and validate it belongs to the dataset
 	packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve package: %v", err), http.StatusBadRequest), nil
 	}
 
-	// Query assets linked to this package
 	query := fmt.Sprintf(`
 		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-		FROM "%d".viewer_assets va
-		JOIN "%d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
+		FROM "%d".%s va
+		JOIN "%d".%s vap ON va.id = vap.viewer_asset_id
 		WHERE vap.package_id = $1
 		ORDER BY va.created_at DESC
-	`, orgID, orgID)
+	`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
 
 	rows, err := PennsieveDB.QueryContext(ctx, query, packageIntID)
 	if err != nil {
@@ -240,7 +229,6 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 			return h.logAndBuildError(fmt.Sprintf("failed to scan asset row: %v", err), http.StatusInternalServerError), nil
 		}
 
-		// Get linked package node IDs for this asset
 		pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, a.ID)
 
 		assets = append(assets, viewerAssetResponse{
@@ -254,21 +242,22 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
 	}
-
 	if assets == nil {
 		assets = []viewerAssetResponse{}
 	}
 
-	// Generate CloudFront signed policy for the dataset prefix
 	resp := listViewerAssetsResponse{Assets: assets}
 
-	s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
-	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-	signedURL, expiresAt, err := cfHandler.generateCloudFrontSignedURLWithPolicy(s3Prefix, "")
-	if err == nil {
-		components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
+	// Generate CloudFront signed policy if signing keys are available
+	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
+		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
+		cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+		signedURL, expiresAt, err := cfHandler.generateCloudFrontSignedURLWithPolicy(s3Prefix, "")
 		if err == nil {
-			resp.CloudFront = components
+			components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
+			if err == nil {
+				resp.CloudFront = components
+			}
 		}
 	}
 
@@ -311,10 +300,10 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 
 	if len(setClauses) > 0 {
 		updateQuery := fmt.Sprintf(`
-			UPDATE "%d".viewer_assets SET %s
+			UPDATE "%d".%s SET %s
 			WHERE id = $%d AND dataset_id = $%d
 			RETURNING id, dataset_id, name, asset_type, properties, s3_bucket, status, created_at
-		`, orgID, strings.Join(setClauses, ", "), argIdx, argIdx+1)
+		`, orgID, viewerAssetsTable, strings.Join(setClauses, ", "), argIdx, argIdx+1)
 
 		args = append(args, assetID, datasetIntID)
 
@@ -332,25 +321,27 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 
 	// Update package links if provided
 	if req.PackageIDs != nil {
-		// Delete existing links and insert new ones
-		deleteQuery := fmt.Sprintf(`DELETE FROM "%d".viewer_asset_packages WHERE viewer_asset_id = $1`, orgID)
+		deleteQuery := fmt.Sprintf(`DELETE FROM "%d".%s WHERE viewer_asset_id = $1`, orgID, viewerAssetPackagesTable)
 		if _, err := PennsieveDB.ExecContext(ctx, deleteQuery, assetID); err != nil {
 			h.logger.WithError(err).Error("failed to delete existing package links")
 		}
 
 		if len(*req.PackageIDs) > 0 {
-			if _, err := h.attachPackages(ctx, orgID, datasetIntID, assetID, *req.PackageIDs); err != nil {
-				h.logger.WithError(err).Error("failed to attach packages")
+			resolvedPkgIDs, _, err := h.resolvePackageIDs(ctx, orgID, datasetIntID, *req.PackageIDs)
+			if err == nil && len(resolvedPkgIDs) > 0 {
+				if err := h.batchInsertPackageLinks(ctx, orgID, assetID, resolvedPkgIDs); err != nil {
+					h.logger.WithError(err).Error("failed to attach packages")
+				}
 			}
 		}
 	}
 
-	// Re-fetch the asset for response
+	// Re-fetch for response
 	var asset viewerAssetRow
 	fetchQuery := fmt.Sprintf(`
 		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, created_at
-		FROM "%d".viewer_assets WHERE id = $1 AND dataset_id = $2
-	`, orgID)
+		FROM "%d".%s WHERE id = $1 AND dataset_id = $2
+	`, orgID, viewerAssetsTable)
 	err = PennsieveDB.QueryRowContext(ctx, fetchQuery, assetID, datasetIntID).Scan(
 		&asset.ID, &asset.DatasetID, &asset.Name, &asset.AssetType,
 		&asset.Properties, &asset.S3Bucket, &asset.Status, &asset.CreatedAt)
@@ -390,9 +381,8 @@ func (h *ViewerAssetsHandler) handleDelete(ctx context.Context, assetID string) 
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset: %v", err), http.StatusBadRequest), nil
 	}
 
-	// Fetch asset to get s3_bucket before deleting
 	var s3Bucket string
-	fetchQuery := fmt.Sprintf(`SELECT s3_bucket FROM "%d".viewer_assets WHERE id = $1 AND dataset_id = $2`, orgID)
+	fetchQuery := fmt.Sprintf(`SELECT s3_bucket FROM "%d".%s WHERE id = $1 AND dataset_id = $2`, orgID, viewerAssetsTable)
 	err = PennsieveDB.QueryRowContext(ctx, fetchQuery, assetID, datasetIntID).Scan(&s3Bucket)
 	if err == sql.ErrNoRows {
 		return h.logAndBuildError("asset not found", http.StatusNotFound), nil
@@ -401,14 +391,12 @@ func (h *ViewerAssetsHandler) handleDelete(ctx context.Context, assetID string) 
 		return h.logAndBuildError(fmt.Sprintf("failed to fetch asset: %v", err), http.StatusInternalServerError), nil
 	}
 
-	// Delete S3 objects under the asset prefix
-	keyPrefix := fmt.Sprintf("viewer-assets/O%d/D%d/%s/", orgID, datasetIntID, assetID)
-	if err := h.deleteS3Prefix(ctx, s3Bucket, keyPrefix); err != nil {
+	keyPrefix := ViewerAssetS3Prefix(orgID, datasetIntID, assetID)
+	if err := deleteS3Prefix(ctx, s3Bucket, keyPrefix); err != nil {
 		h.logger.WithError(err).Warn("failed to delete S3 objects, continuing with database delete")
 	}
 
-	// Delete from Postgres (cascades to junction table, trigger writes to cleanup queue)
-	deleteQuery := fmt.Sprintf(`DELETE FROM "%d".viewer_assets WHERE id = $1 AND dataset_id = $2`, orgID)
+	deleteQuery := fmt.Sprintf(`DELETE FROM "%d".%s WHERE id = $1 AND dataset_id = $2`, orgID, viewerAssetsTable)
 	result, err := PennsieveDB.ExecContext(ctx, deleteQuery, assetID, datasetIntID)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to delete asset: %v", err), http.StatusInternalServerError), nil
@@ -421,33 +409,68 @@ func (h *ViewerAssetsHandler) handleDelete(ctx context.Context, assetID string) 
 	return &events.APIGatewayV2HTTPResponse{StatusCode: http.StatusNoContent}, nil
 }
 
-// Helper functions
+// Database helpers
 
 func (h *ViewerAssetsHandler) resolveDatasetID(ctx context.Context, orgID int64, datasetNodeID string) (int64, error) {
 	query := fmt.Sprintf(`SELECT id FROM "%d".datasets WHERE node_id = $1`, orgID)
-	var datasetIntID int64
-	err := PennsieveDB.QueryRowContext(ctx, query, datasetNodeID).Scan(&datasetIntID)
-	if err != nil {
+	var id int64
+	if err := PennsieveDB.QueryRowContext(ctx, query, datasetNodeID).Scan(&id); err != nil {
 		return 0, fmt.Errorf("dataset not found: %s", datasetNodeID)
 	}
-	return datasetIntID, nil
+	return id, nil
 }
 
 func (h *ViewerAssetsHandler) resolvePackageID(ctx context.Context, orgID int64, packageNodeID string, datasetIntID int64) (int64, error) {
 	query := fmt.Sprintf(`SELECT id FROM "%d".packages WHERE node_id = $1 AND dataset_id = $2`, orgID)
-	var packageIntID int64
-	err := PennsieveDB.QueryRowContext(ctx, query, packageNodeID, datasetIntID).Scan(&packageIntID)
-	if err != nil {
+	var id int64
+	if err := PennsieveDB.QueryRowContext(ctx, query, packageNodeID, datasetIntID).Scan(&id); err != nil {
 		return 0, fmt.Errorf("package not found or does not belong to dataset: %s", packageNodeID)
 	}
-	return packageIntID, nil
+	return id, nil
+}
+
+// resolvePackageIDs batch-resolves package node IDs to integer IDs, returning
+// the resolved int IDs and the corresponding node IDs (intersection of valid ones).
+func (h *ViewerAssetsHandler) resolvePackageIDs(ctx context.Context, orgID, datasetIntID int64, packageNodeIDs []string) ([]int64, []string, error) {
+	if len(packageNodeIDs) == 0 {
+		return nil, nil, nil
+	}
+
+	placeholders := make([]string, len(packageNodeIDs))
+	args := make([]interface{}, len(packageNodeIDs)+1)
+	args[0] = datasetIntID
+	for i, nodeID := range packageNodeIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args[i+1] = nodeID
+	}
+
+	query := fmt.Sprintf(`SELECT id, node_id FROM "%d".packages WHERE dataset_id = $1 AND node_id IN (%s)`,
+		orgID, strings.Join(placeholders, ", "))
+
+	rows, err := PennsieveDB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve package IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var intIDs []int64
+	var nodeIDs []string
+	for rows.Next() {
+		var intID int64
+		var nodeID string
+		if err := rows.Scan(&intID, &nodeID); err != nil {
+			return nil, nil, err
+		}
+		intIDs = append(intIDs, intID)
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	return intIDs, nodeIDs, nil
 }
 
 func (h *ViewerAssetsHandler) resolveStorageBucket(ctx context.Context, orgID int64) (string, error) {
 	query := `SELECT storage_bucket FROM pennsieve.organizations WHERE id = $1`
 	var bucketName sql.NullString
-	err := PennsieveDB.QueryRowContext(ctx, query, orgID).Scan(&bucketName)
-	if err != nil {
+	if err := PennsieveDB.QueryRowContext(ctx, query, orgID).Scan(&bucketName); err != nil {
 		return "", fmt.Errorf("failed to query organization: %w", err)
 	}
 	if bucketName.Valid && bucketName.String != "" {
@@ -459,33 +482,33 @@ func (h *ViewerAssetsHandler) resolveStorageBucket(ctx context.Context, orgID in
 	return "", fmt.Errorf("no storage bucket configured")
 }
 
-func (h *ViewerAssetsHandler) attachPackages(ctx context.Context, orgID, datasetIntID int64, assetID string, packageNodeIDs []string) ([]string, error) {
-	attached := []string{}
-	for _, nodeID := range packageNodeIDs {
-		pkgIntID, err := h.resolvePackageID(ctx, orgID, nodeID, datasetIntID)
-		if err != nil {
-			h.logger.WithError(err).Warnf("skipping package %s", nodeID)
-			continue
-		}
-		insertQuery := fmt.Sprintf(`
-			INSERT INTO "%d".viewer_asset_packages (viewer_asset_id, package_id)
-			VALUES ($1, $2) ON CONFLICT DO NOTHING
-		`, orgID)
-		if _, err := PennsieveDB.ExecContext(ctx, insertQuery, assetID, pkgIntID); err != nil {
-			h.logger.WithError(err).Warnf("failed to attach package %s", nodeID)
-			continue
-		}
-		attached = append(attached, nodeID)
+// batchInsertPackageLinks inserts all package links in a single INSERT statement.
+func (h *ViewerAssetsHandler) batchInsertPackageLinks(ctx context.Context, orgID int64, assetID string, packageIntIDs []int64) error {
+	if len(packageIntIDs) == 0 {
+		return nil
 	}
-	return attached, nil
+
+	valuePlaceholders := make([]string, len(packageIntIDs))
+	args := make([]interface{}, 0, 1+len(packageIntIDs))
+	args = append(args, assetID)
+	for i, pkgID := range packageIntIDs {
+		valuePlaceholders[i] = fmt.Sprintf("($1, $%d)", i+2)
+		args = append(args, pkgID)
+	}
+
+	query := fmt.Sprintf(`INSERT INTO "%d".%s (viewer_asset_id, package_id) VALUES %s ON CONFLICT DO NOTHING`,
+		orgID, viewerAssetPackagesTable, strings.Join(valuePlaceholders, ", "))
+
+	_, err := PennsieveDB.ExecContext(ctx, query, args...)
+	return err
 }
 
 func (h *ViewerAssetsHandler) getLinkedPackageNodeIDs(ctx context.Context, orgID int64, assetID string) ([]string, error) {
 	query := fmt.Sprintf(`
 		SELECT p.node_id FROM "%d".packages p
-		JOIN "%d".viewer_asset_packages vap ON p.id = vap.package_id
+		JOIN "%d".%s vap ON p.id = vap.package_id
 		WHERE vap.viewer_asset_id = $1
-	`, orgID, orgID)
+	`, orgID, orgID, viewerAssetPackagesTable)
 
 	rows, err := PennsieveDB.QueryContext(ctx, query, assetID)
 	if err != nil {
@@ -506,6 +529,8 @@ func (h *ViewerAssetsHandler) getLinkedPackageNodeIDs(ctx context.Context, orgID
 	}
 	return nodeIDs, nil
 }
+
+// AWS helpers
 
 func (h *ViewerAssetsHandler) generateUploadCredentials(ctx context.Context, bucket, keyPrefix string) (*uploadCredentialsResponse, error) {
 	roleARN := os.Getenv("UPLOAD_CREDENTIALS_ROLE_ARN")
@@ -565,7 +590,9 @@ func (h *ViewerAssetsHandler) generateUploadCredentials(ctx context.Context, buc
 	}, nil
 }
 
-func (h *ViewerAssetsHandler) deleteS3Prefix(ctx context.Context, bucket, prefix string) error {
+// deleteS3Prefix deletes all S3 objects under the given prefix.
+// Exported as a package function so the cleanup Lambda can reuse it.
+func deleteS3Prefix(ctx context.Context, bucket, prefix string) error {
 	region := os.Getenv("REGION")
 	if region == "" {
 		region = "us-east-1"
@@ -576,8 +603,6 @@ func (h *ViewerAssetsHandler) deleteS3Prefix(ctx context.Context, bucket, prefix
 	}
 
 	s3Client := s3.NewFromConfig(cfg)
-
-	// List and delete in batches
 	paginator := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String(prefix),
@@ -588,7 +613,6 @@ func (h *ViewerAssetsHandler) deleteS3Prefix(ctx context.Context, bucket, prefix
 		if err != nil {
 			return fmt.Errorf("failed to list objects: %w", err)
 		}
-
 		if len(page.Contents) == 0 {
 			continue
 		}
