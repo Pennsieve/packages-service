@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,22 +11,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
-	log "github.com/sirupsen/logrus"
 )
 
 type DiscoverCloudFrontSignedURLHandler struct {
 	RequestHandler
-}
-
-func (h *DiscoverCloudFrontSignedURLHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	switch h.method {
-	case http.MethodGet:
-		return h.handleGet(ctx)
-	case http.MethodOptions:
-		return h.handleOptions(ctx)
-	default:
-		return h.logAndBuildError(fmt.Sprintf("method %s not allowed", h.method), http.StatusMethodNotAllowed), nil
-	}
 }
 
 func (h *DiscoverCloudFrontSignedURLHandler) handleOptions(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
@@ -44,105 +30,137 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleOptions(ctx context.Context) 
 	}, nil
 }
 
-func (h *DiscoverCloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	// Load CloudFront signing keys (same as authenticated endpoint)
-	if cloudfrontKeyID == "" || cloudfrontPrivateKey == nil {
-		secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME")
-		if !ok {
-			log.Error("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME environment variable not set")
-			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-		}
-
-		authHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-		if err := authHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-			log.Errorf("Failed to load keys from Secrets Manager: %v", err)
-			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-		}
-		log.Info("CloudFront keys loaded and cached for this Lambda container")
-	}
-
-	if cloudfrontDistributionDomain == "" || cloudfrontKeyID == "" || cloudfrontPrivateKey == nil {
-		return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-	}
-
-	// Get parameters from query string
-	packageID := h.queryParams["package_id"]
-	path := strings.TrimSpace(h.queryParams["path"])
-	includeComponents := h.queryParams["include_components"] == "true"
-
-	if packageID == "" {
+// handleListAssets lists viewer assets for a published package (unauthenticated).
+func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
+	packageNodeID := h.queryParams["package_id"]
+	if packageNodeID == "" {
 		return h.logAndBuildError("missing required 'package_id' query parameter", http.StatusBadRequest), nil
 	}
 
-	h.logger.WithFields(log.Fields{
-		"packageId": packageID,
-		"assetPath": path,
-	}).Info("handling GET request for discover CloudFront signed URL")
+	h.logger.WithField("packageId", packageNodeID).Info("handling GET request for discover viewer assets")
 
-	// Look up org, dataset, and package info from discover DB + pennsieve DB
-	s3Prefix, orgId, err := h.getDiscoverS3Prefix(ctx, packageID)
+	// Validate that the package is published and resolve IDs
+	orgID, datasetIntID, packageIntID, err := h.resolveDiscoverPackage(ctx, packageNodeID)
 	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to get S3 prefix: %v", err), http.StatusNotFound), nil
+		return h.logAndBuildError(fmt.Sprintf("failed to resolve published package: %v", err), http.StatusNotFound), nil
 	}
 
-	// Generate CloudFront signed URL with custom policy for prefix access
-	signedURL, expiresAt, err := h.generateDiscoverCloudFrontSignedURL(ctx, s3Prefix, path, orgId)
+	// Resolve dataset node ID for the response
+	var datasetNodeID string
+	dsQuery := fmt.Sprintf(`SELECT node_id FROM "%d".datasets WHERE id = $1`, orgID)
+	if err := PennsieveDB.QueryRowContext(ctx, dsQuery, datasetIntID).Scan(&datasetNodeID); err != nil {
+		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset node ID: %v", err), http.StatusInternalServerError), nil
+	}
+
+	// Query viewer assets linked to this package
+	query := fmt.Sprintf(`
+		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
+		FROM "%d".viewer_assets va
+		JOIN "%d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
+		WHERE vap.package_id = $1
+		ORDER BY va.created_at DESC
+	`, orgID, orgID)
+
+	rows, err := PennsieveDB.QueryContext(ctx, query, packageIntID)
 	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to generate signed URL: %v", err), http.StatusInternalServerError), nil
+		return h.logAndBuildError(fmt.Sprintf("failed to query assets: %v", err), http.StatusInternalServerError), nil
 	}
+	defer rows.Close()
 
-	// Build response
-	response := CloudFrontSignedURLResponse{
-		SignedURL:  signedURL,
-		ExpiresAt:  expiresAt.Unix(),
-	}
-
-	if includeComponents {
-		components, err := h.extractDiscoverURLComponents(ctx, signedURL, expiresAt, s3Prefix, orgId)
-		if err != nil {
-			h.logger.WithError(err).Warn("Failed to extract URL components, continuing without them")
+	// Build asset URL base: https://{domain}{pathPrefix}/O{orgID}/D{datasetID}/
+	var assetURLBase string
+	if cloudfrontDistributionDomain != "" {
+		pathPrefix, _ := getOrganizationCloudFrontPathByOrgId(ctx, orgID)
+		if pathPrefix != "" {
+			assetURLBase = fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
 		} else {
-			response.Components = components
+			assetURLBase = fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
 		}
 	}
 
-	// Use custom encoder to avoid escaping HTML characters like &
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	err = encoder.Encode(response)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to marshal response: %v", err), http.StatusInternalServerError), nil
+	var assets []viewerAssetResponse
+	for rows.Next() {
+		var a viewerAssetRow
+		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
+			return h.logAndBuildError(fmt.Sprintf("failed to scan asset row: %v", err), http.StatusInternalServerError), nil
+		}
+
+		// Get linked package node IDs
+		pkgQuery := fmt.Sprintf(`
+			SELECT p.node_id FROM "%d".packages p
+			JOIN "%d".viewer_asset_packages vap ON p.id = vap.package_id
+			WHERE vap.viewer_asset_id = $1
+		`, orgID, orgID)
+		pkgRows, err := PennsieveDB.QueryContext(ctx, pkgQuery, a.ID)
+		var pkgIDs []string
+		if err == nil {
+			for pkgRows.Next() {
+				var nodeID string
+				if pkgRows.Scan(&nodeID) == nil {
+					pkgIDs = append(pkgIDs, nodeID)
+				}
+			}
+			pkgRows.Close()
+		}
+		if pkgIDs == nil {
+			pkgIDs = []string{}
+		}
+
+		var assetURL string
+		if assetURLBase != "" {
+			assetURL = assetURLBase + a.ID + "/"
+		}
+
+		assets = append(assets, viewerAssetResponse{
+			ID:         a.ID,
+			DatasetID:  datasetNodeID,
+			Name:       a.Name,
+			AssetType:  a.AssetType,
+			AssetURL:   assetURL,
+			Properties: &a.Properties,
+			Status:     a.Status,
+			PackageIDs: pkgIDs,
+			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
+		})
 	}
-	responseBody := buf.Bytes()
-	if len(responseBody) > 0 && responseBody[len(responseBody)-1] == '\n' {
-		responseBody = responseBody[:len(responseBody)-1]
+	if assets == nil {
+		assets = []viewerAssetResponse{}
 	}
 
-	headers := map[string]string{
-		"Content-Type":                  "application/json",
-		"Access-Control-Allow-Origin":   "*",
-		"Access-Control-Allow-Methods":  "GET, OPTIONS",
-		"Access-Control-Allow-Headers":  "Content-Type, Origin, Accept",
-		"Access-Control-Expose-Headers": "Content-Type",
+	resp := listViewerAssetsResponse{Assets: assets}
+
+	// Load CloudFront signing keys if not yet cached
+	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey == nil {
+		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
+			authHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+			if err := authHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
+				h.logger.WithError(err).Warn("failed to load CloudFront signing keys")
+			}
+		}
 	}
 
-	return &events.APIGatewayV2HTTPResponse{
-		StatusCode: http.StatusOK,
-		Headers:    headers,
-		Body:       string(responseBody),
-	}, nil
+	// Generate CloudFront signed policy
+	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
+		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
+		signedURL, expiresAt, err := h.generateDiscoverCloudFrontSignedURL(ctx, s3Prefix, "", orgID)
+		if err == nil {
+			components, err := h.extractDiscoverURLComponents(ctx, signedURL, expiresAt, s3Prefix, orgID)
+			if err == nil {
+				resp.CloudFront = components
+			}
+		}
+	}
+
+	return h.buildResponse(resp, http.StatusOK)
 }
 
-// getDiscoverS3Prefix looks up the package in the discover database and constructs the S3 prefix.
-// Returns the S3 prefix and the source organization ID.
-func (h *DiscoverCloudFrontSignedURLHandler) getDiscoverS3Prefix(ctx context.Context, packageNodeId string) (string, int64, error) {
+// resolveDiscoverPackage validates that a package is published via the Discover DB
+// and returns the source org ID, dataset integer ID, and package integer ID.
+func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverPackage(ctx context.Context, packageNodeID string) (orgID, datasetIntID, packageIntID int64, err error) {
 	if DiscoverDB == nil {
-		return "", 0, fmt.Errorf("discover database not configured")
+		return 0, 0, 0, fmt.Errorf("discover database not configured")
 	}
 
-	// Query discover DB: get source_organization_id and source_dataset_id from public_file_versions + public_datasets
-	var sourceOrgId, sourceDatasetId int64
 	discoverQuery := `
 		SELECT DISTINCT pd.source_organization_id, pd.source_dataset_id
 		FROM discover.public_file_versions fv
@@ -150,35 +168,20 @@ func (h *DiscoverCloudFrontSignedURLHandler) getDiscoverS3Prefix(ctx context.Con
 		WHERE fv.source_package_id = $1
 		LIMIT 1
 	`
-	err := DiscoverDB.QueryRowContext(ctx, discoverQuery, packageNodeId).Scan(&sourceOrgId, &sourceDatasetId)
+	err = DiscoverDB.QueryRowContext(ctx, discoverQuery, packageNodeID).Scan(&orgID, &datasetIntID)
 	if err != nil {
-		h.logger.WithError(err).WithField("packageNodeId", packageNodeId).Error("failed to look up package in discover database")
-		return "", 0, fmt.Errorf("published package not found: %w", err)
+		h.logger.WithError(err).WithField("packageNodeId", packageNodeID).Error("failed to look up package in discover database")
+		return 0, 0, 0, fmt.Errorf("published package not found")
 	}
 
-	// Query pennsieve DB: get the package integer ID from the org-scoped schema
-	var packageIntId int64
-	pennsieveQuery := fmt.Sprintf(`SELECT id FROM "%d".packages WHERE node_id = $1`, sourceOrgId)
-	err = PennsieveDB.QueryRowContext(ctx, pennsieveQuery, packageNodeId).Scan(&packageIntId)
+	pennsieveQuery := fmt.Sprintf(`SELECT id FROM "%d".packages WHERE node_id = $1`, orgID)
+	err = PennsieveDB.QueryRowContext(ctx, pennsieveQuery, packageNodeID).Scan(&packageIntID)
 	if err != nil {
-		h.logger.WithError(err).WithFields(log.Fields{
-			"packageNodeId": packageNodeId,
-			"sourceOrgId":   sourceOrgId,
-		}).Error("failed to get package integer ID from pennsieve database")
-		return "", 0, fmt.Errorf("package not found in platform: %w", err)
+		h.logger.WithError(err).WithField("packageNodeId", packageNodeID).Error("failed to get package integer ID")
+		return 0, 0, 0, fmt.Errorf("package not found in platform")
 	}
 
-	s3Prefix := fmt.Sprintf("O%d/D%d/P%d/", sourceOrgId, sourceDatasetId, packageIntId)
-
-	h.logger.WithFields(log.Fields{
-		"packageNodeId":   packageNodeId,
-		"sourceOrgId":     sourceOrgId,
-		"sourceDatasetId": sourceDatasetId,
-		"packageIntId":    packageIntId,
-		"s3Prefix":        s3Prefix,
-	}).Debug("constructed S3 prefix for discover package")
-
-	return s3Prefix, sourceOrgId, nil
+	return orgID, datasetIntID, packageIntID, nil
 }
 
 // generateDiscoverCloudFrontSignedURL generates a signed URL for a discover package.

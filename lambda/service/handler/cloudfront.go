@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/rsa"
@@ -12,13 +11,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -29,11 +26,6 @@ type CloudFrontSignedURLHandler struct {
 	RequestHandler
 }
 
-type CloudFrontSignedURLResponse struct {
-	SignedURL  string                   `json:"signed_url"`
-	ExpiresAt  int64                    `json:"expires_at"` // Unix timestamp
-	Components *CloudFrontURLComponents `json:"components,omitempty"`
-}
 
 type CloudFrontURLComponents struct {
 	BaseURL    string      `json:"base_url"`
@@ -74,183 +66,6 @@ func init() {
 	} else {
 		log.Warn("CLOUDFRONT_DISTRIBUTION_DOMAIN environment variable not set")
 	}
-}
-
-func (h *CloudFrontSignedURLHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	switch h.method {
-	case http.MethodGet:
-		return h.handleGet(ctx)
-	case http.MethodOptions:
-		return h.handleOptions(ctx)
-	default:
-		return h.logAndBuildError(fmt.Sprintf("method %s not allowed", h.method), http.StatusMethodNotAllowed), nil
-	}
-}
-
-func (h *CloudFrontSignedURLHandler) handleOptions(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	h.logger.Info("handling OPTIONS request for CloudFront signed URL")
-
-	headers := map[string]string{
-		"Access-Control-Allow-Origin":  "*",
-		"Access-Control-Allow-Methods": "GET, OPTIONS",
-		"Access-Control-Allow-Headers": "Authorization, Content-Type, Origin, Accept",
-		"Access-Control-Max-Age":       "3600",
-	}
-
-	return &events.APIGatewayV2HTTPResponse{
-		StatusCode: http.StatusNoContent,
-		Headers:    headers,
-	}, nil
-}
-
-func (h *CloudFrontSignedURLHandler) handleGet(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
-	// Load keys from Secrets Manager only if not already cached
-	// With grace period, cached keys remain valid even after rotation
-	if cloudfrontKeyID == "" || cloudfrontPrivateKey == nil {
-		secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME")
-		if !ok {
-			log.Error("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME environment variable not set")
-			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-		}
-
-		if err := h.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-			log.Errorf("Failed to load keys from Secrets Manager: %v", err)
-			return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-		}
-
-		log.Info("CloudFront keys loaded and cached for this Lambda container")
-	} else {
-		log.Debug("Using cached CloudFront keys")
-	}
-
-	if cloudfrontDistributionDomain == "" || cloudfrontKeyID == "" || cloudfrontPrivateKey == nil {
-		return h.logAndBuildError("CloudFront signing not configured", http.StatusInternalServerError), nil
-	}
-
-	// Get parameters from query string
-	datasetID := h.queryParams["dataset_id"]
-	packageID := h.queryParams["package_id"]
-	// Note: path is now optional - if provided, it will be appended to the URL for user convenience
-	// Trim any whitespace from the path to avoid issues with trailing spaces
-	path := strings.TrimSpace(h.queryParams["path"])
-	// Check if client wants URL components included in response
-	includeComponents := h.queryParams["include_components"] == "true"
-
-	// Validate required parameters
-	if datasetID == "" {
-		return h.logAndBuildError("missing required 'dataset_id' query parameter", http.StatusBadRequest), nil
-	}
-	if packageID == "" {
-		return h.logAndBuildError("missing required 'package_id' query parameter", http.StatusBadRequest), nil
-	}
-
-	h.logger.WithFields(log.Fields{
-		"packageId": packageID,
-		"datasetId": datasetID,
-		"assetPath": path,
-	}).Info("handling GET request for CloudFront signed URL with prefix access")
-
-	// Get the S3 prefix for the package
-	s3Prefix, err := h.getS3PrefixForPackage(ctx, packageID, datasetID)
-
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to get S3 prefix: %v", err), http.StatusInternalServerError), nil
-	}
-
-	// Generate CloudFront signed URL with custom policy for prefix access
-	signedURL, expiresAt, err := h.generateCloudFrontSignedURLWithPolicy(s3Prefix, path)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to generate signed URL: %v", err), http.StatusInternalServerError), nil
-	}
-
-	// Build response
-	response := CloudFrontSignedURLResponse{
-		SignedURL: signedURL,
-		ExpiresAt: expiresAt.Unix(),
-	}
-
-	// Extract and include URL components if requested
-	if includeComponents {
-		components, err := h.extractURLComponents(signedURL, expiresAt, s3Prefix)
-		if err != nil {
-			h.logger.WithError(err).Warn("Failed to extract URL components, continuing without them")
-		} else {
-			response.Components = components
-		}
-	}
-
-	// Use custom encoder to avoid escaping HTML characters like &
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	err = encoder.Encode(response)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to marshal response: %v", err), http.StatusInternalServerError), nil
-	}
-	responseBody := buf.Bytes()
-	// Remove trailing newline added by encoder
-	if len(responseBody) > 0 && responseBody[len(responseBody)-1] == '\n' {
-		responseBody = responseBody[:len(responseBody)-1]
-	}
-
-	// Build response headers with CORS
-	headers := map[string]string{
-		"Content-Type":                  "application/json",
-		"Access-Control-Allow-Origin":   "*",
-		"Access-Control-Allow-Methods":  "GET, OPTIONS",
-		"Access-Control-Allow-Headers":  "Authorization, Content-Type, Origin, Accept",
-		"Access-Control-Expose-Headers": "Content-Type",
-	}
-
-	h.logger.WithFields(log.Fields{
-		"signedURL": signedURL,
-		"expiresAt": expiresAt,
-		"packageId": packageID,
-		"datasetId": datasetID,
-	}).Debug("returning CloudFront signed URL")
-
-	return &events.APIGatewayV2HTTPResponse{
-		StatusCode: http.StatusOK,
-		Headers:    headers,
-		Body:       string(responseBody),
-	}, nil
-}
-
-// getS3PrefixForPackage validates and constructs the S3 prefix for all assets in a package
-func (h *CloudFrontSignedURLHandler) getS3PrefixForPackage(ctx context.Context, packageNodeId, datasetNodeId string) (string, error) {
-	// Query to get the internal integer IDs and validate that the package belongs to the dataset
-	query := fmt.Sprintf(`
-		SELECT p.id, d.id
-		FROM "%d".packages p 
-		JOIN "%d".datasets d ON p.dataset_id = d.id 
-		WHERE p.node_id = $1 AND d.node_id = $2
-	`, h.claims.OrgClaim.IntId, h.claims.OrgClaim.IntId)
-
-	var packageIntId, datasetIntId int64
-	err := PennsieveDB.QueryRowContext(ctx, query, packageNodeId, datasetNodeId).Scan(&packageIntId, &datasetIntId)
-	if err != nil {
-		h.logger.WithError(err).WithFields(map[string]any{
-			"packageNodeId": packageNodeId,
-			"datasetNodeId": datasetNodeId,
-		}).Error("failed to get integer IDs for package and dataset or package does not belong to dataset")
-		return "", fmt.Errorf("package not found or does not belong to specified dataset: %w", err)
-	}
-
-	// Construct the S3 prefix for all assets in the package
-	// Format: O{WorkspaceIntId}/D{DatasetIntId}/P{PackageIntId}/
-	// Note: CloudFront origin_path="/viewer-assets" will automatically prepend viewer-assets/ when accessing S3
-	assetPrefix := fmt.Sprintf("O%d/D%d/P%d/", h.claims.OrgClaim.IntId, datasetIntId, packageIntId)
-
-	h.logger.WithFields(log.Fields{
-		"packageNodeId":  packageNodeId,
-		"datasetNodeId":  datasetNodeId,
-		"packageIntId":   packageIntId,
-		"datasetIntId":   datasetIntId,
-		"workspaceIntId": h.claims.OrgClaim.IntId,
-		"assetPrefix":    assetPrefix,
-	}).Debug("constructed S3 prefix for package assets")
-
-	return assetPrefix, nil
 }
 
 // generateCloudFrontSignedURLWithPolicy generates a signed URL with custom policy for prefix access

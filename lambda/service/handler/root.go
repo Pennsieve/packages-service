@@ -15,10 +15,6 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 	case "/restore":
 		restoreHandler := RestoreHandler{RequestHandler: *h}
 		return restoreHandler.handle(ctx)
-	case "/cloudfront/sign":
-		// Authenticated endpoint for generating CloudFront signed URLs
-		cloudfrontHandler := CloudFrontSignedURLHandler{RequestHandler: *h}
-		return cloudfrontHandler.handle(ctx)
 	case "/download-manifest":
 		downloadHandler := DownloadManifestHandler{RequestHandler: *h}
 		return downloadHandler.handle(ctx)

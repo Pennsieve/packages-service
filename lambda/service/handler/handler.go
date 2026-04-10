@@ -200,9 +200,16 @@ func NewDiscoverHandler(request *events.APIGatewayV2HTTPRequest) *RequestHandler
 
 func (h *RequestHandler) handleDiscover(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	switch h.path {
-	case "/discover/cloudfront/sign":
-		discoverCFHandler := DiscoverCloudFrontSignedURLHandler{RequestHandler: *h}
-		return discoverCFHandler.handle(ctx)
+	case "/discover/assets":
+		discoverHandler := DiscoverCloudFrontSignedURLHandler{RequestHandler: *h}
+		switch h.method {
+		case http.MethodGet:
+			return discoverHandler.handleListAssets(ctx)
+		case http.MethodOptions:
+			return discoverHandler.handleOptions(ctx)
+		default:
+			return h.logAndBuildError(fmt.Sprintf("method %s not allowed on /discover/assets", h.method), http.StatusMethodNotAllowed), nil
+		}
 	default:
 		return h.logAndBuildError("resource not found: "+h.path, http.StatusNotFound), nil
 	}

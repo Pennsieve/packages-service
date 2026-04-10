@@ -105,16 +105,16 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
-  /discover/cloudfront/sign:
+  /discover/assets:
     get:
-      summary: Generate CloudFront signed URLs for published assets
+      summary: List viewer assets for a published package
       description: |
-        Unauthenticated endpoint that generates CloudFront signed URLs for published
-        package viewer assets on Pennsieve Discover. Looks up the dataset from the
-        discover database using the source package ID.
+        Unauthenticated endpoint that returns viewer assets linked to a published
+        package along with a CloudFront signed policy for accessing the asset files.
+        Validates that the package is published via the Discover database.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
-      operationId: discoverCloudfrontSign
+      operationId: discoverListViewerAssets
       tags:
         - Discover
       parameters:
@@ -124,26 +124,13 @@ paths:
             type: string
           required: true
           description: source package node id (e.g. N:package:uuid)
-        - in: query
-          name: path
-          schema:
-            type: string
-          required: false
-          description: Optional path to a specific asset within the package
-        - in: query
-          name: include_components
-          schema:
-            type: boolean
-            default: false
-          required: false
-          description: Include URL components in response for client-side URL construction
       responses:
         '200':
-          description: Successfully generated CloudFront signed URL
+          description: List of viewer assets with CloudFront access
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/cloudfrontSignedURLResponse'
+                $ref: '#/components/schemas/listViewerAssetsResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -304,58 +291,6 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
-  /cloudfront/sign:
-    get:
-      summary: Generate CloudFront signed URLs for assets
-      description: |
-        Authenticated endpoint that generates CloudFront signed URLs for package viewer assets.
-        This endpoint validates dataset and package ownership before generating signed URLs.
-        Provides better performance and caching compared to direct S3 access.
-      x-amazon-apigateway-integration:
-        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
-      operationId: cloudfrontSign
-      security:
-        - token_dataset_auth: [ ]
-      tags:
-        - Packages
-      parameters:
-        - in: query
-          name: dataset_id
-          schema:
-            type: string
-          required: true
-          description: dataset node id
-        - in: query
-          name: package_id
-          schema:
-            type: string
-          required: true
-          description: package node id
-        - in: query
-          name: path
-          schema:
-            type: string
-          required: false
-          description: Optional path to a specific asset within the package
-        - in: query
-          name: include_components
-          schema:
-            type: boolean
-            default: false
-          required: false
-          description: Include URL components in response for client-side URL construction
-      responses:
-        '200':
-          description: Successfully generated CloudFront signed URL
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/cloudfrontSignedURLResponse'
-        '4XX':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/Error'
-
 components:
   x-amazon-apigateway-integrations:
     packages-service:
@@ -463,24 +398,6 @@ components:
                 type: string
           description: any restore failures grouped by node id
 
-    cloudfrontSignedURLResponse:
-      type: object
-      required:
-        - signed_url
-        - expires_at
-      properties:
-        signed_url:
-          type: string
-          description: The CloudFront signed URL for accessing package assets
-          example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/viewer/manifest.json?Policy=eyJ...&Signature=gkv...&Key-Pair-Id=K13"
-        expires_at:
-          type: integer
-          format: int64
-          description: Unix timestamp when the signed URL expires
-          example: 1766457092
-        components:
-          $ref: '#/components/schemas/cloudfrontURLComponents'
-
     cloudfrontURLComponents:
       type: object
       description: Optional URL components for client-side URL construction (only present when include_components=true)
@@ -565,6 +482,10 @@ components:
           type: string
         asset_type:
           type: string
+        asset_url:
+          type: string
+          description: CloudFront base URL for the asset's files. Append relative file paths and CloudFront signing query params to access files.
+          example: "https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
         properties:
           type: object
           additionalProperties: true

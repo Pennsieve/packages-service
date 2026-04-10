@@ -79,6 +79,7 @@ type viewerAssetResponse struct {
 	DatasetID  string           `json:"dataset_id"`
 	Name       string           `json:"name"`
 	AssetType  string           `json:"asset_type"`
+	AssetURL   string           `json:"asset_url,omitempty"`
 	Properties *json.RawMessage `json:"properties"`
 	Status     string           `json:"status"`
 	PackageIDs []string         `json:"package_ids"`
@@ -222,6 +223,18 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	}
 	defer rows.Close()
 
+	// Build asset URL base: https://{domain}{pathPrefix}/O{orgID}/D{datasetID}/
+	var assetURLBase string
+	if cloudfrontDistributionDomain != "" {
+		cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+		pathPrefix, _ := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
+		if pathPrefix != "" {
+			assetURLBase = fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
+		} else {
+			assetURLBase = fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
+		}
+	}
+
 	var assets []viewerAssetResponse
 	for rows.Next() {
 		var a viewerAssetRow
@@ -231,11 +244,17 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 
 		pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, a.ID)
 
+		var assetURL string
+		if assetURLBase != "" {
+			assetURL = assetURLBase + a.ID + "/"
+		}
+
 		assets = append(assets, viewerAssetResponse{
 			ID:         a.ID,
 			DatasetID:  datasetNodeID,
 			Name:       a.Name,
 			AssetType:  a.AssetType,
+			AssetURL:   assetURL,
 			Properties: &a.Properties,
 			Status:     a.Status,
 			PackageIDs: pkgIDs,

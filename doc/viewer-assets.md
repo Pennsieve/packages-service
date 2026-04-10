@@ -164,9 +164,11 @@ The asset is now available for front-end viewers to consume.
 
 ## Packages-Service API Reference
 
-All endpoints require `token_dataset_auth` (JWT via API Gateway authorizer).
+### Authenticated Endpoints
 
-### POST /packages/assets
+All authenticated endpoints require `token_dataset_auth` (JWT via API Gateway authorizer).
+
+#### POST /packages/assets
 
 Create a viewer asset and receive temporary upload credentials.
 
@@ -174,15 +176,15 @@ Create a viewer asset and receive temporary upload credentials.
 - **Query params**: `dataset_id` (required)
 - **Returns**: 201 with asset record and `upload_credentials`
 
-### GET /packages/assets
+#### GET /packages/assets
 
 List viewer assets linked to a package.
 
 - **Permission**: `ViewFiles`
 - **Query params**: `dataset_id` (required), `package_id` (required)
-- **Returns**: Array of assets plus a CloudFront signed policy for accessing the files
+- **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
 
-### PATCH /packages/assets/{asset_id}
+#### PATCH /packages/assets/{asset_id}
 
 Update an asset's status, properties, or linked packages.
 
@@ -190,7 +192,7 @@ Update an asset's status, properties, or linked packages.
 - **Query params**: `dataset_id` (required)
 - **Body fields** (all optional): `status`, `properties`, `package_ids`
 
-### DELETE /packages/assets/{asset_id}
+#### DELETE /packages/assets/{asset_id}
 
 Delete an asset record and queue its S3 objects for cleanup.
 
@@ -198,17 +200,50 @@ Delete an asset record and queue its S3 objects for cleanup.
 - **Query params**: `dataset_id` (required)
 - **Returns**: 204
 
+### Public Endpoint (Discover)
+
+#### GET /packages/discover/assets
+
+List viewer assets for a published package. No authentication required.
+
+- **Query params**: `package_id` (required) — source package node ID
+- **Validation**: Checks the Discover database to confirm the package is published
+- **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
+
 ## Accessing Viewer Assets from the Front-End
 
-1. **List assets** for a package: `GET /packages/assets?dataset_id=...&package_id=...`
-2. The response includes a **CloudFront signed policy** (`Policy`, `Signature`, `Key-Pair-Id`) and a `cloudfront_url` base.
-3. Construct file URLs by appending the relative file path to the CloudFront URL and including the signed policy as query parameters.
-4. Signed URLs expire after **1 hour**.
+1. **List assets** for a package using `GET /packages/assets` (authenticated) or `GET /packages/discover/assets` (public).
+2. Each asset in the response includes an `asset_url` — the full CloudFront base URL for that asset's files.
+3. The response also includes `cloudfront` signing params (`policy`, `signature`, `key_pair_id`).
+4. Construct file URLs by appending the relative file path to the asset's `asset_url` and adding the signing params as query parameters.
+5. Signed policies expire after **1 hour**.
 
-Example CloudFront URL:
+Example response:
+```json
+{
+  "assets": [
+    {
+      "id": "a1b2c3d4-...",
+      "name": "ome-zarr",
+      "asset_type": "ome-zarr",
+      "asset_url": "https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-.../",
+      "status": "ready",
+      "package_ids": ["N:package:..."]
+    }
+  ],
+  "cloudfront": {
+    "policy": "eyJ...",
+    "signature": "gkv...",
+    "key_pair_id": "K135..."
+  }
+}
 ```
-https://cdn.pennsieve.net/viewer-assets/O19/D2049/a1b2c3d4-.../data.parquet
-  ?Policy=...&Signature=...&Key-Pair-Id=...
+
+Example file URL construction:
+```
+{asset_url}{relative_path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}
+
+https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-.../.zattrs?Policy=eyJ...&Signature=gkv...&Key-Pair-Id=K135...
 ```
 
 ## Authentication
