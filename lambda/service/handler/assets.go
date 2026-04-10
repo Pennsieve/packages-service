@@ -248,6 +248,16 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 
 	resp := listViewerAssetsResponse{Assets: assets}
 
+	// Load CloudFront signing keys from Secrets Manager if not yet cached
+	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey == nil {
+		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
+			cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+			if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
+				h.logger.WithError(err).Warn("failed to load CloudFront signing keys")
+			}
+		}
+	}
+
 	// Generate CloudFront signed policy if signing keys are available
 	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
 		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
