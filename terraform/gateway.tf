@@ -31,6 +31,12 @@ resource "aws_apigatewayv2_stage" "packages_service_gateway_stage" {
   name        = "$default"
   auto_deploy = true
 
+  route_settings {
+    route_key              = "GET /discover/assets"
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 5
+  }
+
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.packages_service_gateway_log_group.arn
 

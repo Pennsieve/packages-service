@@ -112,6 +112,9 @@ paths:
         Unauthenticated endpoint that returns viewer assets linked to a published
         package along with a CloudFront signed policy for accessing the asset files.
         Validates that the package is published via the Discover database.
+        Each asset includes an `asset_url`. To access files, append the relative
+        path and signing params:
+        `{asset_url}{path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: discoverListViewerAssets
@@ -123,7 +126,7 @@ paths:
           schema:
             type: string
           required: true
-          description: source package node id (e.g. N:package:uuid)
+          description: source package node id (e.g. `N:package:uuid`)
       responses:
         '200':
           description: List of viewer assets with CloudFront access
@@ -181,7 +184,9 @@ paths:
       summary: List viewer assets for a package
       description: |
         Returns viewer assets linked to a package along with a CloudFront
-        signed policy for accessing the assets.
+        signed policy for accessing the assets. Each asset includes an `asset_url`.
+        To access files, append the relative path and signing params:
+        `{asset_url}{path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listViewerAssets
@@ -484,7 +489,11 @@ components:
           type: string
         asset_url:
           type: string
-          description: CloudFront base URL for the asset's files. Append relative file paths and CloudFront signing query params to access files.
+          description: |
+            CloudFront base URL for the asset's files. To access a file, append the
+            relative file path and the CloudFront signing query params from the
+            `cloudfront` object in the response. Example full URL:
+            `{asset_url}.zattrs?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
           example: "https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
         properties:
           type: object
