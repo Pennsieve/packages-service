@@ -25,6 +25,7 @@ resource "aws_lambda_function" "service_lambda" {
       CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
       CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
+      UPLOAD_CREDENTIALS_ROLE_ARN              = aws_iam_role.viewer_assets_upload_credentials_role.arn
       EXTERNAL_BUCKETS_ROLE_MAP = jsonencode(local.external_bucket_roles)
     }
   }
@@ -83,4 +84,50 @@ resource "aws_lambda_function" "key_rotation" {
     Name        = "${var.environment_name}-${var.service_name}-key-rotation"
     Description = "Lambda function for automatic CloudFront key rotation"
   })
+}
+
+# Lambda function for viewer asset S3 cleanup
+resource "aws_lambda_function" "asset_cleanup_lambda" {
+  description   = "Lambda function which cleans up S3 objects for deleted viewer assets"
+  function_name = "${var.environment_name}-${var.service_name}-asset-cleanup-${data.terraform_remote_state.region.outputs.aws_region_shortname}"
+  handler       = "bootstrap"
+  runtime       = "provided.al2"
+  role          = aws_iam_role.asset_cleanup_lambda_role.arn
+  timeout       = 300
+  memory_size   = 256
+  s3_bucket     = var.lambda_bucket
+  s3_key        = "${var.service_name}/asset-cleanup-${var.image_tag}.zip"
+
+  vpc_config {
+    subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
+    security_group_ids = [data.terraform_remote_state.platform_infrastructure.outputs.upload_v2_security_group_id]
+  }
+
+  environment {
+    variables = {
+      ENV                = var.environment_name
+      PENNSIEVE_DOMAIN   = data.terraform_remote_state.account.outputs.domain_name
+      REGION             = var.aws_region
+      RDS_PROXY_ENDPOINT = data.terraform_remote_state.pennsieve_postgres.outputs.rds_proxy_endpoint
+    }
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "asset_cleanup_schedule" {
+  name                = "${var.environment_name}-${var.service_name}-asset-cleanup"
+  description         = "Scheduled cleanup of S3 objects for deleted viewer assets"
+  schedule_expression = "rate(1 hour)"
+}
+
+resource "aws_cloudwatch_event_target" "asset_cleanup_target" {
+  rule = aws_cloudwatch_event_rule.asset_cleanup_schedule.name
+  arn  = aws_lambda_function.asset_cleanup_lambda.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_asset_cleanup" {
+  statement_id  = "AllowEventBridgeAssetCleanup"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.asset_cleanup_lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.asset_cleanup_schedule.arn
 }

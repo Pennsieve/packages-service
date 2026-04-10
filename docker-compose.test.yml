@@ -14,7 +14,7 @@ services:
     volumes:
       - $PWD:/go/src/github.com/pennsieve/packages-service
   pennsievedb:
-    image: pennsieve/pennsievedb:V20260304122946-seed
+    image: pennsieve/pennsievedb:V20260409120000-seed
     restart: always
   #    command: [ "postgres", "-c", "log_statement=all" ]
   minio:
