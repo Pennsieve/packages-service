@@ -278,6 +278,7 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	}
 
 	// Generate CloudFront signed policy if signing keys are available
+	var cookies []string
 	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
 		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
 		cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
@@ -286,11 +287,20 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 			components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
 			if err == nil {
 				resp.CloudFront = components
+				cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
+				cookies = components.CloudFrontCookies(cookieDomain)
 			}
 		}
 	}
 
-	return h.buildResponse(resp, http.StatusOK)
+	apiResp, err := h.buildResponse(resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	if len(cookies) > 0 {
+		apiResp.Cookies = cookies
+	}
+	return apiResp, nil
 }
 
 func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) (*events.APIGatewayV2HTTPResponse, error) {

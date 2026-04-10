@@ -35,6 +35,18 @@ type CloudFrontURLComponents struct {
 	PolicyInfo *PolicyInfo `json:"policy_info,omitempty"`
 }
 
+// CloudFrontCookies returns Set-Cookie header values for the three CloudFront
+// signed cookie fields. These cookies allow the browser to make credentialed
+// requests to the CloudFront distribution (e.g. from Neuroglancer).
+func (c *CloudFrontURLComponents) CloudFrontCookies(domain string) []string {
+	attrs := fmt.Sprintf("; Domain=%s; Path=/; Secure; SameSite=None", domain)
+	return []string{
+		"CloudFront-Policy=" + c.Policy + attrs,
+		"CloudFront-Signature=" + c.Signature + attrs,
+		"CloudFront-Key-Pair-Id=" + c.KeyPairID + attrs,
+	}
+}
+
 type PolicyInfo struct {
 	ResourcePattern string `json:"resource_pattern"`
 	ExpiresAt       int64  `json:"expires_at"`

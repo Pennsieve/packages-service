@@ -140,6 +140,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	}
 
 	// Generate CloudFront signed policy
+	var cookies []string
 	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
 		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
 		signedURL, expiresAt, err := h.generateDiscoverCloudFrontSignedURL(ctx, s3Prefix, "", orgID)
@@ -147,11 +148,20 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			components, err := h.extractDiscoverURLComponents(ctx, signedURL, expiresAt, s3Prefix, orgID)
 			if err == nil {
 				resp.CloudFront = components
+				cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
+				cookies = components.CloudFrontCookies(cookieDomain)
 			}
 		}
 	}
 
-	return h.buildResponse(resp, http.StatusOK)
+	apiResp, err := h.buildResponse(resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	if len(cookies) > 0 {
+		apiResp.Cookies = cookies
+	}
+	return apiResp, nil
 }
 
 // resolveDiscoverPackage validates that a package is published via the Discover DB
