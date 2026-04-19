@@ -14,6 +14,7 @@ import (
 
 func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
 	var changelogEvents []changelog.PackageRestoreEvent
+	var restoredFileInfosOut RestoreFileInfos
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// gather ancestors and set to RESTORING
 		var ancestors []models.RestorePackageInfo
@@ -133,10 +134,8 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			}
 		}
 
-		// restore dataset_storage
-		if err = h.restoreStorages(ctx, int64(orgId), datasetId, restoredFileInfos, sqlStore); err != nil {
-			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "error updating storage", err)
-		}
+		// capture for post-commit storage update
+		restoredFileInfosOut = restoredFileInfos
 		// restore states
 		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+len(folderDescRestoreInfos)+len(restoredFileInfos)+1)
 		// add self
@@ -161,5 +160,16 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		}
 		return nil
 	})
-	return changelogEvents, err
+	if err != nil {
+		return changelogEvents, err
+	}
+
+	// Storage counters run outside the main tx — see handleFilePackage for rationale.
+	simpleStore := h.Store.SQLFactory.NewSimpleStore(orgId)
+	if storageErr := h.restoreStorages(ctx, int64(orgId), datasetId, restoredFileInfosOut, simpleStore); storageErr != nil {
+		h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": storageErr}, "could not update storage after restore")
+	}
+
+	h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "descendantCount": len(restoredFileInfosOut)}, "restore complete")
+	return changelogEvents, nil
 }

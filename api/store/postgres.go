@@ -18,9 +18,7 @@ import (
 )
 
 const (
-	uniqueViolationCode       = "23505"
-	rootPackageNameConstraint = "packages_name_dataset_id__parent_id_null_idx"
-	packageNameConstraint     = "packages_name_dataset_id_parent_id__parent_id_not_null_idx"
+	uniqueViolationCode = "23505"
 )
 
 var (
@@ -95,12 +93,13 @@ func (q *Queries) UpdatePackageName(ctx context.Context, packageId int64, newNam
 	query := fmt.Sprintf(`UPDATE "%d".packages SET name = $1 WHERE id = $2`, q.OrgId)
 	res, err := q.db.ExecContext(ctx, query, newName, packageId)
 	if err != nil {
-		if err, ok := err.(*pq.Error); ok && err.Code == uniqueViolationCode && (err.Constraint == rootPackageNameConstraint || err.Constraint == packageNameConstraint) {
+		// Any 23505 here is a name uniqueness collision — `name` is the only column touched.
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == uniqueViolationCode {
 			return models.PackageNameUniquenessError{
 				OrgId:    q.OrgId,
 				Id:       models.PackageIntId(packageId),
 				Name:     newName,
-				SQLError: err,
+				SQLError: pqErr,
 			}
 		}
 		return err

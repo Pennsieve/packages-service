@@ -27,6 +27,7 @@ var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
 	var changelogEvents []changelog.PackageRestoreEvent
+	var restoredSize int64
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// mark any deleted ancestors as restoring
 		var ancestors []models.RestorePackageInfo
@@ -95,13 +96,9 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "error removing delete record")
 		}
 
-		// restore dataset storage
-		restoredSize := sourceFileSize(sourceFiles)
+		// capture size for post-commit storage update
+		restoredSize = sourceFileSize(sourceFiles)
 		sqlStore.LogInfo("restored size: ", restoredSize)
-		if err = h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, sqlStore); err != nil {
-			// Don't think this should fail the whole restore
-			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "could not update storage")
-		}
 
 		// restore states
 		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+1)
@@ -114,7 +111,21 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		}
 		return nil
 	})
-	return changelogEvents, err
+	if err != nil {
+		return changelogEvents, err
+	}
+
+	// Storage counters are updated outside the main tx so that row locks on the hot
+	// organization_storage and dataset_storage rows are held only for the UPSERTs
+	// themselves, not across S3/DynamoDB calls. Failures are logged but don't fail
+	// the restore — consistent with prior best-effort semantics.
+	simpleStore := h.Store.SQLFactory.NewSimpleStore(orgId)
+	if storageErr := h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, simpleStore); storageErr != nil {
+		h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": storageErr}, "could not update storage after restore")
+	}
+
+	h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "size": restoredSize}, "restore complete")
+	return changelogEvents, nil
 }
 
 func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.RestorePackageInfo, store store.SQLStore) (*RestoredName, error) {
@@ -138,11 +149,15 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
 		h.LogDebugWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
 	}
+	if retryCtx.Err != nil {
+		// The last UPDATE failed and the tx is aborted. Rollback so callers can
+		// still see the real error instead of "current transaction is aborted".
+		// Skip ReleaseSavepoint — it would fail on an aborted tx and mask the root cause.
+		_ = store.RollbackToSavepoint(ctx, savepoint)
+		return nil, retryCtx.Err
+	}
 	if err = store.ReleaseSavepoint(ctx, savepoint); err != nil {
 		return nil, err
-	}
-	if retryCtx.Err != nil {
-		return nil, retryCtx.Err
 	}
 	restoredName := RestoredName{Value: newName}
 	if newName != originalName {
