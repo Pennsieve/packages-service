@@ -105,6 +105,32 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
 
+  /formats:
+    get:
+      summary: List supported file formats
+      description: |
+        Returns the Pennsieve file-format registry: a static catalog of supported
+        formats with their media types, file-type tags, and extensions. Payload is
+        embedded in the service and does not depend on request context.
+      x-amazon-apigateway-integration:
+        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
+      operationId: listFormats
+      security:
+        - token_dataset_auth: [ ]
+      tags:
+        - Packages
+      responses:
+        '200':
+          description: The file-format registry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/formatsResponse'
+        '4XX':
+          $ref: '#/components/responses/Unauthorized'
+        '5XX':
+          $ref: '#/components/responses/Error'
+
   /discover/assets:
     get:
       summary: List viewer assets for a published package
@@ -599,3 +625,59 @@ components:
                 format: int64
               fileExtension:
                 type: string
+
+    format:
+      type: object
+      required:
+        - id
+        - name
+        - mediaTypes
+      properties:
+        id:
+          type: string
+          description: Stable identifier for the format
+          example: "pdf"
+        name:
+          type: string
+          description: Human-readable name
+          example: "PDF"
+        description:
+          type: string
+          description: Short description of the format
+          example: "Portable Document Format."
+        mediaTypes:
+          type: array
+          items:
+            type: string
+          description: IANA media types associated with this format
+          example: ["application/pdf"]
+        fileTypes:
+          type: array
+          items:
+            type: string
+          description: Pennsieve file-type tags
+          example: ["PDF"]
+        extensions:
+          type: array
+          items:
+            type: string
+          description: File extensions (including the leading dot)
+          example: [".pdf"]
+        edam:
+          type: string
+          description: EDAM ontology identifier, when applicable
+
+    formatsResponse:
+      type: object
+      required:
+        - schemaVersion
+        - formats
+      properties:
+        schemaVersion:
+          type: string
+          description: Semantic version of the registry payload
+          example: "1.0.0"
+        formats:
+          type: array
+          items:
+            $ref: '#/components/schemas/format'
