@@ -18,6 +18,14 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 	case "/download-manifest":
 		downloadHandler := DownloadManifestHandler{RequestHandler: *h}
 		return downloadHandler.handle(ctx)
+	case "/formats":
+		formatsHandler := FormatsHandler{RequestHandler: *h}
+		switch h.method {
+		case http.MethodGet:
+			return formatsHandler.handleGet(ctx)
+		default:
+			return h.logAndBuildError(fmt.Sprintf("method %s not allowed on /formats", h.method), http.StatusMethodNotAllowed), nil
+		}
 	case "/assets":
 		assetsHandler := ViewerAssetsHandler{RequestHandler: *h}
 		switch h.method {
