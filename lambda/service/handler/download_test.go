@@ -441,6 +441,61 @@ func TestDownloadManifest_NonexistentPackage(t *testing.T) {
 	assert.Empty(t, manifest.Data)
 }
 
+// TestDownloadManifest_ScanStatusGating verifies that files with
+// scan_status='infected' or 'failed' are routed into the Blocked
+// array (no presigned URL issued), while pending and clean pass
+// through to Data with their scan status surfaced.
+//
+// There is no null-scan-status case here: the migration adds
+// scan_status as NOT NULL DEFAULT 'pending', so pre-existing rows
+// land on 'pending' rather than NULL. The handler's null-tolerant
+// normalizeScanStatus is kept as a defensive fallback only.
+func TestDownloadManifest_ScanStatusGating(t *testing.T) {
+	setupDownloadTestDB(t)
+	setupS3Client(t)
+	setupExternalBucketConfig(t, nil)
+
+	body, _ := json.Marshal(models.DownloadRequest{NodeIds: []string{
+		"N:package:dl-infected",
+		"N:package:dl-failed",
+		"N:package:dl-pending",
+		"N:package:dl-clean",
+	}})
+	req := newTestRequest("POST", "/download-manifest", "test-req-scan",
+		map[string]string{"dataset_id": "N:dataset:dl-test"}, string(body))
+	handler := NewHandler(req, editorClaims(2, "N:dataset:dl-test")).WithDefaultService()
+
+	resp, err := handler.handle(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var manifest models.DownloadManifestResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &manifest))
+
+	// Data: clean + pending (2 files); Blocked: infected + failed (2 files).
+	assert.Equal(t, 2, manifest.Header.Count)
+	assert.Equal(t, 2, manifest.Header.BlockedCount)
+	require.Len(t, manifest.Data, 2)
+	require.Len(t, manifest.Blocked, 2)
+
+	byName := map[string]models.DownloadManifestEntry{}
+	for _, e := range manifest.Data {
+		byName[e.PackageName] = e
+	}
+	assert.Equal(t, "clean", byName["clean-file"].ScanStatus)
+	assert.Equal(t, "pending", byName["pending-file"].ScanStatus)
+	for _, e := range manifest.Data {
+		assert.NotEmpty(t, e.URL, "downloadable entries must have a presigned URL: %s", e.PackageName)
+	}
+
+	blockedByName := map[string]models.DownloadManifestBlockedEntry{}
+	for _, b := range manifest.Blocked {
+		blockedByName[b.PackageName] = b
+	}
+	assert.Equal(t, "infected", blockedByName["infected-file"].ScanStatus)
+	assert.Equal(t, "failed", blockedByName["failed-file"].ScanStatus)
+}
+
 func TestGetFullExtension(t *testing.T) {
 	tests := []struct {
 		input    string

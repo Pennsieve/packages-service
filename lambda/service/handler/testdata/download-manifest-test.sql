@@ -56,3 +56,22 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO "2".files (id, package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, uuid, processing_state, uploaded_state, created_at, updated_at) VALUES
     (5007, 3006, 'non-us-image.ome.tiff', 'OMETIFF', 'pennsieve-test-storage-afs1', '15/files/non-us-image.ome.tiff','source', 8192, '{}', '00000000-0000-0000-0000-000000005007', 'unprocessed', 'uploaded', '2023-01-01 00:00:00', '2023-01-01 00:00:00')
 ON CONFLICT (id) DO NOTHING;
+
+-- scan-status packages (one package per status to exercise the scan_status gating in download.go):
+--   3010 infected  → Blocked with scan_status='infected'
+--   3011 failed    → Blocked with scan_status='failed'
+--   3012 pending   → Data with scan_status='pending' (permissive during scan)
+--   3013 clean     → Data with scan_status='clean'
+INSERT INTO "2".packages (id, name, type, state, dataset_id, parent_id, updated_at, created_at, attributes, node_id, size, owner_id, import_id) VALUES
+(3010, 'infected-file',  'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-infected',  null, 1, '00000000-0000-0000-0000-000000003010'),
+(3011, 'failed-file',    'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-failed',    null, 1, '00000000-0000-0000-0000-000000003011'),
+(3012, 'pending-file',   'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-pending',   null, 1, '00000000-0000-0000-0000-000000003012'),
+(3013, 'clean-file',     'Text', 'READY', 300, null, '2023-01-01 00:00:00', '2023-01-01 00:00:00', '[]', 'N:package:dl-clean',     null, 1, '00000000-0000-0000-0000-000000003013')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO "2".files (id, package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, uuid, processing_state, uploaded_state, scan_status, created_at, updated_at) VALUES
+(5010, 3010, 'infected.bin', 'Text', 'pennsieve-test-storage', 'org2/infected.bin', 'source', 100, '{}', '00000000-0000-0000-0000-000000005010', 'unprocessed', 'uploaded', 'infected', '2023-01-01 00:00:00', '2023-01-01 00:00:00'),
+(5011, 3011, 'failed.bin',   'Text', 'pennsieve-test-storage', 'org2/failed.bin',   'source', 100, '{}', '00000000-0000-0000-0000-000000005011', 'unprocessed', 'uploaded', 'failed',   '2023-01-01 00:00:00', '2023-01-01 00:00:00'),
+(5012, 3012, 'pending.bin',  'Text', 'pennsieve-test-storage', 'org2/pending.bin',  'source', 100, '{}', '00000000-0000-0000-0000-000000005012', 'unprocessed', 'uploaded', 'pending',  '2023-01-01 00:00:00', '2023-01-01 00:00:00'),
+(5013, 3013, 'clean.bin',    'Text', 'pennsieve-test-storage', 'org2/clean.bin',    'source', 100, '{}', '00000000-0000-0000-0000-000000005013', 'unprocessed', 'uploaded', 'clean',    '2023-01-01 00:00:00', '2023-01-01 00:00:00')
+ON CONFLICT (id) DO NOTHING;
