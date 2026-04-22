@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
@@ -109,11 +110,29 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 	presignClient := s3.NewPresignClient(S3Client)
 
 	var entries []models.DownloadManifestEntry
+	var blocked []models.DownloadManifestBlockedEntry
 	var totalSize int64
 
 	bucketOptionsCache := NewBucketOptionsCache(AssumeRoleClient, stsCredentialsDuration, h.externalBucketConfig)
 
 	for _, row := range rows {
+		// Gate on scan_status. See pennsieve/scan-service/docs/developer.md
+		// §12 for the permissive-during-scan policy: infected/failed
+		// are blocked (no URL emitted); pending/scanning/clean/unscanned/
+		// not_required pass through with the status surfaced to the
+		// client. Null scan_status (pre-migration rows) is treated as
+		// clean — permissive default.
+		scanStatus := normalizeScanStatus(row.ScanStatus)
+		if scanStatusBlocks(scanStatus) {
+			blocked = append(blocked, models.DownloadManifestBlockedEntry{
+				NodeId:      row.NodeId,
+				FileName:    row.FileName,
+				PackageName: row.PackageName,
+				ScanStatus:  scanStatus,
+			})
+			continue
+		}
+
 		s3Bucket := row.S3Bucket
 		bucketOptions := bucketOptionsCache.Get(s3Bucket)
 
@@ -152,20 +171,47 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 			URL:           presignResult.URL,
 			Size:          row.Size,
 			FileExtension: getFullExtension(row.S3Key),
+			ScanStatus:    scanStatus,
 		})
 		totalSize += row.Size
 	}
 
 	resp := models.DownloadManifestResponse{
 		Header: models.DownloadManifestHeader{
-			Count: len(entries),
-			Size:  totalSize,
+			Count:        len(entries),
+			Size:         totalSize,
+			BlockedCount: len(blocked),
 		},
-		Data: entries,
+		Data:    entries,
+		Blocked: blocked,
 	}
 
-	h.logger.Infof("download manifest: %d files, %d bytes for %d requested packages", len(entries), totalSize, len(request.NodeIds))
+	h.logger.Infof("download manifest: %d files (%d bytes), %d blocked, for %d requested packages", len(entries), totalSize, len(blocked), len(request.NodeIds))
 	return h.buildResponse(resp, http.StatusOK)
+}
+
+// scan_status values that prevent a presigned URL from being issued.
+// See scan-service developer docs §12.
+const (
+	scanStatusInfected = "infected"
+	scanStatusFailed   = "failed"
+)
+
+func scanStatusBlocks(s string) bool {
+	switch s {
+	case scanStatusInfected, scanStatusFailed:
+		return true
+	}
+	return false
+}
+
+// normalizeScanStatus turns a nullable DB scan_status into a plain
+// string: null / empty → "" (pre-migration rows, permissive default).
+func normalizeScanStatus(s sql.NullString) string {
+	if !s.Valid {
+		return ""
+	}
+	return s.String
 }
 
 // getPackageHierarchy runs the recursive CTE to resolve package node IDs into
@@ -207,7 +253,8 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 			f.file_type,
 			f.s3_bucket,
 			f.s3_key,
-            f.published_s3_version_id
+            f.published_s3_version_id,
+            f.scan_status
 		FROM parents
 		JOIN "%[1]d".files f ON f.package_id = parents.id
 		JOIN (
@@ -247,6 +294,7 @@ func (h *DownloadManifestHandler) getPackageHierarchy(ctx context.Context, orgId
 			&row.S3Bucket,
 			&row.S3Key,
 			&row.PublishedS3VersionId,
+			&row.ScanStatus,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan hierarchy row: %w", err)
 		}
