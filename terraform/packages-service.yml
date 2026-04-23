@@ -110,8 +110,7 @@ paths:
       summary: List supported file formats
       description: |
         Returns the Pennsieve file-format registry: a static catalog of supported
-        formats with their media types, file-type tags, and extensions. Payload is
-        embedded in the service and does not depend on request context.
+        formats with their media types, file-type tags, and extensions.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listFormats
