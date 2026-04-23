@@ -1,0 +1,858 @@
+{
+  "schemaVersion": "1.0.0",
+  "formats": [
+    {
+      "id": "pdf",
+      "name": "PDF",
+      "description": "Portable Document Format.",
+      "mediaTypes": ["application/pdf"],
+      "fileTypes": ["PDF"],
+      "extensions": [".pdf"]
+    },
+    {
+      "id": "mef",
+      "name": "MEF Timeseries",
+      "description": "Multiscale Electrophysiology Format.",
+      "mediaTypes": ["application/vnd.pennsieve.mef"],
+      "fileTypes": ["MEF"],
+      "extensions": [".mef"]
+    },
+    {
+      "id": "edf",
+      "name": "EDF Timeseries",
+      "description": "European Data Format biosignal timeseries.",
+      "mediaTypes": ["application/vnd.pennsieve.edf"],
+      "fileTypes": ["EDF"],
+      "extensions": [".edf"]
+    },
+    {
+      "id": "bdf",
+      "name": "BDF Timeseries",
+      "description": "BioSemi Data Format biosignal timeseries.",
+      "mediaTypes": ["application/vnd.pennsieve.bdf"],
+      "fileTypes": ["BDF"],
+      "extensions": [".bdf"]
+    },
+    {
+      "id": "tdms",
+      "name": "TDMS",
+      "description": "National Instruments Technical Data Management Streaming.",
+      "mediaTypes": ["application/vnd.pennsieve.tdms"],
+      "fileTypes": ["TDMS"],
+      "extensions": [".tdm", ".tdms"]
+    },
+    {
+      "id": "open-ephys",
+      "name": "Open Ephys",
+      "description": "Open Ephys acquisition recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.open-ephys"],
+      "fileTypes": ["OpenEphys"],
+      "extensions": [".continuous", ".spikes", ".events", ".openephys"]
+    },
+    {
+      "id": "persyst",
+      "name": "Persyst",
+      "description": "Persyst EEG recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.persyst"],
+      "fileTypes": ["Persyst"],
+      "extensions": [".lay", ".dat"]
+    },
+    {
+      "id": "dicom",
+      "name": "DICOM",
+      "description": "Digital Imaging and Communications in Medicine.",
+      "mediaTypes": ["application/dicom"],
+      "fileTypes": ["DICOM"],
+      "extensions": [".dcm", ".dicom"]
+    },
+    {
+      "id": "nifti",
+      "name": "NIfTI",
+      "description": "Neuroimaging Informatics Technology Initiative volume.",
+      "mediaTypes": ["application/x-nifti", "application/x-nifti-gz"],
+      "fileTypes": ["NIFTI"],
+      "extensions": [".nii", ".nii.gz", ".nifti"]
+    },
+    {
+      "id": "png",
+      "name": "PNG Image",
+      "description": "Portable Network Graphics raster image.",
+      "mediaTypes": ["image/png"],
+      "fileTypes": ["PNG"],
+      "extensions": [".png"]
+    },
+    {
+      "id": "bci2000",
+      "name": "BCI2000",
+      "description": "BCI2000 brain-computer interface data.",
+      "mediaTypes": ["application/vnd.pennsieve.bci2000"],
+      "fileTypes": ["BCI2000"]
+    },
+    {
+      "id": "bni1",
+      "name": "BNI1",
+      "description": "BNI1 timeseries data.",
+      "mediaTypes": ["application/vnd.pennsieve.bni1"],
+      "fileTypes": ["BNI1"]
+    },
+    {
+      "id": "wfdb",
+      "name": "WFDB",
+      "description": "WaveForm DataBase physiological signals.",
+      "mediaTypes": ["application/vnd.pennsieve.wfdb"],
+      "fileTypes": ["WFDB"]
+    },
+    {
+      "id": "czi",
+      "name": "CZI (Zeiss)",
+      "description": "Carl Zeiss Image microscopy format.",
+      "mediaTypes": ["application/vnd.pennsieve.czi"],
+      "fileTypes": ["CZI"],
+      "extensions": [".czi"]
+    },
+    {
+      "id": "aperio",
+      "name": "Aperio SVS",
+      "description": "Aperio whole-slide imaging format.",
+      "mediaTypes": ["application/vnd.pennsieve.aperio"],
+      "fileTypes": ["Aperio"],
+      "extensions": [".svs"]
+    },
+    {
+      "id": "static-viewer-data",
+      "name": "Static Viewer Data",
+      "description": "Pennsieve static viewer payload.",
+      "mediaTypes": ["application/vnd.pennsieve.static-viewer-data"],
+      "fileTypes": ["StaticViewerData"]
+    },
+    {
+      "id": "directory-viewer-data",
+      "name": "Directory Viewer Data",
+      "description": "Pennsieve directory viewer payload.",
+      "mediaTypes": ["application/vnd.pennsieve.directory-viewer-data"],
+      "fileTypes": ["DirectoryViewerData"]
+    },
+    {
+      "id": "json",
+      "name": "JSON",
+      "description": "JavaScript Object Notation document.",
+      "mediaTypes": ["application/json"],
+      "fileTypes": ["Json"],
+      "extensions": [".json"]
+    },
+    {
+      "id": "csv",
+      "name": "CSV",
+      "description": "Comma-separated values tabular data.",
+      "mediaTypes": ["text/csv"],
+      "fileTypes": ["CSV"],
+      "extensions": [".csv"]
+    },
+    {
+      "id": "tsv",
+      "name": "TSV",
+      "description": "Tab-separated values tabular data.",
+      "mediaTypes": ["text/tab-separated-values"],
+      "fileTypes": ["TSV"],
+      "extensions": [".tsv"]
+    },
+    {
+      "id": "text",
+      "name": "Plain Text",
+      "description": "Plain text document.",
+      "mediaTypes": ["text/plain"],
+      "fileTypes": ["Text"],
+      "extensions": [".txt", ".text", ".rtf"]
+    },
+    {
+      "id": "xml",
+      "name": "XML",
+      "description": "Extensible Markup Language document.",
+      "mediaTypes": ["application/xml"],
+      "fileTypes": ["XML"],
+      "extensions": [".xml"]
+    },
+    {
+      "id": "html",
+      "name": "HTML",
+      "description": "HyperText Markup Language document.",
+      "mediaTypes": ["text/html"],
+      "fileTypes": ["HTML"],
+      "extensions": [".html", ".htm"]
+    },
+    {
+      "id": "ms-excel",
+      "name": "Microsoft Excel",
+      "description": "Microsoft Excel spreadsheet.",
+      "mediaTypes": [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel"
+      ],
+      "fileTypes": ["MSExcel"],
+      "extensions": [".xls", ".xlsx"]
+    },
+    {
+      "id": "ms-word",
+      "name": "Microsoft Word",
+      "description": "Microsoft Word document.",
+      "mediaTypes": [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword"
+      ],
+      "fileTypes": ["MSWord"],
+      "extensions": [".doc", ".docx"]
+    },
+    {
+      "id": "mp4",
+      "name": "MP4 Video",
+      "description": "MPEG-4 video container.",
+      "mediaTypes": ["video/mp4"],
+      "fileTypes": ["MP4"],
+      "extensions": [".mp4"]
+    },
+    {
+      "id": "webm",
+      "name": "WebM Video",
+      "description": "WebM video container.",
+      "mediaTypes": ["video/webm"],
+      "fileTypes": ["WEBM"],
+      "extensions": [".webm"]
+    },
+    {
+      "id": "ogg",
+      "name": "Ogg Video",
+      "description": "Ogg video container.",
+      "mediaTypes": ["video/ogg"],
+      "fileTypes": ["OGG"],
+      "extensions": [".ogg", ".ogv"]
+    },
+    {
+      "id": "mov",
+      "name": "QuickTime Video",
+      "description": "Apple QuickTime video container.",
+      "mediaTypes": ["video/quicktime"],
+      "fileTypes": ["MOV"],
+      "extensions": [".mov"]
+    },
+    {
+      "id": "mat",
+      "name": "MATLAB Data",
+      "description": "MATLAB MAT-file.",
+      "mediaTypes": ["application/x-matlab-data"],
+      "fileTypes": ["MAT"],
+      "extensions": [".mat", ".mex"]
+    },
+    {
+      "id": "jpeg",
+      "name": "JPEG Image",
+      "description": "JPEG raster image.",
+      "mediaTypes": ["image/jpeg"],
+      "fileTypes": ["JPEG"],
+      "extensions": [".jpg", ".jpeg"]
+    },
+    {
+      "id": "jpeg-2000",
+      "name": "JPEG 2000 Image",
+      "description": "JPEG 2000 raster image.",
+      "mediaTypes": ["image/jp2"],
+      "fileTypes": ["JPEG2000"],
+      "extensions": [".jp2", ".jpx"]
+    },
+    {
+      "id": "lsm",
+      "name": "Zeiss LSM",
+      "description": "Zeiss LSM confocal microscopy.",
+      "mediaTypes": ["application/vnd.pennsieve.lsm"],
+      "fileTypes": ["LSM"],
+      "extensions": [".lsm"]
+    },
+    {
+      "id": "ndpi",
+      "name": "Hamamatsu NDPI",
+      "description": "Hamamatsu NDPI whole-slide image.",
+      "mediaTypes": ["application/vnd.pennsieve.ndpi"],
+      "fileTypes": ["NDPI"],
+      "extensions": [".ndpi"]
+    },
+    {
+      "id": "oib",
+      "name": "Olympus OIB",
+      "description": "Olympus OIB microscopy image.",
+      "mediaTypes": ["application/vnd.pennsieve.oib"],
+      "fileTypes": ["OIB"],
+      "extensions": [".oib"]
+    },
+    {
+      "id": "oif",
+      "name": "Olympus OIF",
+      "description": "Olympus OIF microscopy image.",
+      "mediaTypes": ["application/vnd.pennsieve.oif"],
+      "fileTypes": ["OIF"],
+      "extensions": [".oif"]
+    },
+    {
+      "id": "roi",
+      "name": "ROI",
+      "description": "Region-of-interest annotation.",
+      "mediaTypes": ["application/vnd.pennsieve.roi"],
+      "fileTypes": ["ROI"],
+      "extensions": [".roi"]
+    },
+    {
+      "id": "swc",
+      "name": "SWC Morphology",
+      "description": "Neuronal morphology SWC format.",
+      "mediaTypes": ["application/vnd.pennsieve.swc"],
+      "fileTypes": ["SWC"],
+      "extensions": [".swc"]
+    },
+    {
+      "id": "cram",
+      "name": "CRAM Alignment",
+      "description": "Compressed reference-based genomic alignment.",
+      "mediaTypes": ["application/x-cram"],
+      "fileTypes": ["CRAM"],
+      "extensions": [".cram"]
+    },
+    {
+      "id": "mgh",
+      "name": "FreeSurfer MGH",
+      "description": "FreeSurfer MGH/MGZ volumetric image.",
+      "mediaTypes": ["application/vnd.pennsieve.mgh"],
+      "fileTypes": ["MGH"],
+      "extensions": [".mgh", ".mgz", ".mgh.gz"]
+    },
+    {
+      "id": "avi",
+      "name": "AVI Video",
+      "description": "Audio Video Interleave container.",
+      "mediaTypes": ["video/x-msvideo"],
+      "fileTypes": ["AVI"],
+      "extensions": [".avi"]
+    },
+    {
+      "id": "matlab",
+      "name": "MATLAB Script",
+      "description": "MATLAB source script.",
+      "mediaTypes": ["text/x-matlab"],
+      "fileTypes": ["MATLAB"],
+      "extensions": [".m"]
+    },
+    {
+      "id": "hdf5",
+      "name": "HDF5",
+      "description": "Hierarchical Data Format version 5.",
+      "mediaTypes": ["application/x-hdf5"],
+      "fileTypes": ["HDF5"],
+      "extensions": [".hdf5", ".h5"]
+    },
+    {
+      "id": "tiff",
+      "name": "TIFF Image",
+      "description": "Tagged Image File Format.",
+      "mediaTypes": ["image/tiff"],
+      "fileTypes": ["TIFF"],
+      "extensions": [".tiff", ".tif"]
+    },
+    {
+      "id": "ome-tiff",
+      "name": "OME-TIFF",
+      "description": "Open Microscopy Environment TIFF with OME-XML metadata.",
+      "mediaTypes": ["image/tiff"],
+      "fileTypes": ["OMETIFF"],
+      "extensions": [".ome.tiff", ".ome.tif", ".ome.tf2", ".ome.tf8", ".ome.btf", ".ome.xml"]
+    },
+    {
+      "id": "bruker-tiff",
+      "name": "Bruker TIFF",
+      "description": "Bruker multi-frame TIFF image.",
+      "mediaTypes": ["application/vnd.pennsieve.bruker-tiff"],
+      "fileTypes": ["BRUKERTIFF"],
+      "extensions": [".brukertiff.gz"]
+    },
+    {
+      "id": "gif",
+      "name": "GIF Image",
+      "description": "Graphics Interchange Format raster image.",
+      "mediaTypes": ["image/gif"],
+      "fileTypes": ["GIF"],
+      "extensions": [".gif"]
+    },
+    {
+      "id": "analyze",
+      "name": "ANALYZE Image",
+      "description": "Mayo Clinic ANALYZE volumetric image.",
+      "mediaTypes": ["application/vnd.pennsieve.analyze"],
+      "fileTypes": ["ANALYZE"],
+      "extensions": [".img", ".hdr"]
+    },
+    {
+      "id": "neuro-explorer",
+      "name": "NeuroExplorer",
+      "description": "NeuroExplorer timeseries data.",
+      "mediaTypes": ["application/vnd.pennsieve.neuro-explorer"],
+      "fileTypes": ["NeuroExplorer"],
+      "extensions": [".nex", ".nex5"]
+    },
+    {
+      "id": "minc",
+      "name": "MINC",
+      "description": "Medical Imaging NetCDF volumetric image.",
+      "mediaTypes": ["application/vnd.pennsieve.minc"],
+      "fileTypes": ["MINC"],
+      "extensions": [".mnc"]
+    },
+    {
+      "id": "blackrock",
+      "name": "Blackrock",
+      "description": "Blackrock Microsystems electrophysiology data.",
+      "mediaTypes": ["application/vnd.pennsieve.blackrock"],
+      "fileTypes": ["Blackrock"]
+    },
+    {
+      "id": "moberg-series",
+      "name": "Moberg Series",
+      "description": "Moberg CNS Monitor timeseries.",
+      "mediaTypes": ["application/vnd.pennsieve.moberg-series"],
+      "fileTypes": ["MobergSeries"],
+      "extensions": [".moberg.gz"]
+    },
+    {
+      "id": "generic-data",
+      "name": "Generic Data",
+      "description": "Generic opaque binary data.",
+      "mediaTypes": ["application/octet-stream"],
+      "fileTypes": ["GenericData"]
+    },
+    {
+      "id": "bfannot",
+      "name": "Blackfynn Annotation",
+      "description": "Blackfynn annotation bundle.",
+      "mediaTypes": ["application/vnd.pennsieve.bfannot"],
+      "fileTypes": ["BFANNOT"],
+      "extensions": [".bfannot"]
+    },
+    {
+      "id": "bfts",
+      "name": "Blackfynn Timeseries",
+      "description": "Blackfynn timeseries bundle.",
+      "mediaTypes": ["application/vnd.pennsieve.bfts"],
+      "fileTypes": ["BFTS"],
+      "extensions": [".bfts"]
+    },
+    {
+      "id": "nicolet",
+      "name": "Nicolet",
+      "description": "Nicolet EEG recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.nicolet"],
+      "fileTypes": ["Nicolet"],
+      "extensions": [".e"]
+    },
+    {
+      "id": "mef3",
+      "name": "MEF3 Timeseries",
+      "description": "Multiscale Electrophysiology Format version 3.",
+      "mediaTypes": ["application/vnd.pennsieve.mef3"],
+      "fileTypes": ["MEF3"],
+      "extensions": [".mefd.gz"]
+    },
+    {
+      "id": "feather",
+      "name": "Apache Feather",
+      "description": "Apache Arrow Feather columnar format.",
+      "mediaTypes": ["application/vnd.apache.feather"],
+      "fileTypes": ["Feather"],
+      "extensions": [".feather"]
+    },
+    {
+      "id": "nev",
+      "name": "Blackrock NEV",
+      "description": "Blackrock NEV/NSx neural event data.",
+      "mediaTypes": ["application/vnd.pennsieve.nev"],
+      "fileTypes": ["NEV"],
+      "extensions": [".nev", ".ns1", ".ns2", ".ns3", ".ns4", ".ns5", ".ns6", ".nf3"]
+    },
+    {
+      "id": "spike2",
+      "name": "Spike2",
+      "description": "CED Spike2 electrophysiology data.",
+      "mediaTypes": ["application/vnd.pennsieve.spike2"],
+      "fileTypes": ["Spike2"],
+      "extensions": [".smr"]
+    },
+    {
+      "id": "adobe-illustrator",
+      "name": "Adobe Illustrator",
+      "description": "Adobe Illustrator vector document.",
+      "mediaTypes": ["application/postscript", "image/svg+xml"],
+      "fileTypes": ["AdobeIllustrator"],
+      "extensions": [".ai", ".svg"]
+    },
+    {
+      "id": "afni",
+      "name": "AFNI",
+      "description": "AFNI neuroimaging dataset.",
+      "mediaTypes": ["application/vnd.pennsieve.afni"],
+      "fileTypes": ["AFNI"],
+      "extensions": [".afni"]
+    },
+    {
+      "id": "afni-brik",
+      "name": "AFNI BRIK/HEAD",
+      "description": "AFNI BRIK/HEAD neuroimaging dataset.",
+      "mediaTypes": ["application/vnd.pennsieve.afni-brik"],
+      "fileTypes": ["AFNIBRIK"],
+      "extensions": [".brik", ".head"]
+    },
+    {
+      "id": "ansys",
+      "name": "ANSYS",
+      "description": "ANSYS simulation project.",
+      "mediaTypes": ["application/vnd.pennsieve.ansys"],
+      "fileTypes": ["Ansys"],
+      "extensions": [".aedt"]
+    },
+    {
+      "id": "bam",
+      "name": "BAM Alignment",
+      "description": "Binary Alignment Map for genomic reads.",
+      "mediaTypes": ["application/x-bam"],
+      "fileTypes": ["BAM"],
+      "extensions": [".bam", ".bcl", ".bcl.gz"]
+    },
+    {
+      "id": "biodac",
+      "name": "BIODAC",
+      "description": "BIODAC timeseries recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.biodac"],
+      "fileTypes": ["BIODAC"],
+      "extensions": [".tab"]
+    },
+    {
+      "id": "biopac",
+      "name": "BioPAC",
+      "description": "BioPAC AcqKnowledge recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.biopac"],
+      "fileTypes": ["BioPAC"],
+      "extensions": [".acq"]
+    },
+    {
+      "id": "comsol",
+      "name": "COMSOL Model",
+      "description": "COMSOL Multiphysics model file.",
+      "mediaTypes": ["application/vnd.pennsieve.comsol"],
+      "fileTypes": ["COMSOL"],
+      "extensions": [".mph"]
+    },
+    {
+      "id": "cpp",
+      "name": "C++ Source",
+      "description": "C++ source code.",
+      "mediaTypes": ["text/x-c++src"],
+      "fileTypes": ["CPlusPlus"],
+      "extensions": [".cpp"]
+    },
+    {
+      "id": "csharp",
+      "name": "C# Source",
+      "description": "C# source code.",
+      "mediaTypes": ["text/x-csharp"],
+      "fileTypes": ["CSharp"]
+    },
+    {
+      "id": "data",
+      "name": "Raw Data",
+      "description": "Generic raw binary data file.",
+      "mediaTypes": ["application/octet-stream"],
+      "fileTypes": ["Data"],
+      "extensions": [".data", ".bin", ".raw"]
+    },
+    {
+      "id": "docker",
+      "name": "Dockerfile",
+      "description": "Docker container build recipe.",
+      "mediaTypes": ["text/x-dockerfile"],
+      "fileTypes": ["Docker"],
+      "extensions": ["Dockerfile"]
+    },
+    {
+      "id": "eps",
+      "name": "EPS",
+      "description": "Encapsulated PostScript image.",
+      "mediaTypes": ["application/postscript"],
+      "fileTypes": ["EPS"],
+      "extensions": [".eps", ".ps"]
+    },
+    {
+      "id": "fcs",
+      "name": "FCS Flow",
+      "description": "ISAC Flow Cytometry Standard file.",
+      "mediaTypes": ["application/vnd.isac.fcs"],
+      "fileTypes": ["FCS"],
+      "extensions": [".fcs"]
+    },
+    {
+      "id": "fasta",
+      "name": "FASTA",
+      "description": "FASTA biological sequence format.",
+      "mediaTypes": ["application/x-fasta"],
+      "fileTypes": ["FASTA"],
+      "extensions": [".fasta"]
+    },
+    {
+      "id": "fastq",
+      "name": "FASTQ",
+      "description": "FASTQ sequencing reads with quality scores.",
+      "mediaTypes": ["application/x-fastq"],
+      "fileTypes": ["FASTQ"],
+      "extensions": [".fastq"]
+    },
+    {
+      "id": "freesurfer-surface",
+      "name": "FreeSurfer Surface",
+      "description": "FreeSurfer cortical surface data.",
+      "mediaTypes": ["application/vnd.pennsieve.freesurfer-surface"],
+      "fileTypes": ["FreesurferSurface"],
+      "extensions": [".lh", ".rh", ".curv"]
+    },
+    {
+      "id": "fsfast",
+      "name": "FS-FAST",
+      "description": "FreeSurfer FS-FAST fMRI data.",
+      "mediaTypes": ["application/vnd.pennsieve.fsfast"],
+      "fileTypes": ["FSFast"]
+    },
+    {
+      "id": "hdf",
+      "name": "HDF",
+      "description": "Hierarchical Data Format (legacy).",
+      "mediaTypes": ["application/x-hdf"],
+      "fileTypes": ["HDF"],
+      "extensions": [".hdf", ".hdf4", ".h4", ".he2", ".he5"]
+    },
+    {
+      "id": "imaris",
+      "name": "Imaris",
+      "description": "Bitplane Imaris microscopy format.",
+      "mediaTypes": ["application/vnd.pennsieve.imaris"],
+      "fileTypes": ["Imaris"],
+      "extensions": [".ims"]
+    },
+    {
+      "id": "intan",
+      "name": "Intan",
+      "description": "Intan Technologies electrophysiology recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.intan"],
+      "fileTypes": ["Intan"],
+      "extensions": [".rhd"]
+    },
+    {
+      "id": "iv-curve-data",
+      "name": "IV Curve Data",
+      "description": "Current-voltage curve recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.iv-curve-data"],
+      "fileTypes": ["IVCurveData"],
+      "extensions": [".ibw"]
+    },
+    {
+      "id": "java",
+      "name": "Java Source",
+      "description": "Java source code.",
+      "mediaTypes": ["text/x-java-source"],
+      "fileTypes": ["JAVA"]
+    },
+    {
+      "id": "javascript",
+      "name": "JavaScript Source",
+      "description": "JavaScript source code.",
+      "mediaTypes": ["application/javascript"],
+      "fileTypes": ["Javascript"],
+      "extensions": [".js"]
+    },
+    {
+      "id": "jupyter",
+      "name": "Jupyter Notebook",
+      "description": "Jupyter interactive notebook.",
+      "mediaTypes": ["application/x-ipynb+json"],
+      "fileTypes": ["Jupyter"],
+      "extensions": [".ipynb"]
+    },
+    {
+      "id": "labchart",
+      "name": "LabChart",
+      "description": "ADInstruments LabChart recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.labchart"],
+      "fileTypes": ["LabChart"],
+      "extensions": [".adicht", ".adidat"]
+    },
+    {
+      "id": "leica",
+      "name": "Leica",
+      "description": "Leica microscopy image format.",
+      "mediaTypes": ["application/vnd.pennsieve.leica"],
+      "fileTypes": ["Leica"],
+      "extensions": [".lif"]
+    },
+    {
+      "id": "matlab-figure",
+      "name": "MATLAB Figure",
+      "description": "MATLAB figure file.",
+      "mediaTypes": ["application/vnd.pennsieve.matlab-figure"],
+      "fileTypes": ["MatlabFigure"],
+      "extensions": [".fig"]
+    },
+    {
+      "id": "markdown",
+      "name": "Markdown",
+      "description": "Markdown document.",
+      "mediaTypes": ["text/markdown"],
+      "fileTypes": ["Markdown"],
+      "extensions": [".md"]
+    },
+    {
+      "id": "minitab",
+      "name": "Minitab",
+      "description": "Minitab statistical project.",
+      "mediaTypes": ["application/vnd.pennsieve.minitab"],
+      "fileTypes": ["Minitab"],
+      "extensions": [".mpj", ".mtw", ".mgf"]
+    },
+    {
+      "id": "neuralynx",
+      "name": "Neuralynx",
+      "description": "Neuralynx electrophysiology data.",
+      "mediaTypes": ["application/vnd.pennsieve.neuralynx"],
+      "fileTypes": ["Neuralynx"],
+      "extensions": [".ncs"]
+    },
+    {
+      "id": "nwb",
+      "name": "NeuroData Without Borders",
+      "description": "NWB neurophysiology data (HDF5-based).",
+      "mediaTypes": ["application/x-hdf5"],
+      "fileTypes": ["NeuroDataWithoutBorders"],
+      "extensions": [".nwb"]
+    },
+    {
+      "id": "neuron",
+      "name": "NEURON Model",
+      "description": "NEURON simulation model source.",
+      "mediaTypes": ["application/vnd.pennsieve.neuron"],
+      "fileTypes": ["Neuron"],
+      "extensions": [".hoc", ".mod"]
+    },
+    {
+      "id": "nihon-koden",
+      "name": "Nihon Kohden",
+      "description": "Nihon Kohden EEG recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.nihon-koden"],
+      "fileTypes": ["NihonKoden"]
+    },
+    {
+      "id": "nikon",
+      "name": "Nikon Microscope",
+      "description": "Nikon ND2 microscopy image.",
+      "mediaTypes": ["application/vnd.pennsieve.nikon"],
+      "fileTypes": ["Nikon"],
+      "extensions": [".nd2"]
+    },
+    {
+      "id": "patch-master",
+      "name": "PatchMaster",
+      "description": "HEKA PatchMaster electrophysiology data.",
+      "mediaTypes": ["application/vnd.pennsieve.patch-master"],
+      "fileTypes": ["PatchMaster"],
+      "extensions": [".pgf", ".pul"]
+    },
+    {
+      "id": "pclamp",
+      "name": "pCLAMP",
+      "description": "Molecular Devices pCLAMP recordings.",
+      "mediaTypes": ["application/vnd.pennsieve.pclamp"],
+      "fileTypes": ["PClamp"],
+      "extensions": [".abf"]
+    },
+    {
+      "id": "plexon",
+      "name": "Plexon",
+      "description": "Plexon electrophysiology data.",
+      "mediaTypes": ["application/vnd.pennsieve.plexon"],
+      "fileTypes": ["Plexon"]
+    },
+    {
+      "id": "power-point",
+      "name": "Microsoft PowerPoint",
+      "description": "Microsoft PowerPoint presentation.",
+      "mediaTypes": [
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-powerpoint"
+      ],
+      "fileTypes": ["PowerPoint"],
+      "extensions": [".ppt", ".pptx"]
+    },
+    {
+      "id": "python",
+      "name": "Python Source",
+      "description": "Python source code.",
+      "mediaTypes": ["text/x-python"],
+      "fileTypes": ["Python"],
+      "extensions": [".py"]
+    },
+    {
+      "id": "r",
+      "name": "R Source",
+      "description": "R source code.",
+      "mediaTypes": ["text/x-r"],
+      "fileTypes": ["R"],
+      "extensions": [".r"]
+    },
+    {
+      "id": "rdata",
+      "name": "R Data",
+      "description": "R serialized data workspace.",
+      "mediaTypes": ["application/vnd.pennsieve.rdata"],
+      "fileTypes": ["RData"],
+      "extensions": [".rdata"]
+    },
+    {
+      "id": "shell",
+      "name": "Shell Script",
+      "description": "Unix shell script.",
+      "mediaTypes": ["application/x-sh"],
+      "fileTypes": ["Shell"],
+      "extensions": [".sh", ".tcsh", ".bash", ".zsh"]
+    },
+    {
+      "id": "solid-works",
+      "name": "SolidWorks",
+      "description": "SolidWorks CAD assembly or drawing.",
+      "mediaTypes": ["application/vnd.pennsieve.solid-works"],
+      "fileTypes": ["SolidWorks"],
+      "extensions": [".sldasm", ".slddrw"]
+    },
+    {
+      "id": "vcf",
+      "name": "VCF Variant Data",
+      "description": "Variant Call Format genomic variants.",
+      "mediaTypes": ["application/x-vcf"],
+      "fileTypes": ["VariantData"],
+      "extensions": [".vcf"]
+    },
+    {
+      "id": "yaml",
+      "name": "YAML",
+      "description": "YAML Ain't Markup Language document.",
+      "mediaTypes": ["application/yaml"],
+      "fileTypes": ["YAML"],
+      "extensions": [".yaml", ".yml"]
+    },
+    {
+      "id": "zip",
+      "name": "Zip Archive",
+      "description": "Compressed archive (ZIP or tar.gz).",
+      "mediaTypes": ["application/zip"],
+      "fileTypes": ["ZIP"],
+      "extensions": [".zip", ".tar", ".tar.gz"]
+    }
+  ]
+}
