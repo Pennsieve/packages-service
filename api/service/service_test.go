@@ -249,6 +249,10 @@ func (m *MockPackagesStore) GetSourceFilesByNodeIds(ctx context.Context, package
 	panic("mock me if you need me")
 }
 
+func (m *MockPackagesStore) GetFilesNeedingRescanByPackageId(_ context.Context, _ int64) ([]store.RescanFileRow, error) {
+	panic("mock me if you need me")
+}
+
 func (m *MockPackagesStore) NewSavepoint(_ context.Context, _ string) error {
 	panic("mock me if you need me")
 }

@@ -81,7 +81,7 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	dyStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
 	objectStore := store.NewS3Store(s3Client)
-	handler := NewMessageHandler(events.SQSMessage{MessageId: uuid.NewString(), Body: "{}"}, NewBaseStore(sqlFactory, dyStore, objectStore, nil))
+	handler := NewMessageHandler(events.SQSMessage{MessageId: uuid.NewString(), Body: "{}"}, NewBaseStore(sqlFactory, dyStore, objectStore, nil, nil))
 	restoreInfo := models.RestorePackageInfo{
 		Id:     folderPackage.Id,
 		NodeId: folderPackage.NodeId,

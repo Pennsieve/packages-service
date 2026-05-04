@@ -219,7 +219,7 @@ func TestHandleMessage(t *testing.T) {
 	objectStore := store.NewS3Store(s3Client)
 	nosqlStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
 	sqsChangelogStore := restore.NewSQSChangelogStore(sqsClient, jobsQueueID)
-	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore)
+	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, sqsChangelogStore, nil)
 	expectedMessageId := "handle-message-message-id"
 	message := events.SQSMessage{
 		MessageId: expectedMessageId,

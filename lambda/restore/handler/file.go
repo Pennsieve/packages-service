@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/packages-service/api/store/restore"
 	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
@@ -28,6 +29,7 @@ var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datasetId int64, restoreInfo models.RestorePackageInfo) ([]changelog.PackageRestoreEvent, error) {
 	var changelogEvents []changelog.PackageRestoreEvent
 	var restoredSize int64
+	var rescanCandidates []store.RescanFileRow
 	err := h.Store.SQLFactory.ExecStoreTx(ctx, orgId, func(sqlStore store.SQLStore) error {
 		// mark any deleted ancestors as restoring
 		var ancestors []models.RestorePackageInfo
@@ -100,6 +102,17 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		restoredSize = sourceFileSize(sourceFiles)
 		sqlStore.LogInfo("restored size: ", restoredSize)
 
+		// capture files needing rescan for post-commit SNS publish.
+		// Read inside the tx so we see a consistent post-restore view;
+		// publish outside it because SNS is best-effort.
+		if h.Store.ScanTrigger != nil {
+			rescan, err := sqlStore.GetFilesNeedingRescanByPackageId(ctx, restoreInfo.Id)
+			if err != nil {
+				return h.errorf("error querying files needing rescan for package %s: %w", restoreInfo.NodeId, err)
+			}
+			rescanCandidates = rescan
+		}
+
 		// restore states
 		stateRestores := make([]*models.RestorePackageInfo, len(ancestors)+1)
 		stateRestores[0] = &restoreInfo
@@ -122,6 +135,18 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 	simpleStore := h.Store.SQLFactory.NewSimpleStore(orgId)
 	if storageErr := h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, simpleStore); storageErr != nil {
 		h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": storageErr}, "could not update storage after restore")
+	}
+
+	if h.Store.ScanTrigger != nil && len(rescanCandidates) > 0 {
+		files := make([]restore.RescanFile, len(rescanCandidates))
+		for i, r := range rescanCandidates {
+			files[i] = restore.RescanFile{FileID: r.ID, FileUUID: r.UUID, S3Bucket: r.S3Bucket, S3Key: r.S3Key, Size: r.Size}
+		}
+		if pubErr := h.Store.ScanTrigger.PublishRescanRequests(ctx, orgId, files); pubErr != nil {
+			h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "fileCount": len(files), "error": pubErr}, "could not publish rescan triggers after restore")
+		} else {
+			h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "fileCount": len(files)}, "published rescan triggers")
+		}
 	}
 
 	h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "size": restoredSize}, "restore complete")

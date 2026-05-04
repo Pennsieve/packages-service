@@ -116,8 +116,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   # - sparc_bucket_role_arn: SPARC account buckets
   # - rejoin_bucket_role_arn: RE-JOIN and PRECISION account buckets (same account)
   statement {
-    sid    = "AssumeExternalPublishBucketRoles"
-    effect = "Allow"
+    sid     = "AssumeExternalPublishBucketRoles"
+    effect  = "Allow"
     actions = ["sts:AssumeRole"]
     resources = [
       data.terraform_remote_state.platform_infrastructure.outputs.sparc_bucket_role_arn,
@@ -163,8 +163,8 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid    = "PackagesServiceAssumeUploadCredentialsRole"
-    effect = "Allow"
+    sid       = "PackagesServiceAssumeUploadCredentialsRole"
+    effect    = "Allow"
     actions   = ["sts:AssumeRole"]
     resources = [aws_iam_role.viewer_assets_upload_credentials_role.arn]
   }
@@ -352,6 +352,21 @@ data "aws_iam_policy_document" "restore_package_iam_policy_document" {
 
     resources = [
       data.terraform_remote_state.platform_infrastructure.outputs.jobs_kms_key_arn,
+    ]
+  }
+
+  // Re-publish FileFinalized so scan-service rescans files whose
+  // packages were just restored from trash.
+  statement {
+    sid    = "PublishScanRescanTriggers"
+    effect = "Allow"
+
+    actions = [
+      "sns:Publish",
+    ]
+
+    resources = [
+      data.terraform_remote_state.upload_service.outputs.file_finalized_topic_arn,
     ]
   }
 

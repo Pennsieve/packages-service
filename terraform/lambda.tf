@@ -10,7 +10,7 @@ resource "aws_lambda_function" "service_lambda" {
   s3_key        = "${var.service_name}/packages-service-${var.image_tag}.zip"
 
   vpc_config {
-    subnet_ids = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
+    subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
     security_group_ids = [data.terraform_remote_state.platform_infrastructure.outputs.upload_v2_security_group_id]
   }
 
@@ -25,9 +25,9 @@ resource "aws_lambda_function" "service_lambda" {
       CLOUDFRONT_KEY_ID                   = data.terraform_remote_state.platform_infrastructure.outputs.assets_distribution_public_key
       CLOUDFRONT_KEY_GROUP_ID             = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
       CLOUDFRONT_SIGNING_KEYS_SECRET_NAME = aws_secretsmanager_secret.cloudfront_signing_keys.name
-      UPLOAD_CREDENTIALS_ROLE_ARN              = aws_iam_role.viewer_assets_upload_credentials_role.arn
-      VIEWER_ASSETS_BUCKET                    = data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_id
-      EXTERNAL_BUCKETS_ROLE_MAP = jsonencode(local.external_bucket_roles)
+      UPLOAD_CREDENTIALS_ROLE_ARN         = aws_iam_role.viewer_assets_upload_credentials_role.arn
+      VIEWER_ASSETS_BUCKET                = data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_id
+      EXTERNAL_BUCKETS_ROLE_MAP           = jsonencode(local.external_bucket_roles)
     }
   }
 }
@@ -44,7 +44,7 @@ resource "aws_lambda_function" "restore_package_lambda" {
   s3_key        = "${var.service_name}/restore-package-${var.image_tag}.zip"
 
   vpc_config {
-    subnet_ids = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
+    subnet_ids         = tolist(data.terraform_remote_state.vpc.outputs.private_subnet_ids)
     security_group_ids = [data.terraform_remote_state.platform_infrastructure.outputs.upload_v2_security_group_id]
   }
 
@@ -57,6 +57,7 @@ resource "aws_lambda_function" "restore_package_lambda" {
       RESTORE_PACKAGE_QUEUE_URL         = aws_sqs_queue.restore_package_queue.url
       DELETE_RECORD_DYNAMODB_TABLE_NAME = data.terraform_remote_state.process_jobs_service.outputs.process_jobs_table_name
       JOBS_QUEUE_ID                     = data.terraform_remote_state.platform_infrastructure.outputs.jobs_queue_id,
+      FILE_FINALIZED_TOPIC_ARN          = data.terraform_remote_state.upload_service.outputs.file_finalized_topic_arn,
     }
   }
 }
@@ -77,7 +78,7 @@ resource "aws_lambda_function" "key_rotation" {
     variables = {
       ENVIRONMENT                     = var.environment_name
       CLOUDFRONT_KEY_GROUP_ID         = data.terraform_remote_state.platform_infrastructure.outputs.package_assets_key_group_id
-      KEY_ROTATION_GRACE_PERIOD_HOURS = "48"  # Grace period before removing old keys from CloudFront
+      KEY_ROTATION_GRACE_PERIOD_HOURS = "48" # Grace period before removing old keys from CloudFront
     }
   }
 

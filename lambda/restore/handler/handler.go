@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
@@ -25,20 +26,22 @@ var PennsieveDB *sql.DB
 var S3Client *s3.Client
 var DyDBClient *dynamodb.Client
 var SQSClient *sqs.Client
+var SNSClient *sns.Client
 
 type BaseStore interface {
 	NewStore(log *pennsievelog.Log) *Store
 }
 
 type baseStore struct {
-	sqlFactory *store.PostgresStoreFactory
-	dyDB       *store.DynamoDBStore
-	s3         *store.S3Store
-	changelog  *restore.SQSChangelogStore
+	sqlFactory  *store.PostgresStoreFactory
+	dyDB        *store.DynamoDBStore
+	s3          *store.S3Store
+	changelog   *restore.SQSChangelogStore
+	scanTrigger *restore.SNSScanTriggerStore
 }
 
-func NewBaseStore(sqlFactory *store.PostgresStoreFactory, dyDB *store.DynamoDBStore, s3 *store.S3Store, changelog *restore.SQSChangelogStore) BaseStore {
-	return &baseStore{sqlFactory: sqlFactory, dyDB: dyDB, s3: s3, changelog: changelog}
+func NewBaseStore(sqlFactory *store.PostgresStoreFactory, dyDB *store.DynamoDBStore, s3 *store.S3Store, changelog *restore.SQSChangelogStore, scanTrigger *restore.SNSScanTriggerStore) BaseStore {
+	return &baseStore{sqlFactory: sqlFactory, dyDB: dyDB, s3: s3, changelog: changelog, scanTrigger: scanTrigger}
 }
 
 func (b *baseStore) NewStore(log *pennsievelog.Log) *Store {
@@ -46,14 +49,19 @@ func (b *baseStore) NewStore(log *pennsievelog.Log) *Store {
 	objectStore := b.s3.WithLogging(log)
 	sqlFactory := b.sqlFactory.WithLogging(log)
 	changelog := b.changelog.WithLogging(log)
-	return &Store{NoSQL: noSQLStore, Object: objectStore, SQLFactory: sqlFactory, Changelog: changelog}
+	var scanTrigger restore.ScanTriggerStore
+	if b.scanTrigger != nil {
+		scanTrigger = b.scanTrigger.WithLogging(log)
+	}
+	return &Store{NoSQL: noSQLStore, Object: objectStore, SQLFactory: sqlFactory, Changelog: changelog, ScanTrigger: scanTrigger}
 }
 
 type Store struct {
-	SQLFactory store.SQLStoreFactory
-	Object     store.ObjectStore
-	NoSQL      store.NoSQLStore
-	Changelog  restore.ChangelogStore
+	SQLFactory  store.SQLStoreFactory
+	Object      store.ObjectStore
+	NoSQL       store.NoSQLStore
+	Changelog   restore.ChangelogStore
+	ScanTrigger restore.ScanTriggerStore
 }
 
 func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.SQSEventResponse, error) {
@@ -61,7 +69,11 @@ func RestorePackagesHandler(ctx context.Context, event events.SQSEvent) (events.
 	objectStore := store.NewS3Store(S3Client)
 	nosqlStore := store.NewDynamoDBStore(DyDBClient, os.Getenv(store.DeleteRecordTableNameEnvKey))
 	changelogStore := restore.NewSQSChangelogStore(SQSClient, os.Getenv(restore.JobsQueueIDEnvKey))
-	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, changelogStore)
+	var scanTriggerStore *restore.SNSScanTriggerStore
+	if topicArn := os.Getenv(restore.FileFinalizedTopicEnvKey); topicArn != "" && SNSClient != nil {
+		scanTriggerStore = restore.NewSNSScanTriggerStore(SNSClient, topicArn)
+	}
+	base := NewBaseStore(sqlFactory, nosqlStore, objectStore, changelogStore, scanTriggerStore)
 	return handleBatches(ctx, event, base)
 }
 

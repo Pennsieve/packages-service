@@ -229,6 +229,49 @@ func (q *Queries) GetSourceFilesByPackageId(ctx context.Context, packageId int64
 	return files, nil
 }
 
+// RescanFileRow is the projection used by the restore handler to
+// publish FileFinalized events for files whose scan_status indicates a
+// scan never completed. Kept distinct from File so the existing
+// GetSourceFilesByPackageId callers don't grow new fields they ignore.
+type RescanFileRow struct {
+	ID       int64
+	UUID     string
+	S3Bucket string
+	S3Key    string
+	Size     int64
+}
+
+// GetFilesNeedingRescanByPackageId returns source files for the given
+// package whose scan_status is NULL, 'pending', or 'failed' — i.e. files
+// for which there is no successful terminal verdict yet. The restore
+// handler uses this to decide which files to publish to the scan
+// trigger topic after a package comes out of trash.
+func (q *Queries) GetFilesNeedingRescanByPackageId(ctx context.Context, packageId int64) ([]RescanFileRow, error) {
+	query := fmt.Sprintf(`SELECT id, uuid, s3_bucket, s3_key, size
+		FROM "%d".files
+		WHERE package_id = $1
+		AND object_type = $2
+		AND (scan_status IS NULL OR scan_status IN ('pending', 'failed'))`, q.OrgId)
+	rows, err := q.db.QueryContext(ctx, query, packageId, objectType.Source.String())
+	if err != nil {
+		return nil, fmt.Errorf("error getting files needing rescan: %w", err)
+	}
+	defer q.closeRows(rows)
+
+	var out []RescanFileRow
+	for rows.Next() {
+		var r RescanFileRow
+		if err := rows.Scan(&r.ID, &r.UUID, &r.S3Bucket, &r.S3Key, &r.Size); err != nil {
+			return nil, fmt.Errorf("error scanning rescan file row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error on rescan file rows iteration: %w", err)
+	}
+	return out, nil
+}
+
 func (q *Queries) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]File, error) {
 	if len(packageNodeIds) == 0 {
 		return map[string][]File{}, nil
@@ -457,5 +500,7 @@ type SQLStore interface {
 	// GetSourceFilesByPackageId returns Files that have the object type "source" for the given package.
 	GetSourceFilesByPackageId(ctx context.Context, packageId int64) ([]File, error)
 	GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []string) (map[string][]File, error)
+	// GetFilesNeedingRescanByPackageId returns files in the package whose scan_status indicates no successful terminal verdict (NULL, 'pending', or 'failed').
+	GetFilesNeedingRescanByPackageId(ctx context.Context, packageId int64) ([]RescanFileRow, error)
 	logging.Logger
 }

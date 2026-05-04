@@ -3,15 +3,19 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/packages-service/api/store/restore"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
@@ -120,7 +124,7 @@ func TestRestoreName(t *testing.T) {
 		db.ExecSQLFile("restore-package-name-test.sql")
 		sqlFactory := store.NewPostgresStoreFactory(db.DB)
 		ctx := context.Background()
-		messageHandler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil))
+		messageHandler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil, nil))
 		restoreInfo := models.RestorePackageInfo{
 			Id:     d.id,
 			NodeId: d.nodeId,
@@ -166,7 +170,7 @@ func TestRestoreName_ConflictWithDeletedFile(t *testing.T) {
 
 	sqlFactory := store.NewPostgresStoreFactory(db.DB)
 	ctx := context.Background()
-	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil))
+	handler := NewMessageHandler(events.SQSMessage{}, NewBaseStore(sqlFactory, nil, nil, nil, nil))
 	originalName := "root-dir"
 	restoreInfo1 := models.RestorePackageInfo{
 		Id:     5,
@@ -285,7 +289,9 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			sqlFactory := store.NewPostgresStoreFactory(subDB.DB)
 			dyStore := store.NewDynamoDBStore(dyClient, deleteRecordTableName)
 			objectStore := store.NewS3Store(s3Client)
-			handler := NewMessageHandler(events.SQSMessage{MessageId: uuid.NewString(), Body: "{}"}, NewBaseStore(sqlFactory, dyStore, objectStore, nil))
+			fakeSNS := &fakeSNSPublisher{}
+			scanTriggerStore := restore.NewSNSScanTriggerStore(fakeSNS, "arn:aws:sns:us-east-1:000000000000:test-file-finalized")
+			handler := NewMessageHandler(events.SQSMessage{MessageId: uuid.NewString(), Body: "{}"}, NewBaseStore(sqlFactory, dyStore, objectStore, nil, scanTriggerStore))
 			restoreInfo := models.RestorePackageInfo{
 				Id:     tt.sourcePackage.Package.Id,
 				NodeId: tt.sourcePackage.Package.NodeId,
@@ -334,9 +340,60 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			// All delete records have been removed
 			assert.Zero(t, scanOut.ScannedCount)
 			assert.Empty(t, scanOut.Items)
+
+			// Files default to scan_status='pending' from the migration,
+			// so each restored file should have produced one FileFinalized
+			// rescan event on the fake SNS topic.
+			publishedFiles := fakeSNS.publishedFileEvents(t)
+			require.Len(t, publishedFiles, len(tt.sourcePackage.Files))
+			gotFileIDs := make(map[int64]struct{}, len(publishedFiles))
+			for _, evt := range publishedFiles {
+				assert.Equal(t, "FileFinalized", evt.EventType)
+				assert.Equal(t, orgId, evt.OrganizationID)
+				assert.NotEmpty(t, evt.S3Bucket)
+				assert.NotEmpty(t, evt.S3Key)
+				gotFileIDs[evt.FileID] = struct{}{}
+			}
+			for _, f := range tt.sourcePackage.Files {
+				expectedID := int64(f.IntId(t))
+				_, ok := gotFileIDs[expectedID]
+				assert.True(t, ok, "expected published rescan event for fileId %d", expectedID)
+			}
 		})
 	}
 
+}
+
+// fakeSNSPublisher captures PublishBatch entries for assertion.
+type fakeSNSPublisher struct {
+	entries []snstypes.PublishBatchRequestEntry
+}
+
+func (f *fakeSNSPublisher) PublishBatch(_ context.Context, in *sns.PublishBatchInput, _ ...func(*sns.Options)) (*sns.PublishBatchOutput, error) {
+	f.entries = append(f.entries, in.PublishBatchRequestEntries...)
+	return &sns.PublishBatchOutput{}, nil
+}
+
+// publishedFileEvents decodes captured entry bodies into the projection
+// the test asserts on. Mirrors the field set scan-service reads.
+func (f *fakeSNSPublisher) publishedFileEvents(t require.TestingT) []capturedFileEvent {
+	out := make([]capturedFileEvent, 0, len(f.entries))
+	for _, e := range f.entries {
+		var evt capturedFileEvent
+		require.NoError(t, json.Unmarshal([]byte(aws.ToString(e.Message)), &evt))
+		out = append(out, evt)
+	}
+	return out
+}
+
+type capturedFileEvent struct {
+	EventType      string `json:"eventType"`
+	FileID         int64  `json:"fileId"`
+	FileUUID       string `json:"fileUUID"`
+	S3Bucket       string `json:"s3Bucket"`
+	S3Key          string `json:"s3Key"`
+	Size           int64  `json:"size"`
+	OrganizationID int    `json:"organizationId"`
 }
 
 type TestSourcePackage struct {
