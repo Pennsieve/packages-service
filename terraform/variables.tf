@@ -48,7 +48,7 @@ locals {
     aws_region       = data.aws_region.current_region.name
     environment_name = var.environment_name
   }
-  cors_allowed_origins = (var.environment_name == "prod" ? ["https://discover.pennsieve.io", "https://app.pennsieve.io"]
+  cors_allowed_origins = (var.environment_name == "prod" ? ["https://discover.pennsieve.io", "https://app.pennsieve.io", "https://sparc.science", "https://staging.sparc.science"]
     : ["http://localhost:3000", "https://discover.pennsieve.net", "https://app.pennsieve.net"])
   external_bucket_roles = {
     // NIH account SPARC publish bucket to role
