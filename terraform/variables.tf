@@ -49,7 +49,7 @@ locals {
     environment_name = var.environment_name
   }
   cors_allowed_origins = (var.environment_name == "prod" ? ["https://discover.pennsieve.io", "https://app.pennsieve.io"]
-    : ["http://localhost:3000", "https://discover.pennsieve.net", "https://app.pennsieve.net"])
+    : ["http://localhost:3000", "https://discover.pennsieve.net", "https://app.pennsieve.net", "https://staging.sparc.science"])
   external_bucket_roles = {
     // NIH account SPARC publish bucket to role
     (data.terraform_remote_state.platform_infrastructure.outputs.sparc_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.sparc_bucket_role_arn
