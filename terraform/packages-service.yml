@@ -115,7 +115,7 @@ paths:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listFormats
       security:
-        - token_dataset_auth: [ ]
+        - token_auth: [ ]
       tags:
         - Packages
       responses:
@@ -337,6 +337,18 @@ components:
       in: "header"
       x-amazon-apigateway-authorizer:
         identitySource: "$request.header.Authorization,$request.querystring.dataset_id"
+        authorizerUri: ${authorize_lambda_invoke_uri}
+        authorizerPayloadFormatVersion: "2.0"
+        authorizerResultTtlInSeconds: 300
+        type: "request"
+        enableSimpleResponses: true
+        authorizerCredentials: ${gateway_authorizer_role}
+    token_auth:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authorizer:
+        identitySource: "$request.header.Authorization"
         authorizerUri: ${authorize_lambda_invoke_uri}
         authorizerPayloadFormatVersion: "2.0"
         authorizerResultTtlInSeconds: 300
