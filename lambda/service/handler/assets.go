@@ -186,6 +186,9 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 	return h.buildResponse(resp, http.StatusCreated)
 }
 
+// handleList returns viewer assets for a dataset, in one of two modes:
+//   - if package_id is supplied: assets linked to that package (package-scoped)
+//   - if package_id is absent:   assets with no package links (dataset-scoped)
 func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	if !authorizer.HasRole(*h.claims, permissions.ViewFiles) {
 		return h.logAndBuildError("unauthorized", http.StatusUnauthorized), nil
@@ -195,45 +198,52 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	datasetNodeID := h.queryParams["dataset_id"]
 	packageNodeID := h.queryParams["package_id"]
 
-	if packageNodeID == "" {
-		return h.logAndBuildError("package_id is required", http.StatusBadRequest), nil
-	}
-
 	datasetIntID, err := h.resolveDatasetID(ctx, orgID, datasetNodeID)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset: %v", err), http.StatusBadRequest), nil
 	}
 
-	packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to resolve package: %v", err), http.StatusBadRequest), nil
+	if packageNodeID != "" {
+		packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
+		if err != nil {
+			return h.logAndBuildError(fmt.Sprintf("failed to resolve package: %v", err), http.StatusBadRequest), nil
+		}
+
+		query := fmt.Sprintf(`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
+			FROM "%d".%s va
+			JOIN "%d".%s vap ON va.id = vap.viewer_asset_id
+			WHERE vap.package_id = $1
+			ORDER BY va.created_at DESC
+		`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
+
+		return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, packageIntID)
 	}
 
 	query := fmt.Sprintf(`
 		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
 		FROM "%d".%s va
-		JOIN "%d".%s vap ON va.id = vap.viewer_asset_id
-		WHERE vap.package_id = $1
+		WHERE va.dataset_id = $1
+		  AND NOT EXISTS (
+		    SELECT 1 FROM "%d".%s vap WHERE vap.viewer_asset_id = va.id
+		  )
 		ORDER BY va.created_at DESC
 	`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
 
-	rows, err := PennsieveDB.QueryContext(ctx, query, packageIntID)
+	return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, datasetIntID)
+}
+
+// runListQuery executes a viewer-assets list query, builds responses with per-asset
+// CloudFront URLs and signed-policy cookies, and serializes the result. Shared by
+// handleList (package-scoped) and handleListByDataset (dataset-scoped).
+func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIntID int64, datasetNodeID, query string, arg interface{}) (*events.APIGatewayV2HTTPResponse, error) {
+	rows, err := PennsieveDB.QueryContext(ctx, query, arg)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to query assets: %v", err), http.StatusInternalServerError), nil
 	}
 	defer rows.Close()
 
-	// Build asset URL base: https://{domain}{pathPrefix}/O{orgID}/D{datasetID}/
-	var assetURLBase string
-	if cloudfrontDistributionDomain != "" {
-		cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-		pathPrefix, _ := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
-		if pathPrefix != "" {
-			assetURLBase = fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
-		} else {
-			assetURLBase = fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
-		}
-	}
+	assetURLBase := h.buildAssetURLBase(ctx, orgID, datasetIntID)
 
 	var assets []viewerAssetResponse
 	for rows.Next() {
@@ -266,31 +276,9 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
-
-	// Load CloudFront signing keys from Secrets Manager if not yet cached
-	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey == nil {
-		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
-			cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-			if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-				h.logger.WithError(err).Warn("failed to load CloudFront signing keys")
-			}
-		}
-	}
-
-	// Generate CloudFront signed policy if signing keys are available
-	var cookies []string
-	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
-		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
-		cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-		signedURL, expiresAt, err := cfHandler.generateCloudFrontSignedURLWithPolicy(s3Prefix, "")
-		if err == nil {
-			components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
-			if err == nil {
-				resp.CloudFront = components
-				cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
-				cookies = components.CloudFrontCookies(cookieDomain)
-			}
-		}
+	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID)
+	if components != nil {
+		resp.CloudFront = components
 	}
 
 	apiResp, err := h.buildResponse(resp, http.StatusOK)
@@ -301,6 +289,53 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 		apiResp.Cookies = cookies
 	}
 	return apiResp, nil
+}
+
+// buildAssetURLBase returns the CloudFront URL prefix for a dataset's assets
+// (e.g. "https://cdn/.../O{org}/D{dataset}/"), or "" when CloudFront is not configured.
+func (h *ViewerAssetsHandler) buildAssetURLBase(ctx context.Context, orgID, datasetIntID int64) string {
+	if cloudfrontDistributionDomain == "" {
+		return ""
+	}
+	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+	pathPrefix, _ := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
+	if pathPrefix != "" {
+		return fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
+	}
+	return fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
+}
+
+// signDatasetCloudFront generates CloudFront signing components and cookies covering
+// every asset under O{org}/D{dataset}/. Returns (nil, nil) if signing is not configured
+// or fails — callers treat that as "no signing", not an error.
+func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, datasetIntID int64) (*CloudFrontURLComponents, []string) {
+	if cloudfrontDistributionDomain == "" {
+		return nil, nil
+	}
+	if cloudfrontPrivateKey == nil {
+		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
+			cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+			if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
+				h.logger.WithError(err).Warn("failed to load CloudFront signing keys")
+			}
+		}
+	}
+	if cloudfrontPrivateKey == nil {
+		return nil, nil
+	}
+
+	s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
+	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
+	signedURL, expiresAt, err := cfHandler.generateCloudFrontSignedURLWithPolicy(s3Prefix, "")
+	if err != nil {
+		return nil, nil
+	}
+	components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
+	if err != nil {
+		return nil, nil
+	}
+	cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
+	return components, components.CloudFrontCookies(cookieDomain)
 }
 
 func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) (*events.APIGatewayV2HTTPResponse, error) {

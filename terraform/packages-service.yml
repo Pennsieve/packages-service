@@ -132,14 +132,20 @@ paths:
 
   /discover/assets:
     get:
-      summary: List viewer assets for a published package
+      summary: List viewer assets for a published package or dataset
       description: |
-        Unauthenticated endpoint that returns viewer assets linked to a published
-        package along with a CloudFront signed policy for accessing the asset files.
-        Validates that the package is published via the Discover database.
-        Each asset includes an `asset_url`. To access files, append the relative
-        path and signing params:
+        Unauthenticated endpoint that returns viewer assets for a published
+        package or a published dataset, along with a CloudFront signed policy
+        for accessing the asset files. Each asset includes an `asset_url`.
+        To access files, append the relative path and signing params:
         `{asset_url}{path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
+
+        Caller must supply **exactly one** of `package_id` or `dataset_id`.
+        Note the asymmetry between the two: the package side accepts a *node ID*
+        because `discover.public_file_versions` stores `source_package_id` as a
+        node ID, while the dataset side accepts the *published-dataset integer
+        PK* because `discover.public_datasets` does not record the source
+        dataset node ID.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: discoverListViewerAssets
@@ -150,8 +156,21 @@ paths:
           name: package_id
           schema:
             type: string
-          required: true
-          description: source package node id (e.g. `N:package:uuid`)
+          required: false
+          description: |
+            Source package node id (e.g. `N:package:uuid`). Returns viewer assets
+            linked to that package. Mutually exclusive with `dataset_id`.
+        - in: query
+          name: dataset_id
+          schema:
+            type: integer
+            format: int64
+          required: false
+          description: |
+            Published-dataset integer PK (i.e. `discover.public_datasets.id`,
+            the same numeric ID used in `https://discover.pennsieve.io/datasets/{id}`
+            URLs). Returns dataset-scoped viewer assets (those with no package
+            links). Mutually exclusive with `package_id`.
       responses:
         '200':
           description: List of viewer assets with CloudFront access
@@ -206,12 +225,18 @@ paths:
         '5XX':
           $ref: '#/components/responses/Error'
     get:
-      summary: List viewer assets for a package
+      summary: List viewer assets for a dataset or package
       description: |
-        Returns viewer assets linked to a package along with a CloudFront
-        signed policy for accessing the assets. Each asset includes an `asset_url`.
+        Returns viewer assets for a dataset, along with a CloudFront signed
+        policy for accessing the asset files. Each asset includes an `asset_url`.
         To access files, append the relative path and signing params:
         `{asset_url}{path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
+
+        Operates in one of two modes depending on `package_id`:
+          - **package_id supplied** — returns assets linked to that package
+            (package-scoped assets).
+          - **package_id omitted** — returns assets in the dataset that have
+            no package links (dataset-scoped assets).
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listViewerAssets
@@ -230,8 +255,11 @@ paths:
           name: package_id
           schema:
             type: string
-          required: true
-          description: package node id
+          required: false
+          description: |
+            Optional package node id. When supplied, returns assets linked to
+            that package. When omitted, returns dataset-scoped assets (those
+            with no package links).
       responses:
         '200':
           description: List of viewer assets with CloudFront access
