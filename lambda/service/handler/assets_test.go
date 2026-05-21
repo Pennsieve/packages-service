@@ -117,11 +117,10 @@ func TestCreateViewerAsset_MissingFields(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
-func TestListViewerAssets_RequiresPackageID(t *testing.T) {
+func TestListViewerAssets_RequiresDatasetID(t *testing.T) {
 	setupAssetsTestDB(t)
 
-	req := newTestRequest("GET", "/assets", "list-no-pkg",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
+	req := newTestRequest("GET", "/assets", "list-no-ds", nil, "")
 
 	resp, err := NewHandler(req, assetsViewerClaims()).WithDefaultService().handle(context.Background())
 	require.NoError(t, err)
@@ -246,3 +245,131 @@ func TestViewerAssetsFullLifecycle(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
+
+// TestListViewerAssets_NoPackageID_ReturnsDatasetScoped verifies that GET /assets
+// with only dataset_id (no package_id) returns assets with no rows in
+// viewer_asset_packages.
+func TestListViewerAssets_NoPackageID_ReturnsDatasetScoped(t *testing.T) {
+	db := setupAssetsTestDB(t)
+	createTestPackages(t, db, 2, 1)
+
+	// Asset A: linked to a package
+	var pkgScopedID string
+	err := db.DB.QueryRow(`
+		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		VALUES (1, 'pkg-scoped', 'ome-zarr', '{}', 'test-storage-bucket', 101) RETURNING id`).Scan(&pkgScopedID)
+	require.NoError(t, err)
+	_, err = db.DB.Exec(`INSERT INTO "2".viewer_asset_packages (viewer_asset_id, package_id) VALUES ($1, 5001)`, pkgScopedID)
+	require.NoError(t, err)
+
+	// Asset B: no package links — dataset-scoped
+	var datasetScopedID string
+	err = db.DB.QueryRow(`
+		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		VALUES (1, 'dataset-scoped', 'parquet-umap-viewer', '{}', 'test-storage-bucket', 101) RETURNING id`).Scan(&datasetScopedID)
+	require.NoError(t, err)
+
+	req := newTestRequest("GET", "/assets", "list-dataset-scoped",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
+
+	resp, err := NewHandler(req, assetsViewerClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result listViewerAssetsResponse
+	require.NoError(t, json.Unmarshal([]byte(resp.Body), &result))
+	require.Len(t, result.Assets, 1)
+	assert.Equal(t, datasetScopedID, result.Assets[0].ID)
+	assert.Equal(t, "dataset-scoped", result.Assets[0].Name)
+	assert.Empty(t, result.Assets[0].PackageIDs)
+}
+
+// TestPatchPackageLinks_RemoveAll_BecomesDatasetScoped verifies that an asset
+// can transition from package-scoped to dataset-scoped via PATCH with an empty
+// package_ids array, and that subsequent list calls reflect the change.
+func TestPatchPackageLinks_RemoveAll_BecomesDatasetScoped(t *testing.T) {
+	db := setupAssetsTestDB(t)
+	pkgNodeIDs := createTestPackages(t, db, 2, 1)
+
+	var assetID string
+	err := db.DB.QueryRow(`
+		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		VALUES (1, 'transition-test', 'ome-zarr', '{}', 'test-storage-bucket', 101) RETURNING id`).Scan(&assetID)
+	require.NoError(t, err)
+	_, err = db.DB.Exec(`INSERT INTO "2".viewer_asset_packages (viewer_asset_id, package_id) VALUES ($1, 5001)`, assetID)
+	require.NoError(t, err)
+
+	// PATCH to empty package_ids
+	patchBody, _ := json.Marshal(updateViewerAssetRequest{PackageIDs: &[]string{}})
+	patchReq := newTestRequest("PATCH", "/assets/"+assetID, "patch-remove-all",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID}, string(patchBody))
+
+	patchResp, err := NewHandler(patchReq, assetsEditorClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, patchResp.StatusCode)
+
+	var updated viewerAssetResponse
+	require.NoError(t, json.Unmarshal([]byte(patchResp.Body), &updated))
+	assert.Empty(t, updated.PackageIDs)
+
+	// Verify the asset now appears in dataset-scoped list
+	dsReq := newTestRequest("GET", "/assets", "list-ds-after",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
+	dsResp, err := NewHandler(dsReq, assetsViewerClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, dsResp.StatusCode)
+
+	var dsResult listViewerAssetsResponse
+	require.NoError(t, json.Unmarshal([]byte(dsResp.Body), &dsResult))
+	require.Len(t, dsResult.Assets, 1)
+	assert.Equal(t, assetID, dsResult.Assets[0].ID)
+
+	// And no longer appears under the original package
+	pkgReq := newTestRequest("GET", "/assets", "list-by-pkg-after",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID, "package_id": pkgNodeIDs[0]}, "")
+	pkgResp, err := NewHandler(pkgReq, assetsViewerClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, pkgResp.StatusCode)
+
+	var pkgResult listViewerAssetsResponse
+	require.NoError(t, json.Unmarshal([]byte(pkgResp.Body), &pkgResult))
+	assert.Empty(t, pkgResult.Assets)
+}
+
+// TestPatchPackageLinks_AddToEmpty_BecomesPackageScoped verifies the reverse
+// transition: a dataset-scoped asset becomes package-scoped when PATCHed with
+// non-empty package_ids.
+func TestPatchPackageLinks_AddToEmpty_BecomesPackageScoped(t *testing.T) {
+	db := setupAssetsTestDB(t)
+	pkgNodeIDs := createTestPackages(t, db, 2, 1)
+
+	var assetID string
+	err := db.DB.QueryRow(`
+		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		VALUES (1, 'add-links', 'ome-zarr', '{}', 'test-storage-bucket', 101) RETURNING id`).Scan(&assetID)
+	require.NoError(t, err)
+
+	patchBody, _ := json.Marshal(updateViewerAssetRequest{PackageIDs: &[]string{pkgNodeIDs[0]}})
+	patchReq := newTestRequest("PATCH", "/assets/"+assetID, "patch-add-links",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID}, string(patchBody))
+
+	patchResp, err := NewHandler(patchReq, assetsEditorClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, patchResp.StatusCode)
+
+	var updated viewerAssetResponse
+	require.NoError(t, json.Unmarshal([]byte(patchResp.Body), &updated))
+	assert.Equal(t, []string{pkgNodeIDs[0]}, updated.PackageIDs)
+
+	// Dataset-scoped list should no longer include it
+	dsReq := newTestRequest("GET", "/assets", "list-ds-empty",
+		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
+	dsResp, err := NewHandler(dsReq, assetsViewerClaims()).WithDefaultService().handle(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, dsResp.StatusCode)
+
+	var dsResult listViewerAssetsResponse
+	require.NoError(t, json.Unmarshal([]byte(dsResp.Body), &dsResult))
+	assert.Empty(t, dsResult.Assets)
+}
+

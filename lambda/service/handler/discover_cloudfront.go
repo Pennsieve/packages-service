@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,38 +31,72 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleOptions(ctx context.Context) 
 	}, nil
 }
 
-// handleListAssets lists viewer assets for a published package (unauthenticated).
+// handleListAssets lists viewer assets for a published package or dataset (unauthenticated).
+// Accepts exactly one of:
+//   - package_id: the source package node ID (returns assets linked to that package)
+//   - dataset_id: the published-dataset PK from discover.public_datasets.id (returns
+//     dataset-scoped assets — those with no package links)
 func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	packageNodeID := h.queryParams["package_id"]
-	if packageNodeID == "" {
-		return h.logAndBuildError("missing required 'package_id' query parameter", http.StatusBadRequest), nil
+	publishedDatasetIDStr := h.queryParams["dataset_id"]
+
+	if (packageNodeID == "") == (publishedDatasetIDStr == "") {
+		return h.logAndBuildError("exactly one of 'package_id' or 'dataset_id' is required", http.StatusBadRequest), nil
 	}
 
-	h.logger.WithField("packageId", packageNodeID).Info("handling GET request for discover viewer assets")
+	var (
+		orgID         int64
+		datasetIntID  int64
+		packageIntID  int64
+		datasetNodeID string
+		query         string
+		queryArg      interface{}
+		err           error
+	)
 
-	// Validate that the package is published and resolve IDs
-	orgID, datasetIntID, packageIntID, err := h.resolveDiscoverPackage(ctx, packageNodeID)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to resolve published package: %v", err), http.StatusNotFound), nil
+	if packageNodeID != "" {
+		h.logger.WithField("packageId", packageNodeID).Info("handling GET request for discover viewer assets")
+		orgID, datasetIntID, packageIntID, err = h.resolveDiscoverPackage(ctx, packageNodeID)
+		if err != nil {
+			return h.logAndBuildError(fmt.Sprintf("failed to resolve published package: %v", err), http.StatusNotFound), nil
+		}
+		query = fmt.Sprintf(`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
+			FROM "%d".viewer_assets va
+			JOIN "%d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
+			WHERE vap.package_id = $1
+			ORDER BY va.created_at DESC
+		`, orgID, orgID)
+		queryArg = packageIntID
+	} else {
+		publishedDatasetID, parseErr := strconv.ParseInt(publishedDatasetIDStr, 10, 64)
+		if parseErr != nil {
+			return h.logAndBuildError("'dataset_id' must be a positive integer (the published-dataset ID)", http.StatusBadRequest), nil
+		}
+		h.logger.WithField("publishedDatasetId", publishedDatasetID).Info("handling GET request for discover viewer assets by dataset")
+		orgID, datasetIntID, err = h.resolveDiscoverDataset(ctx, publishedDatasetID)
+		if err != nil {
+			return h.logAndBuildError(fmt.Sprintf("failed to resolve published dataset: %v", err), http.StatusNotFound), nil
+		}
+		query = fmt.Sprintf(`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
+			FROM "%d".viewer_assets va
+			WHERE va.dataset_id = $1
+			  AND NOT EXISTS (
+			    SELECT 1 FROM "%d".viewer_asset_packages vap WHERE vap.viewer_asset_id = va.id
+			  )
+			ORDER BY va.created_at DESC
+		`, orgID, orgID)
+		queryArg = datasetIntID
 	}
 
 	// Resolve dataset node ID for the response
-	var datasetNodeID string
 	dsQuery := fmt.Sprintf(`SELECT node_id FROM "%d".datasets WHERE id = $1`, orgID)
 	if err := PennsieveDB.QueryRowContext(ctx, dsQuery, datasetIntID).Scan(&datasetNodeID); err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset node ID: %v", err), http.StatusInternalServerError), nil
 	}
 
-	// Query viewer assets linked to this package
-	query := fmt.Sprintf(`
-		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-		FROM "%d".viewer_assets va
-		JOIN "%d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
-		WHERE vap.package_id = $1
-		ORDER BY va.created_at DESC
-	`, orgID, orgID)
-
-	rows, err := PennsieveDB.QueryContext(ctx, query, packageIntID)
+	rows, err := PennsieveDB.QueryContext(ctx, query, queryArg)
 	if err != nil {
 		return h.logAndBuildError(fmt.Sprintf("failed to query assets: %v", err), http.StatusInternalServerError), nil
 	}
@@ -192,6 +227,28 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverPackage(ctx context.
 	}
 
 	return orgID, datasetIntID, packageIntID, nil
+}
+
+// resolveDiscoverDataset validates that a dataset is published via the Discover DB
+// and returns the source org ID and source dataset integer ID.
+// publishedDatasetID is discover.public_datasets.id (the published-dataset PK).
+func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverDataset(ctx context.Context, publishedDatasetID int64) (orgID, datasetIntID int64, err error) {
+	if DiscoverDB == nil {
+		return 0, 0, fmt.Errorf("discover database not configured")
+	}
+
+	discoverQuery := `
+		SELECT source_organization_id, source_dataset_id
+		FROM discover.public_datasets
+		WHERE id = $1
+	`
+	err = DiscoverDB.QueryRowContext(ctx, discoverQuery, publishedDatasetID).Scan(&orgID, &datasetIntID)
+	if err != nil {
+		h.logger.WithError(err).WithField("publishedDatasetId", publishedDatasetID).Error("failed to look up dataset in discover database")
+		return 0, 0, fmt.Errorf("published dataset not found")
+	}
+
+	return orgID, datasetIntID, nil
 }
 
 // generateDiscoverCloudFrontSignedURL generates a signed URL for a discover package.

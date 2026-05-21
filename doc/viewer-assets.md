@@ -14,7 +14,9 @@ Dataset
 ```
 
 - A **viewer asset** belongs to exactly one **dataset**.
-- A viewer asset can be linked to **one or more packages** (many-to-many via a junction table).
+- A viewer asset can be linked to **zero or more packages** (many-to-many via a junction table).
+  - An asset with **one or more** package links is *package-scoped*: it visualises data from those specific packages.
+  - An asset with **zero** package links is *dataset-scoped*: it represents data at the dataset level (e.g. a cohort-wide UMAP). Scope is derived from the current state of the junction table — there is no `scope` column — and an asset can move between scopes by editing its `package_ids` via PATCH.
 - Each viewer asset maps to a set of files stored under a single S3 prefix.
 
 ### Database Tables
@@ -178,10 +180,15 @@ Create a viewer asset and receive temporary upload credentials.
 
 #### GET /packages/assets
 
-List viewer assets linked to a package.
+List viewer assets for a dataset. Operates in two modes:
+
+- **`package_id` supplied** — returns assets linked to that package (*package-scoped*).
+- **`package_id` omitted** — returns assets in the dataset that have **no package links** (*dataset-scoped*).
+
+Settings:
 
 - **Permission**: `ViewFiles`
-- **Query params**: `dataset_id` (required), `package_id` (required)
+- **Query params**: `dataset_id` (required), `package_id` (optional)
 - **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
 
 #### PATCH /packages/assets/{asset_id}
@@ -204,11 +211,14 @@ Delete an asset record and queue its S3 objects for cleanup.
 
 #### GET /packages/discover/assets
 
-List viewer assets for a published package. No authentication required.
+List viewer assets for a published package or dataset. No authentication required.
 
-- **Query params**: `package_id` (required) — source package node ID
-- **Validation**: Checks the Discover database to confirm the package is published
+- **Query params**: exactly one of
+  - `package_id` — the **source package node ID** (e.g. `N:package:abc-123`). Returns assets linked to that package.
+  - `dataset_id` — the **published-dataset PK** as an integer, i.e. `discover.public_datasets.id` (the same numeric ID that appears in `https://discover.pennsieve.io/datasets/{id}` URLs). Returns dataset-scoped assets (those with no package links).
+- **Validation**: Checks the Discover database to confirm the package or dataset is published. Note the asymmetry: the package side accepts a *node ID* (because `discover.public_file_versions` stores `source_package_id` as a node ID), while the dataset side accepts the *published-dataset integer PK* (because `discover.public_datasets` does not store the source dataset node ID).
 - **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
+- **Errors**: 400 if neither or both query params are supplied, or if `dataset_id` is non-numeric. 404 if the package/dataset is not published.
 
 ## Accessing Viewer Assets from the Front-End
 
