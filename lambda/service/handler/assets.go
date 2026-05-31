@@ -52,22 +52,16 @@ type viewerAssetRow struct {
 }
 
 type createViewerAssetRequest struct {
-	Name          string           `json:"name"`
-	AssetType     string           `json:"asset_type"`
-	Properties    *json.RawMessage `json:"properties"`
-	PackageIDs    []string         `json:"package_ids"`
-	ChatSessionID *string          `json:"chat_session_id"`
+	Name       string           `json:"name"`
+	AssetType  string           `json:"asset_type"`
+	Properties *json.RawMessage `json:"properties"`
+	PackageIDs []string         `json:"package_ids"`
 }
 
 type updateViewerAssetRequest struct {
 	Status     *string          `json:"status"`
 	Properties *json.RawMessage `json:"properties"`
 	PackageIDs *[]string        `json:"package_ids"`
-	// ClearChatSession, when true, detaches the asset from its chat session
-	// (chat_session_id = NULL) — i.e. "promote" the figure out of the chat so
-	// it becomes a normal dataset asset (and/or a package-linked one via
-	// PackageIDs). dataset_id is unchanged, so the bytes never move.
-	ClearChatSession *bool `json:"clear_chat_session"`
 }
 
 type uploadCredentialsResponse struct {
@@ -99,11 +93,6 @@ type createViewerAssetResponseBody struct {
 
 type listViewerAssetsResponse struct {
 	Assets     []viewerAssetResponse    `json:"assets"`
-	CloudFront *CloudFrontURLComponents `json:"cloudfront,omitempty"`
-}
-
-type getViewerAssetResponse struct {
-	Asset      viewerAssetResponse      `json:"asset"`
 	CloudFront *CloudFrontURLComponents `json:"cloudfront,omitempty"`
 }
 
@@ -150,28 +139,16 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 		props = *req.Properties
 	}
 
-	// chat_session_id is optional; when set the figure is chat-scoped (excluded
-	// from the dataset listing) while its bytes still live under D{dataset}/.
-	cols := []string{"dataset_id", "name", "asset_type", "properties", "s3_bucket", "created_by"}
-	vals := []interface{}{datasetIntID, req.Name, req.AssetType, props, storageBucket, h.claims.UserClaim.Id}
-	if req.ChatSessionID != nil && *req.ChatSessionID != "" {
-		cols = append(cols, "chat_session_id")
-		vals = append(vals, *req.ChatSessionID)
-	}
-	placeholders := make([]string, len(vals))
-	for i := range vals {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-	}
-
 	var asset viewerAssetRow
 	insertQuery := fmt.Sprintf(`
-		INSERT INTO "%d".%s (%s)
-		VALUES (%s)
+		INSERT INTO "%d".%s (dataset_id, name, asset_type, properties, s3_bucket, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, dataset_id, name, asset_type, properties, s3_bucket, status, created_by, created_at
-	`, orgID, viewerAssetsTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+	`, orgID, viewerAssetsTable)
 
-	err = PennsieveDB.QueryRowContext(ctx, insertQuery, vals...).Scan(
-		&asset.ID, &asset.DatasetID, &asset.Name, &asset.AssetType,
+	err = PennsieveDB.QueryRowContext(ctx, insertQuery,
+		datasetIntID, req.Name, req.AssetType, props, storageBucket, h.claims.UserClaim.Id,
+	).Scan(&asset.ID, &asset.DatasetID, &asset.Name, &asset.AssetType,
 		&asset.Properties, &asset.S3Bucket, &asset.Status, &asset.CreatedBy, &asset.CreatedAt)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to insert viewer asset")
@@ -247,7 +224,6 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
 		FROM "%d".%s va
 		WHERE va.dataset_id = $1
-		  AND va.chat_session_id IS NULL
 		  AND NOT EXISTS (
 		    SELECT 1 FROM "%d".%s vap WHERE vap.viewer_asset_id = va.id
 		  )
@@ -255,77 +231,6 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
 
 	return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, datasetIntID)
-}
-
-// handleGet resolves a single viewer asset by ID and returns it with a per-asset
-// CloudFront URL plus dataset-scoped signing cookies. Used by the frontend to
-// render inline chat figures (which are excluded from the dataset listing): the
-// caller has the asset ID (from the chat content block) and the dataset it lives
-// in. Authorization is dataset RBAC — the dataset cookie grants read to every
-// asset under O{org}/D{dataset}/, so no chat-session-specific check is needed.
-func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*events.APIGatewayV2HTTPResponse, error) {
-	if !authorizer.HasRole(*h.claims, permissions.ViewFiles) {
-		return h.logAndBuildError("unauthorized", http.StatusUnauthorized), nil
-	}
-
-	orgID := h.claims.OrgClaim.IntId
-	datasetNodeID := h.queryParams["dataset_id"]
-
-	datasetIntID, err := h.resolveDatasetID(ctx, orgID, datasetNodeID)
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset: %v", err), http.StatusBadRequest), nil
-	}
-
-	// Scope the lookup to the claimed dataset: that pairing is the authorization
-	// boundary (the caller proved dataset access via the dataset_id claim).
-	var a viewerAssetRow
-	query := fmt.Sprintf(`
-		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, created_at
-		FROM "%d".%s WHERE id = $1 AND dataset_id = $2
-	`, orgID, viewerAssetsTable)
-	err = PennsieveDB.QueryRowContext(ctx, query, assetID, datasetIntID).Scan(
-		&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt)
-	if err == sql.ErrNoRows {
-		return h.logAndBuildError("asset not found", http.StatusNotFound), nil
-	}
-	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to fetch asset: %v", err), http.StatusInternalServerError), nil
-	}
-
-	pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, a.ID)
-
-	var assetURL string
-	if assetURLBase := h.buildAssetURLBase(ctx, orgID, datasetIntID); assetURLBase != "" {
-		assetURL = assetURLBase + a.ID + "/"
-	}
-
-	resp := getViewerAssetResponse{
-		Asset: viewerAssetResponse{
-			ID:         a.ID,
-			DatasetID:  datasetNodeID,
-			Name:       a.Name,
-			AssetType:  a.AssetType,
-			AssetURL:   assetURL,
-			Properties: &a.Properties,
-			Status:     a.Status,
-			PackageIDs: pkgIDs,
-			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
-		},
-	}
-
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID)
-	if components != nil {
-		resp.CloudFront = components
-	}
-
-	apiResp, err := h.buildResponse(resp, http.StatusOK)
-	if err != nil {
-		return nil, err
-	}
-	if len(cookies) > 0 {
-		apiResp.Cookies = cookies
-	}
-	return apiResp, nil
 }
 
 // runListQuery executes a viewer-assets list query, builds responses with per-asset
@@ -465,11 +370,6 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 		setClauses = append(setClauses, fmt.Sprintf("properties = $%d", argIdx))
 		args = append(args, *req.Properties)
 		argIdx++
-	}
-	// Promote out of chat: detach the chat session. dataset_id stays set, so
-	// viewer_assets_scope_check holds and the bytes never move.
-	if req.ClearChatSession != nil && *req.ClearChatSession {
-		setClauses = append(setClauses, "chat_session_id = NULL")
 	}
 
 	if len(setClauses) > 0 {

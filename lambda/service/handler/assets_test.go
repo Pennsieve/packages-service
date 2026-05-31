@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,7 +67,6 @@ func setupAssetsTestDB(t *testing.T) *store.TestDB {
 		PennsieveDB = originalDB
 		db.DB.Exec(`DELETE FROM "2".viewer_asset_packages`)
 		db.DB.Exec(`DELETE FROM "2".viewer_assets`)
-		db.DB.Exec(`DELETE FROM "2".chat_sessions`)
 		db.Truncate(2, "packages")
 		db.Truncate(2, "datasets")
 		db.Close()
@@ -76,20 +74,6 @@ func setupAssetsTestDB(t *testing.T) *store.TestDB {
 
 	return db
 }
-
-// createTestChatSession inserts a chat_sessions row so chat-scoped viewer
-// assets have a valid chat_session_id FK target. Returns the session UUID.
-func createTestChatSession(t *testing.T, db *store.TestDB, orgID, datasetID int) string {
-	t.Helper()
-	var id string
-	err := db.DB.QueryRow(fmt.Sprintf(`
-		INSERT INTO "%d".chat_sessions (user_id, dataset_id, compute_node_id)
-		VALUES (101, $1, 'test-compute-node') RETURNING id`, orgID), datasetID).Scan(&id)
-	require.NoError(t, err)
-	return id
-}
-
-func boolPtr(b bool) *bool { return &b }
 
 func createTestPackages(t *testing.T, db *store.TestDB, orgID int, datasetID int) []string {
 	t.Helper()
@@ -387,135 +371,5 @@ func TestPatchPackageLinks_AddToEmpty_BecomesPackageScoped(t *testing.T) {
 	var dsResult listViewerAssetsResponse
 	require.NoError(t, json.Unmarshal([]byte(dsResp.Body), &dsResult))
 	assert.Empty(t, dsResult.Assets)
-}
-
-// TestListViewerAssets_ExcludesChatScoped verifies a chat-scoped asset
-// (chat_session_id set) is excluded from the dataset-scoped listing, while a
-// plain dataset-scoped asset still appears.
-func TestListViewerAssets_ExcludesChatScoped(t *testing.T) {
-	db := setupAssetsTestDB(t)
-	sessionID := createTestChatSession(t, db, 2, 1)
-
-	// Chat-scoped asset
-	var chatAssetID string
-	err := db.DB.QueryRow(`
-		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by, chat_session_id)
-		VALUES (1, 'chat-figure', 'png', '{}', 'test-storage-bucket', 101, $1) RETURNING id`, sessionID).Scan(&chatAssetID)
-	require.NoError(t, err)
-
-	// Plain dataset-scoped asset
-	var dsAssetID string
-	err = db.DB.QueryRow(`
-		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by)
-		VALUES (1, 'dataset-figure', 'ome-zarr', '{}', 'test-storage-bucket', 101) RETURNING id`).Scan(&dsAssetID)
-	require.NoError(t, err)
-
-	req := newTestRequest("GET", "/assets", "list-excl-chat",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	resp, err := NewHandler(req, assetsViewerClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var result listViewerAssetsResponse
-	require.NoError(t, json.Unmarshal([]byte(resp.Body), &result))
-	require.Len(t, result.Assets, 1)
-	assert.Equal(t, dsAssetID, result.Assets[0].ID)
-}
-
-// TestGetViewerAsset_ByID verifies a single asset is resolvable by ID via
-// GET /assets/{id}, including a chat-scoped one that is hidden from the list.
-func TestGetViewerAsset_ByID(t *testing.T) {
-	db := setupAssetsTestDB(t)
-	sessionID := createTestChatSession(t, db, 2, 1)
-
-	var assetID string
-	err := db.DB.QueryRow(`
-		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by, chat_session_id)
-		VALUES (1, 'chat-figure', 'png', '{}', 'test-storage-bucket', 101, $1) RETURNING id`, sessionID).Scan(&assetID)
-	require.NoError(t, err)
-
-	req := newTestRequest("GET", "/assets/"+assetID, "get-by-id",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	resp, err := NewHandler(req, assetsViewerClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var result getViewerAssetResponse
-	require.NoError(t, json.Unmarshal([]byte(resp.Body), &result))
-	assert.Equal(t, assetID, result.Asset.ID)
-	assert.Equal(t, "chat-figure", result.Asset.Name)
-}
-
-// TestGetViewerAsset_NotFound verifies an unknown asset ID returns 404.
-func TestGetViewerAsset_NotFound(t *testing.T) {
-	setupAssetsTestDB(t)
-
-	req := newTestRequest("GET", "/assets/00000000-0000-0000-0000-000000000000", "get-missing",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	resp, err := NewHandler(req, assetsViewerClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-}
-
-// TestGetViewerAsset_Unauthorized verifies viewer-role is required.
-func TestGetViewerAsset_Unauthorized(t *testing.T) {
-	setupAssetsTestDB(t)
-
-	claims := &authorizer.Claims{
-		OrgClaim:     &organization.Claim{IntId: assetsTestOrgID},
-		UserClaim:    &user.Claim{Id: 101, NodeId: "N:user:test-101"},
-		DatasetClaim: &dataset.Claim{Role: role.None, NodeId: assetsTestDatasetNodeID, IntId: 1},
-	}
-	req := newTestRequest("GET", "/assets/some-uuid", "get-unauth",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	resp, err := NewHandler(req, claims).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-}
-
-// TestPatchClearChatSession_PromotesToDataset verifies that PATCH with
-// clear_chat_session=true detaches a chat figure so it becomes a normal
-// dataset-scoped asset (now visible in the dataset listing).
-func TestPatchClearChatSession_PromotesToDataset(t *testing.T) {
-	db := setupAssetsTestDB(t)
-	sessionID := createTestChatSession(t, db, 2, 1)
-
-	var assetID string
-	err := db.DB.QueryRow(`
-		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by, chat_session_id)
-		VALUES (1, 'promote-me', 'png', '{}', 'test-storage-bucket', 101, $1) RETURNING id`, sessionID).Scan(&assetID)
-	require.NoError(t, err)
-
-	// Initially excluded from the dataset listing.
-	listReq := newTestRequest("GET", "/assets", "list-before-promote",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	listResp, err := NewHandler(listReq, assetsViewerClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	var before listViewerAssetsResponse
-	require.NoError(t, json.Unmarshal([]byte(listResp.Body), &before))
-	assert.Empty(t, before.Assets)
-
-	// Promote: clear the chat session.
-	patchBody, _ := json.Marshal(updateViewerAssetRequest{ClearChatSession: boolPtr(true)})
-	patchReq := newTestRequest("PATCH", "/assets/"+assetID, "patch-promote",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, string(patchBody))
-	patchResp, err := NewHandler(patchReq, assetsEditorClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, patchResp.StatusCode)
-
-	// chat_session_id is now NULL in the DB.
-	var chatSessionID sql.NullString
-	require.NoError(t, db.DB.QueryRow(`SELECT chat_session_id FROM "2".viewer_assets WHERE id = $1`, assetID).Scan(&chatSessionID))
-	assert.False(t, chatSessionID.Valid)
-
-	// Now visible in the dataset listing.
-	listReq2 := newTestRequest("GET", "/assets", "list-after-promote",
-		map[string]string{"dataset_id": assetsTestDatasetNodeID}, "")
-	listResp2, err := NewHandler(listReq2, assetsViewerClaims()).WithDefaultService().handle(context.Background())
-	require.NoError(t, err)
-	var after listViewerAssetsResponse
-	require.NoError(t, json.Unmarshal([]byte(listResp2.Body), &after))
-	require.Len(t, after.Assets, 1)
-	assert.Equal(t, assetID, after.Assets[0].ID)
 }
 

@@ -236,9 +236,7 @@ paths:
           - **package_id supplied** — returns assets linked to that package
             (package-scoped assets).
           - **package_id omitted** — returns assets in the dataset that have
-            no package links and no chat session (dataset-scoped assets).
-            Chat-scoped figures are excluded; resolve them individually via
-            `GET /assets/{asset_id}`.
+            no package links (dataset-scoped assets).
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listViewerAssets
@@ -275,49 +273,6 @@ paths:
           $ref: '#/components/responses/Error'
 
   /assets/{asset_id}:
-    get:
-      summary: Get a single viewer asset by ID
-      description: |
-        Resolves one viewer asset by its UUID and returns it with a CloudFront
-        signed policy for accessing the asset's files (same `asset_url` +
-        `cloudfront` signing model as the list endpoint). Used to render assets
-        that are hidden from the dataset listing — notably chat-scoped figures.
-        Authorization is dataset RBAC: the asset must belong to the dataset in
-        the `dataset_id` claim.
-      x-amazon-apigateway-integration:
-        $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
-      operationId: getViewerAsset
-      security:
-        - token_dataset_auth: [ ]
-      tags:
-        - Viewer Assets
-      parameters:
-        - in: path
-          name: asset_id
-          schema:
-            type: string
-            format: uuid
-          required: true
-          description: viewer asset UUID
-        - in: query
-          name: dataset_id
-          schema:
-            type: string
-          required: true
-          description: dataset node id
-      responses:
-        '200':
-          description: Viewer asset with CloudFront access
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/getViewerAssetResponse'
-        '404':
-          description: Asset not found
-        '4XX':
-          $ref: '#/components/responses/Unauthorized'
-        '5XX':
-          $ref: '#/components/responses/Error'
     patch:
       summary: Update a viewer asset
       description: |
@@ -576,13 +531,6 @@ components:
           items:
             type: string
           description: Package node IDs to attach the asset to
-        chat_session_id:
-          type: string
-          format: uuid
-          description: |
-            Optional chat session UUID. When set, the asset is chat-scoped:
-            excluded from the dataset asset listing and cascade-deleted when the
-            chat session is deleted. Its bytes still live under the dataset prefix.
 
     createViewerAssetResponse:
       type: object
@@ -638,13 +586,6 @@ components:
           type: array
           items:
             type: string
-        clear_chat_session:
-          type: boolean
-          description: |
-            When true, detaches the asset from its chat session
-            (chat_session_id is cleared) — "promotes" the figure out of the chat
-            so it becomes a normal dataset asset. The dataset is unchanged, so
-            the underlying S3 bytes never move.
 
     uploadCredentials:
       type: object
@@ -672,14 +613,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/viewerAsset'
-        cloudfront:
-          $ref: '#/components/schemas/cloudfrontURLComponents'
-
-    getViewerAssetResponse:
-      type: object
-      properties:
-        asset:
-          $ref: '#/components/schemas/viewerAsset'
         cloudfront:
           $ref: '#/components/schemas/cloudfrontURLComponents'
 
