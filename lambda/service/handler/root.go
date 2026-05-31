@@ -41,6 +41,8 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 			assetID := strings.TrimPrefix(h.path, "/assets/")
 			assetsHandler := ViewerAssetsHandler{RequestHandler: *h}
 			switch h.method {
+			case http.MethodGet:
+				return assetsHandler.handleGet(ctx, assetID)
 			case http.MethodPatch:
 				return assetsHandler.handleUpdate(ctx, assetID)
 			case http.MethodDelete:
