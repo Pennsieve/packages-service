@@ -23,9 +23,9 @@ import (
 
 // Table and column constants
 const (
-	viewerAssetsTable         = "viewer_assets"
-	viewerAssetPackagesTable  = "viewer_asset_packages"
-	viewerAssetsS3Prefix      = "viewer-assets"
+	viewerAssetsTable        = "viewer_assets"
+	viewerAssetPackagesTable = "viewer_asset_packages"
+	viewerAssetsS3Prefix     = "viewer-assets"
 )
 
 // ViewerAssetS3Prefix returns the S3 key prefix for a viewer asset.
@@ -49,6 +49,10 @@ type viewerAssetRow struct {
 	Status     string          `json:"status"`
 	CreatedBy  *int64          `json:"-"`
 	CreatedAt  time.Time       `json:"created_at"`
+	// ChatSessionID is set only while the asset is chat-scoped (an inline chat
+	// figure). NULL once promoted (cleared via clear_chat_session) or for any
+	// plain dataset/package asset.
+	ChatSessionID sql.NullString `json:"-"`
 }
 
 type createViewerAssetRequest struct {
@@ -89,11 +93,15 @@ type viewerAssetResponse struct {
 	Properties *json.RawMessage `json:"properties"`
 	Status     string           `json:"status"`
 	PackageIDs []string         `json:"package_ids"`
-	CreatedAt  string           `json:"created_at"`
+	// ChatSessionID is present only while the asset is still a chat-scoped
+	// figure. The frontend uses its presence to distinguish a not-yet-promoted
+	// chat figure (offer "promote") from an already-promoted one (don't).
+	ChatSessionID string `json:"chat_session_id,omitempty"`
+	CreatedAt     string `json:"created_at"`
 }
 
 type createViewerAssetResponseBody struct {
-	Asset             viewerAssetResponse       `json:"asset"`
+	Asset             viewerAssetResponse        `json:"asset"`
 	UploadCredentials *uploadCredentialsResponse `json:"upload_credentials"`
 }
 
@@ -280,11 +288,11 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 	// boundary (the caller proved dataset access via the dataset_id claim).
 	var a viewerAssetRow
 	query := fmt.Sprintf(`
-		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, created_at
+		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, chat_session_id, created_at
 		FROM "%d".%s WHERE id = $1 AND dataset_id = $2
 	`, orgID, viewerAssetsTable)
 	err = PennsieveDB.QueryRowContext(ctx, query, assetID, datasetIntID).Scan(
-		&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt)
+		&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.ChatSessionID, &a.CreatedAt)
 	if err == sql.ErrNoRows {
 		return h.logAndBuildError("asset not found", http.StatusNotFound), nil
 	}
@@ -301,15 +309,16 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 
 	resp := getViewerAssetResponse{
 		Asset: viewerAssetResponse{
-			ID:         a.ID,
-			DatasetID:  datasetNodeID,
-			Name:       a.Name,
-			AssetType:  a.AssetType,
-			AssetURL:   assetURL,
-			Properties: &a.Properties,
-			Status:     a.Status,
-			PackageIDs: pkgIDs,
-			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
+			ID:            a.ID,
+			DatasetID:     datasetNodeID,
+			Name:          a.Name,
+			AssetType:     a.AssetType,
+			AssetURL:      assetURL,
+			Properties:    &a.Properties,
+			Status:        a.Status,
+			PackageIDs:    pkgIDs,
+			ChatSessionID: a.ChatSessionID.String,
+			CreatedAt:     a.CreatedAt.Format(time.RFC3339),
 		},
 	}
 
@@ -513,12 +522,12 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 	// Re-fetch for response
 	var asset viewerAssetRow
 	fetchQuery := fmt.Sprintf(`
-		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, created_at
+		SELECT id, dataset_id, name, asset_type, properties, s3_bucket, status, chat_session_id, created_at
 		FROM "%d".%s WHERE id = $1 AND dataset_id = $2
 	`, orgID, viewerAssetsTable)
 	err = PennsieveDB.QueryRowContext(ctx, fetchQuery, assetID, datasetIntID).Scan(
 		&asset.ID, &asset.DatasetID, &asset.Name, &asset.AssetType,
-		&asset.Properties, &asset.S3Bucket, &asset.Status, &asset.CreatedAt)
+		&asset.Properties, &asset.S3Bucket, &asset.Status, &asset.ChatSessionID, &asset.CreatedAt)
 	if err == sql.ErrNoRows {
 		return h.logAndBuildError("asset not found", http.StatusNotFound), nil
 	}
@@ -529,14 +538,15 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 	pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, asset.ID)
 
 	resp := viewerAssetResponse{
-		ID:         asset.ID,
-		DatasetID:  datasetNodeID,
-		Name:       asset.Name,
-		AssetType:  asset.AssetType,
-		Properties: &asset.Properties,
-		Status:     asset.Status,
-		PackageIDs: pkgIDs,
-		CreatedAt:  asset.CreatedAt.Format(time.RFC3339),
+		ID:            asset.ID,
+		DatasetID:     datasetNodeID,
+		Name:          asset.Name,
+		AssetType:     asset.AssetType,
+		Properties:    &asset.Properties,
+		Status:        asset.Status,
+		PackageIDs:    pkgIDs,
+		ChatSessionID: asset.ChatSessionID.String,
+		CreatedAt:     asset.CreatedAt.Format(time.RFC3339),
 	}
 
 	return h.buildResponse(resp, http.StatusOK)
