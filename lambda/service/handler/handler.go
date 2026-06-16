@@ -165,6 +165,9 @@ func buildResponseFromString(body string, status int) *events.APIGatewayV2HTTPRe
 	response := events.APIGatewayV2HTTPResponse{
 		Body:       body,
 		StatusCode: status,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
 	}
 	return &response
 }
