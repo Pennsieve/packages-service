@@ -43,6 +43,7 @@ resource "aws_apigatewayv2_stage" "packages_service_gateway_stage" {
     format = jsonencode({
       requestId               = "$context.requestId"
       sourceIp                = "$context.identity.sourceIp"
+      userAgent               = "$context.identity.userAgent"
       requestTime             = "$context.requestTime"
       protocol                = "$context.protocol"
       httpMethod              = "$context.httpMethod"
