@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.28.7
 	github.com/aws/aws-sdk-go-v2/service/cloudfront v1.44.0
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.37.0
+	github.com/google/uuid v1.3.0
 )
 
 require (
