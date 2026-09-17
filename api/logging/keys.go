@@ -32,6 +32,10 @@ const (
 	KeyAWSRequestID = "awsRequestId"
 	// KeySQSMessageID is the SQS message id (one queue hop).
 	KeySQSMessageID = "sqsMessageId"
+	// KeyTraceIDInherited records whether the trace id was adopted from an
+	// inbound header (true) or minted here (false). Useful for spotting callers
+	// that are not yet propagating a correlation id.
+	KeyTraceIDInherited = "traceIdInherited"
 
 	// Request shape.
 	KeyMethod      = "method"
@@ -78,6 +82,7 @@ const (
 	KeySecretName            = "secretName"
 	KeySecretVersionID       = "secretVersionId"
 	KeyRotationStep          = "rotationStep"
+	KeyCreatedAt             = "createdAt"
 
 	// Outcomes and diagnostics.
 	KeyError            = "error"

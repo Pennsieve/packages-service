@@ -348,7 +348,7 @@ func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Cont
 	cloudfrontKeyPair = &keyPair
 	h.logger.LogInfoWithFields(logging.Fields{
 		logging.KeyCloudFrontKeyID: keyPair.KeyID,
-		"createdAt":                keyPair.CreatedAt,
+		logging.KeyCreatedAt:       keyPair.CreatedAt,
 	}, "loaded CloudFront key pair")
 
 	// Decode base64 private key
@@ -376,7 +376,7 @@ func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Cont
 		logging.KeyCloudFrontKeyID:       keyPair.KeyID,
 		logging.KeyCloudFrontPublicKeyID: keyPair.PublicKeyID,
 		logging.KeyCloudFrontKeyGroupID:  keyPair.KeyGroupID,
-		"createdAt":                      keyPair.CreatedAt,
+		logging.KeyCreatedAt:             keyPair.CreatedAt,
 	}, "successfully loaded CloudFront private key")
 	return nil
 }

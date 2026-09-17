@@ -156,12 +156,12 @@ func NewHandlerWithContext(ctx context.Context, request *events.APIGatewayV2HTTP
 	requestHandler, inheritedTrace := newRequestHandler(ctx, request, claims)
 
 	requestHandler.logger.LogInfoWithFields(logging.Fields{
-		logging.KeyMethod:      requestHandler.method,
-		logging.KeyPath:        requestHandler.path,
-		logging.KeyQueryParams: requestHandler.queryParams,
-		logging.KeyRequestBody: requestHandler.body,
-		logging.KeyClaims:      requestHandler.claims,
-		"traceIdInherited":     inheritedTrace,
+		logging.KeyMethod:           requestHandler.method,
+		logging.KeyPath:             requestHandler.path,
+		logging.KeyQueryParams:      requestHandler.queryParams,
+		logging.KeyRequestBody:      requestHandler.body,
+		logging.KeyClaims:           requestHandler.claims,
+		logging.KeyTraceIDInherited: inheritedTrace,
 	}, "creating RequestHandler")
 
 	return requestHandler
@@ -184,9 +184,9 @@ func (h *RequestHandler) WithService(service service.PackagesService) *RequestHa
 }
 
 // logAndBuildError logs a static message and renders the client error body.
-// The trace id (not the per-hop API Gateway id) is what goes in the response,
-// since that is the id a caller can quote to find the whole operation in the
-// logs — including any hop this service made downstream.
+// The body carries both ids: the API Gateway request id (unchanged, so the
+// client-visible contract is preserved) and the trace id, which is the one a
+// caller can quote to find the whole operation in the logs.
 func (h *RequestHandler) logAndBuildError(message string, status int) *events.APIGatewayV2HTTPResponse {
 	return h.logAndBuildErrorWithFields(message, status, nil)
 }
@@ -265,10 +265,10 @@ func NewDiscoverHandlerWithContext(ctx context.Context, request *events.APIGatew
 	requestHandler, inheritedTrace := newRequestHandler(ctx, request, nil)
 
 	requestHandler.logger.LogInfoWithFields(logging.Fields{
-		logging.KeyMethod:      requestHandler.method,
-		logging.KeyPath:        requestHandler.path,
-		logging.KeyQueryParams: requestHandler.queryParams,
-		"traceIdInherited":     inheritedTrace,
+		logging.KeyMethod:           requestHandler.method,
+		logging.KeyPath:             requestHandler.path,
+		logging.KeyQueryParams:      requestHandler.queryParams,
+		logging.KeyTraceIDInherited: inheritedTrace,
 	}, "creating discover RequestHandler (unauthenticated)")
 
 	return requestHandler
