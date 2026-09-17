@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/regions"
 	"net/http"
 	"os"
@@ -49,7 +50,8 @@ func (h *DownloadManifestHandler) LoadExternalBucketConfigFromEnv() error {
 		return fmt.Errorf("parsing %s value [%s]: %w", ExternalBucketsRoleMapKey, raw, err)
 	}
 	h.externalBucketConfig = m
-	h.logger.Debugf("set %s: %s", ExternalBucketsRoleMapKey, m)
+	h.logger.LogDebugWithFields(logging.Fields{ExternalBucketsRoleMapKey: m},
+		"loaded external bucket role map")
 	return nil
 }
 
@@ -85,7 +87,7 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	var request models.DownloadRequest
 	if err := json.Unmarshal([]byte(h.body), &request); err != nil {
-		return h.logAndBuildError(fmt.Sprintf("unable to unmarshal request body: %v", err), http.StatusBadRequest), nil
+		return h.logAndBuildErrorCause("unable to unmarshal request body", http.StatusBadRequest, err), nil
 	}
 	if len(request.NodeIds) == 0 {
 		return h.logAndBuildError("nodeIds must not be empty", http.StatusBadRequest), nil
@@ -95,7 +97,11 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 
 	rows, err := h.getPackageHierarchy(ctx, orgId, datasetNodeId, request.NodeIds)
 	if err != nil {
-		h.logger.Errorf("failed to query package hierarchy: %v", err)
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:          err,
+			logging.KeyOrganizationID: orgId,
+			logging.KeyDatasetNodeID:  datasetNodeId,
+		}, "failed to query package hierarchy")
 		return nil, err
 	}
 
@@ -147,7 +153,11 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 				options.ClientOptions = append(options.ClientOptions, bucketOptions.S3Options())
 			})
 		if err != nil {
-			h.logger.Errorf("failed to generate presigned URL for bucket=%s key=%s: %v", s3Bucket, row.S3Key, err)
+			h.logger.LogErrorWithFields(logging.Fields{
+				logging.KeyError:    err,
+				logging.KeyS3Bucket: s3Bucket,
+				logging.KeyS3Key:    row.S3Key,
+			}, "failed to generate presigned URL")
 			return nil, fmt.Errorf("failed to generate presigned URL: %w", err)
 		}
 
@@ -186,7 +196,12 @@ func (h *DownloadManifestHandler) post(ctx context.Context) (*events.APIGatewayV
 		Blocked: blocked,
 	}
 
-	h.logger.Infof("download manifest: %d files (%d bytes), %d blocked, for %d requested packages", len(entries), totalSize, len(blocked), len(request.NodeIds))
+	h.logger.LogInfoWithFields(logging.Fields{
+		logging.KeyCount:          len(entries),
+		logging.KeyTotalSize:      totalSize,
+		logging.KeyBlockedCount:   len(blocked),
+		logging.KeyRequestedCount: len(request.NodeIds),
+	}, "built download manifest")
 	return h.buildResponse(resp, http.StatusOK)
 }
 

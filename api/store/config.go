@@ -3,24 +3,18 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"strings"
+
+	"github.com/pennsieve/packages-service/api/logging"
 )
 
 func init() {
-	log.SetFormatter(&log.JSONFormatter{})
-	if level, ok := os.LookupEnv("LOG_LEVEL"); !ok {
-		log.SetLevel(log.InfoLevel)
-	} else {
-		if ll, err := log.ParseLevel(level); err == nil {
-			log.SetLevel(ll)
-		} else {
-			log.SetLevel(log.InfoLevel)
-			log.Warnf("could not set log level to %q: %v", level, err)
-		}
-
-	}
+	// Kept as a package init (rather than moved to each main) so that importing
+	// the store never leaves slog at its unconfigured text-handler default —
+	// the same guarantee the previous logrus init gave. Each lambda's main also
+	// calls this explicitly, which is idempotent.
+	logging.SetDefaultFromEnv()
 }
 
 type PostgresOption struct {

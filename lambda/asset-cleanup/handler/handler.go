@@ -4,12 +4,56 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/aws/aws-lambda-go/lambdacontext"
+	"github.com/google/uuid"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	log "github.com/sirupsen/logrus"
 )
+
+// Structured log attribute keys. This lambda is its own Go module and does not
+// depend on packages-service/api, so it carries a small local copy of the key
+// constants it needs rather than pulling in that module just for logging. Keep
+// the string values identical to api/logging/keys.go so a single DataDog query
+// spans both.
+const (
+	keyTraceID      = "traceId"
+	keyAWSRequestID = "awsRequestId"
+	keyError        = "error"
+	keyEntryID      = "entryId"
+	keyS3Bucket     = "s3Bucket"
+	keyS3Prefix     = "s3Prefix"
+	keyCount        = "count"
+	keyDeletedCount = "deletedCount"
+)
+
+// SetDefaultLoggerFromEnv installs a JSON slog logger at LOG_LEVEL (INFO when
+// unset or unparseable) as slog.Default.
+func SetDefaultLoggerFromEnv() {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		level = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+}
+
+// newInvocationLogger returns the per-invocation logger.
+//
+// This lambda is triggered on a schedule rather than by a caller, so there is no
+// inbound correlation id to adopt: it mints its own traceId per invocation, and
+// logs the Lambda request id separately under its own key (the two are
+// different kinds of id and are deliberately not conflated).
+func newInvocationLogger(ctx context.Context) *slog.Logger {
+	logger := slog.Default().With(slog.String(keyTraceID, uuid.NewString()))
+	if lc, ok := lambdacontext.FromContext(ctx); ok && lc != nil {
+		logger = logger.With(slog.String(keyAWSRequestID, lc.AwsRequestID))
+	}
+	return logger
+}
 
 var (
 	PennsieveDB *sql.DB
@@ -23,6 +67,7 @@ type cleanupEntry struct {
 }
 
 func HandleCleanup(ctx context.Context) error {
+	logger := newInvocationLogger(ctx)
 	for {
 		entries, err := fetchCleanupEntries(ctx)
 		if err != nil {
@@ -30,30 +75,30 @@ func HandleCleanup(ctx context.Context) error {
 		}
 
 		if len(entries) == 0 {
-			log.Info("no more viewer asset cleanup entries to process")
+			logger.Info("no more viewer asset cleanup entries to process")
 			return nil
 		}
 
-		log.Infof("processing %d viewer asset cleanup entries", len(entries))
+		logger.Info("processing viewer asset cleanup entries", slog.Int(keyCount, len(entries)))
 
 		for _, entry := range entries {
-			log.WithFields(log.Fields{
-				"entryID":  entry.ID,
-				"s3Bucket": entry.S3Bucket,
-				"s3Prefix": entry.S3Prefix,
-			}).Info("cleaning up S3 objects for deleted viewer asset")
+			entryLogger := logger.With(
+				slog.Int64(keyEntryID, entry.ID),
+				slog.String(keyS3Bucket, entry.S3Bucket),
+				slog.String(keyS3Prefix, entry.S3Prefix))
+			entryLogger.Info("cleaning up S3 objects for deleted viewer asset")
 
-			if err := deleteS3Prefix(ctx, entry.S3Bucket, entry.S3Prefix); err != nil {
-				log.WithError(err).WithField("entryID", entry.ID).Error("failed to delete S3 objects, will retry next run")
+			if err := deleteS3Prefix(ctx, entryLogger, entry.S3Bucket, entry.S3Prefix); err != nil {
+				entryLogger.Error("failed to delete S3 objects, will retry next run", slog.Any(keyError, err))
 				continue
 			}
 
 			if err := removeCleanupEntry(ctx, entry.ID); err != nil {
-				log.WithError(err).WithField("entryID", entry.ID).Error("failed to remove cleanup entry")
+				entryLogger.Error("failed to remove cleanup entry", slog.Any(keyError, err))
 				continue
 			}
 
-			log.WithField("entryID", entry.ID).Info("cleanup complete")
+			entryLogger.Info("cleanup complete")
 		}
 	}
 }
@@ -86,7 +131,7 @@ func removeCleanupEntry(ctx context.Context, id int64) error {
 	return err
 }
 
-func deleteS3Prefix(ctx context.Context, bucket, prefix string) error {
+func deleteS3Prefix(ctx context.Context, logger *slog.Logger, bucket, prefix string) error {
 	paginator := s3.NewListObjectsV2Paginator(S3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String(prefix),
@@ -120,7 +165,10 @@ func deleteS3Prefix(ctx context.Context, bucket, prefix string) error {
 	}
 
 	if totalDeleted > 0 {
-		log.Infof("deleted %d objects from s3://%s/%s", totalDeleted, bucket, prefix)
+		logger.Info("deleted S3 objects",
+			slog.Int(keyDeletedCount, totalDeleted),
+			slog.String(keyS3Bucket, bucket),
+			slog.String(keyS3Prefix, prefix))
 	}
 
 	return nil

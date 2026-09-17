@@ -19,13 +19,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	log "github.com/sirupsen/logrus"
+	"log/slog"
+
+	"github.com/pennsieve/packages-service/api/logging"
 )
 
 type CloudFrontSignedURLHandler struct {
 	RequestHandler
 }
-
 
 type CloudFrontURLComponents struct {
 	BaseURL    string      `json:"base_url"`
@@ -74,9 +75,10 @@ func init() {
 	// Note: CloudFront key ID is now loaded dynamically from Secrets Manager
 	if domain, ok := os.LookupEnv("CLOUDFRONT_DISTRIBUTION_DOMAIN"); ok {
 		cloudfrontDistributionDomain = domain
-		log.Infof("CloudFront distribution domain initialized: %s", cloudfrontDistributionDomain)
+		slog.Info("CloudFront distribution domain initialized",
+			slog.String(logging.KeyCloudFrontDomain, cloudfrontDistributionDomain))
 	} else {
-		log.Warn("CLOUDFRONT_DISTRIBUTION_DOMAIN environment variable not set")
+		slog.Warn("CLOUDFRONT_DISTRIBUTION_DOMAIN environment variable not set")
 	}
 }
 
@@ -114,7 +116,8 @@ func (h *CloudFrontSignedURLHandler) generateCloudFrontSignedURLWithPolicy(s3Pre
 	}
 
 	// Create the signer
-	log.Infof("Creating CloudFront signer with Key ID: %s", cloudfrontKeyID)
+	h.logger.LogDebugWithFields(logging.Fields{logging.KeyCloudFrontKeyID: cloudfrontKeyID},
+		"creating CloudFront signer")
 	signer := sign.NewURLSigner(cloudfrontKeyID, cloudfrontPrivateKey)
 
 	// Build the base URL - if optionalPath is provided, include it for user convenience
@@ -142,11 +145,11 @@ func (h *CloudFrontSignedURLHandler) generateCloudFrontSignedURLWithPolicy(s3Pre
 		return "", time.Time{}, fmt.Errorf("failed to sign URL with policy: %w", err)
 	}
 
-	h.logger.WithFields(log.Fields{
-		"resourcePattern": resourcePattern,
-		"baseURL":         baseURL,
-		"expiresAt":       expiresAt,
-	}).Debug("generated CloudFront signed URL with prefix policy")
+	h.logger.LogDebugWithFields(logging.Fields{
+		logging.KeyResourcePattern: resourcePattern,
+		logging.KeyBaseURL:         baseURL,
+		logging.KeyExpiresAt:       expiresAt,
+	}, "generated CloudFront signed URL with prefix policy")
 
 	return signedURL, expiresAt, nil
 }
@@ -164,15 +167,16 @@ func (h *CloudFrontSignedURLHandler) getOrganizationCloudFrontPath(ctx context.C
 	if bucketName.Valid && bucketName.String != "" {
 		// Generate deterministic 8-character path from bucket name
 		pathPrefix := generateDeterministicPath(bucketName.String)
-		h.logger.WithFields(log.Fields{
-			"orgId":      orgId,
-			"bucketName": bucketName.String,
-			"pathPrefix": pathPrefix,
-		}).Debug("Generated CloudFront path prefix for organization bucket")
+		h.logger.LogDebugWithFields(logging.Fields{
+			logging.KeyOrganizationID: orgId,
+			logging.KeyS3Bucket:       bucketName.String,
+			logging.KeyPathPrefix:     pathPrefix,
+		}, "generated CloudFront path prefix for organization bucket")
 		return "/" + pathPrefix, nil
 	} else {
 		// Default: use main storage bucket (no prefix)
-		h.logger.WithField("orgId", orgId).Debug("Using default storage bucket for organization")
+		h.logger.LogDebugWithFields(logging.Fields{logging.KeyOrganizationID: orgId},
+			"using default storage bucket for organization")
 		return "", nil
 	}
 }
@@ -301,7 +305,8 @@ func (h *CloudFrontSignedURLHandler) extractPolicyInfo(encodedPolicy string, exp
 }
 
 func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Context, secretName string) error {
-	log.Infof("Loading CloudFront keys from Secrets Manager: %s", secretName)
+	h.logger.LogInfoWithFields(logging.Fields{logging.KeySecretName: secretName},
+		"loading CloudFront keys from Secrets Manager")
 
 	// Create AWS config with explicit region
 	region := os.Getenv("REGION")
@@ -317,7 +322,7 @@ func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Cont
 		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	log.Infof("AWS config loaded with region: %s", cfg.Region)
+	h.logger.LogDebugWithFields(logging.Fields{logging.KeyRegion: cfg.Region}, "AWS config loaded")
 
 	// Create Secrets Manager client
 	smClient := secretsmanager.NewFromConfig(cfg)
@@ -341,7 +346,10 @@ func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Cont
 	}
 
 	cloudfrontKeyPair = &keyPair
-	log.Infof("Loaded CloudFront key pair with ID: %s, created at: %s", keyPair.KeyID, keyPair.CreatedAt)
+	h.logger.LogInfoWithFields(logging.Fields{
+		logging.KeyCloudFrontKeyID: keyPair.KeyID,
+		"createdAt":                keyPair.CreatedAt,
+	}, "loaded CloudFront key pair")
 
 	// Decode base64 private key
 	keyBytes, err := base64.StdEncoding.DecodeString(keyPair.PrivateKey)
@@ -364,8 +372,11 @@ func (h *CloudFrontSignedURLHandler) loadKeysFromSecretsManager(ctx context.Cont
 	cloudfrontPrivateKey = privateKey
 	cloudfrontKeyID = keyPair.PublicKeyID // Use the CloudFront public key ID for signing
 
-	log.Infof("Successfully loaded CloudFront private key (Public Key ID: %s)", cloudfrontKeyID)
-	log.Infof("CloudFront key pair details - KeyID: %s, PublicKeyID: %s, KeyGroupID: %s, CreatedAt: %s",
-		keyPair.KeyID, keyPair.PublicKeyID, keyPair.KeyGroupID, keyPair.CreatedAt)
+	h.logger.LogInfoWithFields(logging.Fields{
+		logging.KeyCloudFrontKeyID:       keyPair.KeyID,
+		logging.KeyCloudFrontPublicKeyID: keyPair.PublicKeyID,
+		logging.KeyCloudFrontKeyGroupID:  keyPair.KeyGroupID,
+		"createdAt":                      keyPair.CreatedAt,
+	}, "successfully loaded CloudFront private key")
 	return nil
 }

@@ -20,8 +20,8 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
-	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"math/rand"
@@ -164,19 +164,19 @@ type NoLogger struct{}
 
 func (n NoLogger) LogWarn(_ ...any) {}
 
-func (n NoLogger) LogWarnWithFields(_ log.Fields, _ ...any) {}
+func (n NoLogger) LogWarnWithFields(_ logging.Fields, _ ...any) {}
 
 func (n NoLogger) LogDebug(_ ...any) {}
 
-func (n NoLogger) LogDebugWithFields(_ log.Fields, _ ...any) {}
+func (n NoLogger) LogDebugWithFields(_ logging.Fields, _ ...any) {}
 
 func (n NoLogger) LogError(_ ...any) {}
 
-func (n NoLogger) LogErrorWithFields(_ log.Fields, _ ...any) {}
+func (n NoLogger) LogErrorWithFields(_ logging.Fields, _ ...any) {}
 
 func (n NoLogger) LogInfo(_ ...any) {}
 
-func (n NoLogger) LogInfoWithFields(_ log.Fields, _ ...any) {}
+func (n NoLogger) LogInfoWithFields(_ logging.Fields, _ ...any) {}
 
 func GetTestAWSConfig(t *testing.T) aws.Config {
 	// awsKey and awsSecret should match MINIO_ROOT_USER and MINIO_ROOT_PASSWORD respectively.

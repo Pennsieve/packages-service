@@ -5,17 +5,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambdacontext"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/service"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 )
@@ -28,24 +30,14 @@ var AssumeRoleClient stscreds.AssumeRoleAPIClient
 var ViewerAssetsBucket string
 
 func init() {
-	log.SetFormatter(&log.JSONFormatter{})
-	if level, ok := os.LookupEnv("LOG_LEVEL"); !ok {
-		log.SetLevel(log.InfoLevel)
-	} else {
-		if ll, err := log.ParseLevel(level); err == nil {
-			log.SetLevel(ll)
-		} else {
-			log.SetLevel(log.InfoLevel)
-			log.Warnf("could not set log level to %q: %v", level, err)
-		}
-	}
+	logging.SetDefaultFromEnv()
 
 	// Initialize ViewerAssetsBucket from environment variable
 	if bucket, ok := os.LookupEnv("VIEWER_ASSETS_BUCKET"); ok {
 		ViewerAssetsBucket = bucket
-		log.Infof("ViewerAssetsBucket initialized: %s", ViewerAssetsBucket)
+		slog.Info("ViewerAssetsBucket initialized", slog.String(logging.KeyS3Bucket, ViewerAssetsBucket))
 	} else {
-		log.Warn("VIEWER_ASSETS_BUCKET environment variable not set")
+		slog.Warn("VIEWER_ASSETS_BUCKET environment variable not set")
 	}
 
 }
@@ -55,68 +47,131 @@ func PackagesServiceHandler(ctx context.Context, request events.APIGatewayV2HTTP
 
 	// Discover endpoints are unauthenticated — skip claim parsing
 	if strings.HasPrefix(path, "/discover/") {
-		handler := NewDiscoverHandler(&request)
+		handler := NewDiscoverHandlerWithContext(ctx, &request)
 		return handler.handleDiscover(ctx)
 	}
 
 	// For authenticated endpoints, parse claims and create service
 	claims := authorizer.ParseClaims(request.RequestContext.Authorizer.Lambda)
-	handler := NewHandler(&request, claims).WithDefaultService()
+	handler := NewHandlerWithContext(ctx, &request, claims).WithDefaultService()
 	return handler.handle(ctx)
+}
+
+// inboundTraceHeaders are the headers, in precedence order, that a caller may
+// use to hand us an existing correlation id. If any is present we adopt it, so
+// that a logical operation keeps one id across service boundaries; otherwise we
+// mint a fresh one.
+var inboundTraceHeaders = []string{"x-request-id", "x-correlation-id", "traceparent", "x-amzn-trace-id"}
+
+// resolveTraceID returns this service's internal correlation id for one logical
+// operation, and whether it was inherited from the caller.
+//
+// Deliberately NOT an AWS-issued id. API Gateway's RequestContext.RequestID,
+// SQS's MessageId and Lambda's AwsRequestID are each minted fresh at their own
+// hop, so none of them can follow an operation across service boundaries. Those
+// per-hop ids are still logged, each under its own key, alongside this one.
+func resolveTraceID(headers map[string]string) (traceID string, inherited bool) {
+	for _, h := range inboundTraceHeaders {
+		// API Gateway v2 lower-cases header names, but check both to be safe.
+		if v, ok := headers[h]; ok && v != "" {
+			return v, true
+		}
+		if v, ok := headers[http.CanonicalHeaderKey(h)]; ok && v != "" {
+			return v, true
+		}
+	}
+	return uuid.NewString(), false
+}
+
+// awsRequestID returns the Lambda invocation id, if the context carries one.
+func awsRequestID(ctx context.Context) string {
+	if lc, ok := lambdacontext.FromContext(ctx); ok && lc != nil {
+		return lc.AwsRequestID
+	}
+	return ""
 }
 
 // RequestHandler wraps the incoming request with a logger and a service.PackagesService.
 // Some request params are pulled out for convenience. Use NewHandler followed by WithDefaultService to have things
 // initialized nicely. Use WithService in tests where a specially constructed or mock service.PackagesService is required.
 type RequestHandler struct {
-	request   *events.APIGatewayV2HTTPRequest
-	requestID string
+	request *events.APIGatewayV2HTTPRequest
+	// apiGatewayRequestID is API Gateway's per-hop request id. Kept (and now
+	// named unambiguously) for correlating with the API Gateway access log; it
+	// is not the cross-service trace id — see traceID.
+	apiGatewayRequestID string
+	// traceID is this service's internal correlation id for the logical
+	// operation. Inherited from an inbound header when the caller supplied one.
+	traceID string
 
 	method      string
 	path        string
 	queryParams map[string]string
 	body        string
 
-	logger          *log.Entry
+	logger          *logging.Log
 	packagesService service.PackagesService
 	claims          *authorizer.Claims
 }
 
-// NewHandler creates a RequestHandler that has its logger field initialized with useful fields.
-func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Claims) *RequestHandler {
-	method := request.RequestContext.HTTP.Method
-	path := request.RequestContext.HTTP.Path
-	reqID := request.RequestContext.RequestID
-	logger := log.WithFields(log.Fields{
-		"requestID": reqID,
-	})
-	requestHandler := RequestHandler{
-		request:   request,
-		requestID: reqID,
+// newRequestHandler builds the request-scoped logger shared by the
+// authenticated and unauthenticated (discover) entrypoints, attaching both the
+// per-hop AWS ids and this service's own trace id so every downstream log line
+// carries all of them.
+func newRequestHandler(ctx context.Context, request *events.APIGatewayV2HTTPRequest, claims *authorizer.Claims) (*RequestHandler, bool) {
+	apiGatewayReqID := request.RequestContext.RequestID
+	traceID, inherited := resolveTraceID(request.Headers)
 
-		method:      method,
-		path:        path,
+	fields := logging.Fields{
+		logging.KeyTraceID:             traceID,
+		logging.KeyAPIGatewayRequestID: apiGatewayReqID,
+	}
+	if awsReqID := awsRequestID(ctx); awsReqID != "" {
+		fields[logging.KeyAWSRequestID] = awsReqID
+	}
+
+	return &RequestHandler{
+		request:             request,
+		apiGatewayRequestID: apiGatewayReqID,
+		traceID:             traceID,
+
+		method:      request.RequestContext.HTTP.Method,
+		path:        request.RequestContext.HTTP.Path,
 		queryParams: request.QueryStringParameters,
 		body:        request.Body,
 
-		logger: logger,
+		logger: logging.NewLogWithFields(fields),
 		claims: claims,
-	}
-	logger.WithFields(log.Fields{
-		"method":      requestHandler.method,
-		"path":        requestHandler.path,
-		"queryParams": requestHandler.queryParams,
-		"requestBody": requestHandler.body,
-		"claims":      requestHandler.claims}).Info("creating RequestHandler")
+	}, inherited
+}
 
-	return &requestHandler
+// NewHandler creates a RequestHandler that has its logger field initialized with useful fields.
+func NewHandler(request *events.APIGatewayV2HTTPRequest, claims *authorizer.Claims) *RequestHandler {
+	return NewHandlerWithContext(context.Background(), request, claims)
+}
+
+// NewHandlerWithContext is NewHandler with the invocation context available, so
+// the Lambda request id can be picked up from lambdacontext.
+func NewHandlerWithContext(ctx context.Context, request *events.APIGatewayV2HTTPRequest, claims *authorizer.Claims) *RequestHandler {
+	requestHandler, inheritedTrace := newRequestHandler(ctx, request, claims)
+
+	requestHandler.logger.LogInfoWithFields(logging.Fields{
+		logging.KeyMethod:      requestHandler.method,
+		logging.KeyPath:        requestHandler.path,
+		logging.KeyQueryParams: requestHandler.queryParams,
+		logging.KeyRequestBody: requestHandler.body,
+		logging.KeyClaims:      requestHandler.claims,
+		"traceIdInherited":     inheritedTrace,
+	}, "creating RequestHandler")
+
+	return requestHandler
 }
 
 // WithDefaultService adds a new service.PackagesService to the RequestHandler that
 // has been initialized to use PennsieveDB as the SQL database pointed to the
 // workspace in the RequestHandler's OrgClaim.
 func (h *RequestHandler) WithDefaultService() *RequestHandler {
-	svc := service.NewPackagesService(PennsieveDB, SQSClient, int(h.claims.OrgClaim.IntId), &logging.Log{Entry: h.logger})
+	svc := service.NewPackagesService(PennsieveDB, SQSClient, int(h.claims.OrgClaim.IntId), h.logger)
 	h.packagesService = svc
 	return h
 }
@@ -128,9 +183,32 @@ func (h *RequestHandler) WithService(service service.PackagesService) *RequestHa
 	return h
 }
 
+// logAndBuildError logs a static message and renders the client error body.
+// The trace id (not the per-hop API Gateway id) is what goes in the response,
+// since that is the id a caller can quote to find the whole operation in the
+// logs — including any hop this service made downstream.
 func (h *RequestHandler) logAndBuildError(message string, status int) *events.APIGatewayV2HTTPResponse {
-	h.logger.Error(message)
-	errorBody := fmt.Sprintf("{'message': '%s (requestID: %s)'}", message, h.requestID)
+	return h.logAndBuildErrorWithFields(message, status, nil)
+}
+
+// logAndBuildErrorCause is logAndBuildError for the common case of "static
+// message + the error that caused it". The error becomes a structured field
+// rather than being interpolated into the message, so that the message stays
+// groupable in DataDog while the detail is still queryable.
+func (h *RequestHandler) logAndBuildErrorCause(message string, status int, err error) *events.APIGatewayV2HTTPResponse {
+	return h.logAndBuildErrorWithFields(message, status, logging.Fields{logging.KeyError: err})
+}
+
+func (h *RequestHandler) logAndBuildErrorWithFields(message string, status int, fields logging.Fields) *events.APIGatewayV2HTTPResponse {
+	if fields == nil {
+		fields = logging.Fields{}
+	}
+	fields[logging.KeyStatusCode] = status
+	h.logger.LogErrorWithFields(fields, message)
+	// requestID is retained verbatim so the client-visible error contract does
+	// not change; traceId is added because that is the id that follows the
+	// operation across hops.
+	errorBody := fmt.Sprintf("{'message': '%s (requestID: %s, traceId: %s)'}", message, h.apiGatewayRequestID, h.traceID)
 	return buildResponseFromString(errorBody, status)
 }
 
@@ -155,7 +233,10 @@ func (h *RequestHandler) queryParamAsInt(paramName string, minValue, maxValue, d
 func (h *RequestHandler) buildResponse(body any, status int) (*events.APIGatewayV2HTTPResponse, error) {
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		h.logger.Errorf("error marshalling body: [%v]: %s", body, err)
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:       err,
+			logging.KeyRequestBody: fmt.Sprintf("%v", body),
+		}, "error marshalling response body")
 		return nil, err
 	}
 	return buildResponseFromString(string(bodyBytes), status), nil
@@ -175,30 +256,22 @@ func buildResponseFromString(body string, status int) *events.APIGatewayV2HTTPRe
 // NewDiscoverHandler creates a RequestHandler for unauthenticated discover endpoints.
 // No claims are parsed since these routes don't require authentication.
 func NewDiscoverHandler(request *events.APIGatewayV2HTTPRequest) *RequestHandler {
-	method := request.RequestContext.HTTP.Method
-	path := request.RequestContext.HTTP.Path
-	reqID := request.RequestContext.RequestID
-	logger := log.WithFields(log.Fields{
-		"requestID": reqID,
-	})
-	requestHandler := RequestHandler{
-		request:   request,
-		requestID: reqID,
+	return NewDiscoverHandlerWithContext(context.Background(), request)
+}
 
-		method:      method,
-		path:        path,
-		queryParams: request.QueryStringParameters,
-		body:        request.Body,
+// NewDiscoverHandlerWithContext is NewDiscoverHandler with the invocation
+// context available, so the Lambda request id can be picked up.
+func NewDiscoverHandlerWithContext(ctx context.Context, request *events.APIGatewayV2HTTPRequest) *RequestHandler {
+	requestHandler, inheritedTrace := newRequestHandler(ctx, request, nil)
 
-		logger: logger,
-	}
-	logger.WithFields(log.Fields{
-		"method":      requestHandler.method,
-		"path":        requestHandler.path,
-		"queryParams": requestHandler.queryParams,
-	}).Info("creating discover RequestHandler (unauthenticated)")
+	requestHandler.logger.LogInfoWithFields(logging.Fields{
+		logging.KeyMethod:      requestHandler.method,
+		logging.KeyPath:        requestHandler.path,
+		logging.KeyQueryParams: requestHandler.queryParams,
+		"traceIdInherited":     inheritedTrace,
+	}, "creating discover RequestHandler (unauthenticated)")
 
-	return &requestHandler
+	return requestHandler
 }
 
 func (h *RequestHandler) handleDiscover(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {

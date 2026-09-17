@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
-	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"strconv"
 	"time"
@@ -128,12 +127,12 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 		// Use the injected (request-scoped) logger, not the logrus global: these
 		// retry warnings are useless without the request correlation the rest of
 		// this store's log lines carry.
-		d.LogInfoWithFields(log.Fields{
-			"unprocessedCount": len(unprocessed.Keys),
-			"originalCount":    len(keys),
-			"waitDuration":     waitDuration.String(),
-			"retryCount":       retryCount,
-			"tableName":        tableName,
+		d.LogInfoWithFields(logging.Fields{
+			logging.KeyUnprocessedCount: len(unprocessed.Keys),
+			logging.KeyOriginalCount:    len(keys),
+			logging.KeyWaitDuration:     waitDuration.String(),
+			logging.KeyRetryCount:       retryCount,
+			logging.KeyTableName:        tableName,
 		}, "retrying unprocessed DynamoDB batch-get items")
 		input := dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{tableName: unprocessed}}
 		unprocessed, err = makeOneRequest(ctx, &input)
@@ -183,12 +182,12 @@ func (d *dynamodbStore) deleteBatchItemsSingleTable(ctx context.Context, tableNa
 		waitDuration := time.Duration(retryCount)*time.Second + (time.Duration(rand.Intn(1000)) * time.Millisecond)
 		time.Sleep(waitDuration)
 		// See getBatchItemsSingleTable: injected logger, not the logrus global.
-		d.LogInfoWithFields(log.Fields{
-			"unprocessedCount": len(unprocessed),
-			"originalCount":    len(writeRequests),
-			"waitDuration":     waitDuration.String(),
-			"retryCount":       retryCount,
-			"tableName":        tableName,
+		d.LogInfoWithFields(logging.Fields{
+			logging.KeyUnprocessedCount: len(unprocessed),
+			logging.KeyOriginalCount:    len(writeRequests),
+			logging.KeyWaitDuration:     waitDuration.String(),
+			logging.KeyRetryCount:       retryCount,
+			logging.KeyTableName:        tableName,
 		}, "retrying unprocessed DynamoDB batch-write items")
 		input := dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{tableName: unprocessed}}
 		unprocessed, err = makeOneRequest(ctx, &input)

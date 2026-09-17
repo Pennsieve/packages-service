@@ -13,7 +13,6 @@ import (
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	pg "github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
-	log "github.com/sirupsen/logrus"
 	"strings"
 )
 
@@ -261,7 +260,7 @@ func (q *Queries) GetSourceFilesByNodeIds(ctx context.Context, packageNodeIds []
 
 func (q *Queries) closeRows(rows *sql.Rows) {
 	if err := rows.Close(); err != nil {
-		q.LogWarnWithFields(log.Fields{"error": err}, "ignoring error while closing Rows")
+		q.LogWarnWithFields(logging.Fields{logging.KeyError: err}, "ignoring error while closing Rows")
 	}
 }
 
