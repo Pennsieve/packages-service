@@ -300,7 +300,7 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 		return h.logAndBuildError(fmt.Sprintf("failed to fetch asset: %v", err), http.StatusInternalServerError), nil
 	}
 
-	pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, a.ID)
+	pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
 
 	var assetURL string
 	if assetURLBase := h.buildAssetURLBase(ctx, orgID, datasetIntID); assetURLBase != "" {
@@ -356,7 +356,7 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 			return h.logAndBuildError(fmt.Sprintf("failed to scan asset row: %v", err), http.StatusInternalServerError), nil
 		}
 
-		pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, a.ID)
+		pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
 
 		var assetURL string
 		if assetURLBase != "" {
@@ -402,7 +402,16 @@ func (h *ViewerAssetsHandler) buildAssetURLBase(ctx context.Context, orgID, data
 		return ""
 	}
 	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-	pathPrefix, _ := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
+	pathPrefix, err := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
+	if err != nil {
+		// Not fatal: we fall back to an unprefixed CloudFront URL. But that
+		// silently produces a different (possibly non-resolving) asset URL, so
+		// it must not go unlogged.
+		h.logger.WithError(err).WithFields(log.Fields{
+			"organizationId": orgID,
+			"datasetId":      datasetIntID,
+		}).Warn("could not resolve organization CloudFront path; falling back to unprefixed CloudFront asset URL")
+	}
 	if pathPrefix != "" {
 		return fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
 	}
@@ -535,7 +544,7 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 		return h.logAndBuildError(fmt.Sprintf("failed to fetch asset: %v", err), http.StatusInternalServerError), nil
 	}
 
-	pkgIDs, _ := h.getLinkedPackageNodeIDs(ctx, orgID, asset.ID)
+	pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, asset.ID)
 
 	resp := viewerAssetResponse{
 		ID:            asset.ID,
@@ -685,6 +694,24 @@ func (h *ViewerAssetsHandler) batchInsertPackageLinks(ctx context.Context, orgID
 
 	_, err := PennsieveDB.ExecContext(ctx, query, args...)
 	return err
+}
+
+// linkedPackageNodeIDsOrEmpty resolves an asset's linked package node IDs,
+// degrading to an empty list on error rather than failing the whole request —
+// the same log-and-continue posture the surrounding handlers take for package
+// link writes and S3 cleanup. The error is logged (it previously was silently
+// discarded, so a failed lookup was indistinguishable in the response and in
+// the logs from an asset that genuinely has no linked packages).
+func (h *ViewerAssetsHandler) linkedPackageNodeIDsOrEmpty(ctx context.Context, orgID int64, assetID string) []string {
+	pkgIDs, err := h.getLinkedPackageNodeIDs(ctx, orgID, assetID)
+	if err != nil {
+		h.logger.WithError(err).WithFields(log.Fields{
+			"organizationId": orgID,
+			"viewerAssetId":  assetID,
+		}).Error("failed to look up linked packages for viewer asset; returning empty package list")
+		return []string{}
+	}
+	return pkgIDs
 }
 
 func (h *ViewerAssetsHandler) getLinkedPackageNodeIDs(ctx context.Context, orgID int64, assetID string) ([]string, error) {

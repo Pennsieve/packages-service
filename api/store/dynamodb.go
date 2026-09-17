@@ -125,7 +125,16 @@ func (d *dynamodbStore) getBatchItemsSingleTable(ctx context.Context, tableName 
 	for len(unprocessed.Keys) > 0 {
 		waitDuration := time.Duration(retryCount)*time.Second + (time.Duration(rand.Intn(1000)) * time.Millisecond)
 		time.Sleep(waitDuration)
-		log.Infof("retrying %d unprocessed items out of an original %d after a wait of %s", len(unprocessed.Keys), len(keys), waitDuration)
+		// Use the injected (request-scoped) logger, not the logrus global: these
+		// retry warnings are useless without the request correlation the rest of
+		// this store's log lines carry.
+		d.LogInfoWithFields(log.Fields{
+			"unprocessedCount": len(unprocessed.Keys),
+			"originalCount":    len(keys),
+			"waitDuration":     waitDuration.String(),
+			"retryCount":       retryCount,
+			"tableName":        tableName,
+		}, "retrying unprocessed DynamoDB batch-get items")
 		input := dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{tableName: unprocessed}}
 		unprocessed, err = makeOneRequest(ctx, &input)
 		if err != nil {
@@ -173,7 +182,14 @@ func (d *dynamodbStore) deleteBatchItemsSingleTable(ctx context.Context, tableNa
 	for unprocessed != nil && len(unprocessed) > 0 {
 		waitDuration := time.Duration(retryCount)*time.Second + (time.Duration(rand.Intn(1000)) * time.Millisecond)
 		time.Sleep(waitDuration)
-		log.Infof("retrying %d unprocessed items out of an original %d after a wait of %s", len(unprocessed), len(writeRequests), waitDuration)
+		// See getBatchItemsSingleTable: injected logger, not the logrus global.
+		d.LogInfoWithFields(log.Fields{
+			"unprocessedCount": len(unprocessed),
+			"originalCount":    len(writeRequests),
+			"waitDuration":     waitDuration.String(),
+			"retryCount":       retryCount,
+			"tableName":        tableName,
+		}, "retrying unprocessed DynamoDB batch-write items")
 		input := dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{tableName: unprocessed}}
 		unprocessed, err = makeOneRequest(ctx, &input)
 		if err != nil {
