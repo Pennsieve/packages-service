@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -82,7 +82,7 @@ func generateKeyPair(clientRequestToken string) (*KeyPair, error) {
 }
 
 func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient *cloudfront.Client, event RotationEvent) error {
-	log.Printf("Creating new secret version for %s", event.SecretId)
+	logger(ctx).Info("creating new secret version")
 
 	// Check if AWSPENDING version already exists (for idempotency)
 	_, err := smClient.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
@@ -93,7 +93,7 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 
 	// If secret already exists, we're good (idempotency)
 	if err == nil {
-		log.Printf("Secret version already exists, skipping creation")
+		logger(ctx).Info("secret version already exists, skipping creation")
 		return nil
 	}
 
@@ -117,7 +117,7 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 				keyPair.PreviousKeyID = oldKeyPair.PublicKeyID
 				rotatedAt := time.Now()
 				keyPair.PreviousRotatedAt = &rotatedAt
-				log.Printf("Tracking previous key %s for grace period cleanup", oldKeyPair.PublicKeyID)
+				logger(ctx).Info("tracking previous key for grace period cleanup", slog.String(keyPublicKeyID, oldKeyPair.PublicKeyID))
 			}
 		}
 	}
@@ -137,7 +137,8 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 	// Check if key already exists
 	for _, item := range listResp.PublicKeyList.Items {
 		if *item.Name == publicKeyName {
-			log.Printf("CloudFront public key already exists: %s (ID: %s)", publicKeyName, *item.Id)
+			logger(ctx).Info("CloudFront public key already exists",
+				slog.String(keyPublicKeyName, publicKeyName), slog.String(keyPublicKeyID, *item.Id))
 			publicKeyID = *item.Id
 			break
 		}
@@ -145,7 +146,7 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 
 	// Create public key only if it doesn't exist
 	if publicKeyID == "" {
-		log.Printf("Creating new CloudFront public key: %s", publicKeyName)
+		logger(ctx).Info("creating new CloudFront public key", slog.String(keyPublicKeyName, publicKeyName))
 		publicKeyResp, err := cfClient.CreatePublicKey(ctx, &cloudfront.CreatePublicKeyInput{
 			PublicKeyConfig: &types.PublicKeyConfig{
 				CallerReference: aws.String(keyPair.KeyID),
@@ -196,9 +197,10 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 			if err != nil {
 				return fmt.Errorf("failed to update key group: %w", err)
 			}
-			log.Printf("Added public key %s to key group %s", publicKeyID, keyGroupID)
+			logger(ctx).Info("added public key to key group",
+				slog.String(keyPublicKeyID, publicKeyID), slog.String(keyKeyGroupID, keyGroupID))
 		} else {
-			log.Printf("Public key %s already exists in key group", publicKeyID)
+			logger(ctx).Info("public key already exists in key group", slog.String(keyPublicKeyID, publicKeyID))
 		}
 
 		keyPair.KeyGroupID = keyGroupID
@@ -221,12 +223,13 @@ func createSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 		return fmt.Errorf("failed to put secret value: %w", err)
 	}
 
-	log.Printf("Successfully created new secret version with key ID: %s and CloudFront public key ID: %s", keyPair.KeyID, keyPair.PublicKeyID)
+	logger(ctx).Info("successfully created new secret version",
+		slog.String(keyKeyID, keyPair.KeyID), slog.String(keyPublicKeyID, keyPair.PublicKeyID))
 	return nil
 }
 
 func setSecret(ctx context.Context, smClient *secretsmanager.Client, event RotationEvent) error {
-	log.Printf("Setting secret for %s", event.SecretId)
+	logger(ctx).Info("setting secret")
 
 	// In Option A, all CloudFront operations are moved to createSecret step
 	// setSecret step is a no-op since the secret with CloudFront keys was already created
@@ -253,12 +256,12 @@ func setSecret(ctx context.Context, smClient *secretsmanager.Client, event Rotat
 		return fmt.Errorf("PublicKeyID is empty - CloudFront key creation may have failed in createSecret step")
 	}
 
-	log.Printf("Successfully validated secret - CloudFront public key ID: %s", keyPair.PublicKeyID)
+	logger(ctx).Info("successfully validated secret", slog.String(keyPublicKeyID, keyPair.PublicKeyID))
 	return nil
 }
 
 func testSecret(ctx context.Context, client *secretsmanager.Client, event RotationEvent) error {
-	log.Printf("Testing secret for %s", event.SecretId)
+	logger(ctx).Info("testing secret")
 
 	// Get the pending secret version
 	pendingSecret, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
@@ -292,12 +295,12 @@ func testSecret(ctx context.Context, client *secretsmanager.Client, event Rotati
 		return fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	log.Printf("Successfully tested secret - key is valid")
+	logger(ctx).Info("successfully tested secret; key is valid")
 	return nil
 }
 
 func finishSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient *cloudfront.Client, event RotationEvent) error {
-	log.Printf("Finishing secret rotation for %s", event.SecretId)
+	logger(ctx).Info("finishing secret rotation")
 
 	// Get the current version for version stage management
 	currentSecret, err := smClient.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
@@ -326,7 +329,7 @@ func finishSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 
 	// Check if previous keys need cleanup (they should already be tracked in the secret from createSecret)
 	if err := cleanupExpiredKeys(ctx, cfClient, &newKeyPair); err != nil {
-		log.Printf("Warning: failed to cleanup expired keys: %v", err)
+		logger(ctx).Warn("failed to cleanup expired keys", slog.Any(keyError, err))
 		// Don't fail the rotation
 	}
 
@@ -345,19 +348,22 @@ func finishSecret(ctx context.Context, smClient *secretsmanager.Client, cfClient
 	// Clean up old secret versions (remove AWSPREVIOUS labels from old versions)
 	err = cleanupOldSecretVersions(ctx, smClient, event.SecretId)
 	if err != nil {
-		log.Printf("Warning: failed to cleanup old secret versions: %v", err)
+		logger(ctx).Warn("failed to cleanup old secret versions", slog.Any(keyError, err))
 		// Don't fail the rotation if cleanup fails
 	}
 
-	log.Printf("Successfully finished secret rotation")
+	logger(ctx).Info("successfully finished secret rotation")
 	return nil
 }
 
 func handleRotation(ctx context.Context, event RotationEvent) error {
 	// Log the event for debugging
-	log.Printf("Rotation event received: Step=%s, SecretId=%s, ClientRequestToken=%s, RotationToken=%s",
-		event.Step, event.SecretId, event.ClientRequestToken, event.RotationToken)
-	log.Printf("ClientRequestToken length: %d", len(event.ClientRequestToken))
+	// NB: ClientRequestToken and RotationToken are rotation-control tokens, not
+	// key material, but they are still credentials-adjacent — log only the
+	// token length, never the token itself.
+	invocationLogger := newInvocationLogger(ctx, event)
+	ctx = withLogger(ctx, invocationLogger)
+	invocationLogger.Info("rotation event received", slog.Int(keyTokenLength, len(event.ClientRequestToken)))
 
 	// Validate required fields
 	if event.SecretId == "" {
@@ -400,7 +406,8 @@ func handleRotation(ctx context.Context, event RotationEvent) error {
 // removeOldKeyFromGroup removes an old CloudFront public key from the key group and deletes it entirely
 // Since signed URL policies are only valid for 1 hour, it's safe to delete the key immediately
 func removeOldKeyFromGroup(ctx context.Context, cfClient *cloudfront.Client, keyGroupID, publicKeyID string) error {
-	log.Printf("Removing and deleting old CloudFront public key %s from key group %s", publicKeyID, keyGroupID)
+	logger(ctx).Info("removing and deleting old CloudFront public key from key group",
+		slog.String(keyPublicKeyID, publicKeyID), slog.String(keyKeyGroupID, keyGroupID))
 
 	// Get current key group configuration
 	keyGroupResp, err := cfClient.GetKeyGroup(ctx, &cloudfront.GetKeyGroupInput{
@@ -424,7 +431,7 @@ func removeOldKeyFromGroup(ctx context.Context, cfClient *cloudfront.Client, key
 	}
 
 	if !keyFound {
-		log.Printf("Old public key %s not found in key group, skipping removal", publicKeyID)
+		logger(ctx).Info("old public key not found in key group, skipping removal", slog.String(keyPublicKeyID, publicKeyID))
 		return nil
 	}
 
@@ -439,17 +446,18 @@ func removeOldKeyFromGroup(ctx context.Context, cfClient *cloudfront.Client, key
 		return fmt.Errorf("failed to update key group: %w", err)
 	}
 
-	log.Printf("Successfully removed old public key %s from key group", publicKeyID)
+	logger(ctx).Info("successfully removed old public key from key group", slog.String(keyPublicKeyID, publicKeyID))
 
 	// Now delete the CloudFront public key entirely to reclaim quota
 	err = deleteCloudFrontPublicKey(ctx, cfClient, publicKeyID)
 	if err != nil {
-		log.Printf("Warning: failed to delete CloudFront public key %s: %v", publicKeyID, err)
+		logger(ctx).Warn("failed to delete CloudFront public key",
+			slog.String(keyPublicKeyID, publicKeyID), slog.Any(keyError, err))
 		// Don't fail the entire operation if deletion fails
 		return nil
 	}
 
-	log.Printf("Successfully deleted CloudFront public key %s (quota reclaimed)", publicKeyID)
+	logger(ctx).Info("successfully deleted CloudFront public key; quota reclaimed", slog.String(keyPublicKeyID, publicKeyID))
 	return nil
 }
 
@@ -493,9 +501,9 @@ func cleanupExpiredKeys(ctx context.Context, cfClient *cloudfront.Client, keyPai
 	// Check if grace period has passed
 	timeSinceRotation := time.Since(*keyPair.PreviousRotatedAt)
 	if timeSinceRotation < time.Duration(gracePeriodHours)*time.Hour {
-		log.Printf("Previous key %s still in grace period (%.1f hours remaining)",
-			keyPair.PreviousKeyID,
-			float64(gracePeriodHours)-timeSinceRotation.Hours())
+		logger(ctx).Info("previous key still in grace period",
+			slog.String(keyPublicKeyID, keyPair.PreviousKeyID),
+			slog.Float64(keyGraceHours, float64(gracePeriodHours)-timeSinceRotation.Hours()))
 		return nil
 	}
 
@@ -510,7 +518,7 @@ func cleanupExpiredKeys(ctx context.Context, cfClient *cloudfront.Client, keyPai
 		keyPair.PreviousKeyID = ""
 		keyPair.PreviousRotatedAt = nil
 
-		log.Printf("Successfully cleaned up expired key after grace period")
+		logger(ctx).Info("successfully cleaned up expired key after grace period")
 	}
 
 	return nil
@@ -518,7 +526,7 @@ func cleanupExpiredKeys(ctx context.Context, cfClient *cloudfront.Client, keyPai
 
 // cleanupOldKeys is a custom step that can be called manually or via scheduled event
 func cleanupOldKeys(ctx context.Context, smClient *secretsmanager.Client, cfClient *cloudfront.Client, event RotationEvent) error {
-	log.Printf("Running cleanup of old keys for %s", event.SecretId)
+	logger(ctx).Info("running cleanup of old keys")
 
 	// Get the current secret
 	currentSecret, err := smClient.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
@@ -558,21 +566,21 @@ func cleanupOldKeys(ctx context.Context, smClient *secretsmanager.Client, cfClie
 			return fmt.Errorf("failed to update secret after cleanup: %w", err)
 		}
 
-		log.Printf("Updated secret to remove cleaned up key tracking")
+		logger(ctx).Info("updated secret to remove cleaned up key tracking")
 	} else if originalPreviousKeyID == "" {
-		log.Printf("No previous keys found to cleanup")
+		logger(ctx).Info("no previous keys found to cleanup")
 	} else {
-		log.Printf("Previous key still in grace period, no cleanup needed")
+		logger(ctx).Info("previous key still in grace period, no cleanup needed")
 	}
 
-	log.Printf("Successfully completed cleanup check for old keys")
+	logger(ctx).Info("successfully completed cleanup check for old keys")
 	return nil
 }
 
 // cleanupOldSecretVersions removes AWSPREVIOUS labels from old secret versions
 // This follows AWS best practice of removing staging labels to trigger automatic cleanup
 func cleanupOldSecretVersions(ctx context.Context, smClient *secretsmanager.Client, secretId string) error {
-	log.Printf("Cleaning up old secret versions for %s", secretId)
+	logger(ctx).Info("cleaning up old secret versions", slog.String(keySecretName, secretId))
 
 	// List all versions of the secret
 	listResp, err := smClient.ListSecretVersionIds(ctx, &secretsmanager.ListSecretVersionIdsInput{
@@ -600,7 +608,7 @@ func cleanupOldSecretVersions(ctx context.Context, smClient *secretsmanager.Clie
 		// Remove AWSPREVIOUS label from all but the most recent one
 		for i := 1; i < len(previousVersions); i++ {
 			versionId := previousVersions[i]
-			log.Printf("Removing AWSPREVIOUS label from old version: %s", versionId)
+			logger(ctx).Info("removing AWSPREVIOUS label from old version", slog.String(keySecretVersion, versionId))
 
 			_, err = smClient.UpdateSecretVersionStage(ctx, &secretsmanager.UpdateSecretVersionStageInput{
 				SecretId:            aws.String(secretId),
@@ -608,10 +616,11 @@ func cleanupOldSecretVersions(ctx context.Context, smClient *secretsmanager.Clie
 				RemoveFromVersionId: aws.String(versionId),
 			})
 			if err != nil {
-				log.Printf("Warning: failed to remove AWSPREVIOUS label from version %s: %v", versionId, err)
+				logger(ctx).Warn("failed to remove AWSPREVIOUS label from version",
+					slog.String(keySecretVersion, versionId), slog.Any(keyError, err))
 				// Continue with other versions
 			} else {
-				log.Printf("Successfully removed AWSPREVIOUS label from version %s", versionId)
+				logger(ctx).Info("successfully removed AWSPREVIOUS label from version", slog.String(keySecretVersion, versionId))
 			}
 		}
 	}
@@ -620,5 +629,6 @@ func cleanupOldSecretVersions(ctx context.Context, smClient *secretsmanager.Clie
 }
 
 func main() {
+	setDefaultLoggerFromEnv()
 	lambda.Start(handleRotation)
 }

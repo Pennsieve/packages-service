@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/permissions"
@@ -35,20 +35,22 @@ func (h *RestoreHandler) post(ctx context.Context) (*events.APIGatewayV2HTTPResp
 	}
 	var request models.RestoreRequest
 	if err := json.Unmarshal([]byte(h.body), &request); err != nil {
-		msg := fmt.Sprintf("unable to unmarshall request body [%s] as RestoreRequest: %v", h.body, err)
-		return h.logAndBuildError(msg, http.StatusBadRequest), nil
+		return h.logAndBuildErrorCause("unable to unmarshal request body as RestoreRequest", http.StatusBadRequest, err), nil
 	}
 	request.UserId = h.claims.UserClaim.NodeId
 	response, err := h.packagesService.RestorePackages(ctx, datasetId, request)
 	if err == nil {
-		h.logger.Info("Returning OK")
+		h.logger.LogInfo("returning OK")
 		return h.buildResponse(response, http.StatusOK)
 	}
 	switch err.(type) {
 	case models.DatasetNotFoundError:
 		return h.logAndBuildError(err.Error(), http.StatusNotFound), nil
 	default:
-		h.logger.Errorf("restore packages failed: %v", err)
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:         err,
+			logging.KeyDatasetNodeID: datasetId,
+		}, "restore packages failed")
 		return nil, err
 	}
 }

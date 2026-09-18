@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 
@@ -14,28 +15,30 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	_ "github.com/lib/pq"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/service/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
-	log "github.com/sirupsen/logrus"
 )
 
 func init() {
+	logging.SetDefaultFromEnv()
+
 	// Create connection pool to Postgres DB
 	db, err := pgdb.ConnectRDS()
 	if err != nil {
-		panic(fmt.Sprintf("unable to open connection pool to RDS database: %s", err))
+		fatal("unable to open connection pool to RDS database", err)
 	}
 	if err := db.Ping(); err != nil {
-		panic(fmt.Sprintf("unable to connect to RDS database: %s", err))
+		fatal("unable to connect to RDS database", err)
 	}
-	log.Info("connected to RDS database")
+	slog.Info("connected to RDS database")
 	handler.PennsieveDB = db
 
 	// Create AWS config
 	region := os.Getenv("REGION")
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 	if err != nil {
-		log.Fatalf("AWS configuration error: %v\n", err)
+		fatal("AWS configuration error", err)
 	}
 
 	handler.SQSClient = sqs.NewFromConfig(cfg)
@@ -45,11 +48,24 @@ func init() {
 	// Connect to discover_postgres database
 	discoverDB, err := connectRDSDiscover()
 	if err != nil {
-		log.Warnf("unable to connect to discover database: %s (discover endpoints will be unavailable)", err)
+		slog.Warn("unable to connect to discover database; discover endpoints will be unavailable",
+			slog.Any(logging.KeyError, err))
 	} else {
 		handler.DiscoverDB = discoverDB
-		log.Info("connected to discover database")
+		slog.Info("connected to discover database")
 	}
+}
+
+// fatal reports an unrecoverable cold-start failure and exits.
+//
+// One consistent mechanism across all of this service's lambdas: a structured
+// slog.Error (so the failure is queryable like every other log line) followed by
+// os.Exit(1). Previously these sites were a mix of bare panic(fmt.Sprintf(...))
+// — which emits an unstructured stack trace — and stdlib log.Fatalf, which wrote
+// to a logger that was never JSON-configured.
+func fatal(msg string, err error) {
+	slog.Error(msg, slog.Any(logging.KeyError, err))
+	os.Exit(1)
 }
 
 // connectRDSDiscover connects to the discover_postgres database using IAM auth.

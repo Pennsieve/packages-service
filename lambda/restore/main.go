@@ -2,54 +2,53 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/restore/handler"
 	"github.com/pennsieve/pennsieve-go-core/pkg/queries/pgdb"
-	log "github.com/sirupsen/logrus"
+	"log/slog"
 	"os"
 )
 
 func init() {
 	uuid.EnableRandPool()
-	log.SetFormatter(&log.JSONFormatter{})
-	if level, ok := os.LookupEnv("LOG_LEVEL"); !ok {
-		log.SetLevel(log.InfoLevel)
-	} else {
-		if ll, err := log.ParseLevel(level); err == nil {
-			log.SetLevel(ll)
-		} else {
-			log.SetLevel(log.InfoLevel)
-			log.Warnf("could not set log level to %q: %v", level, err)
-		}
-	}
+	logging.SetDefaultFromEnv()
 
 	// Open DB connection pool here so that it can be reused if lambda handles more than one request
 	db, err := pgdb.ConnectRDS()
 	if err != nil {
-		panic(fmt.Sprintf("unable open connection pool to RDS database: %s", err))
+		fatal("unable to open connection pool to RDS database", err)
 	}
 	if err := db.Ping(); err != nil {
-		panic(fmt.Sprintf("unable to connect to RDS database: %s", err))
+		fatal("unable to connect to RDS database", err)
 	}
-	log.Info("connected to RDS database")
+	slog.Info("connected to RDS database")
 	handler.PennsieveDB = db
 
 	// Create AWS config
 	region := os.Getenv("REGION")
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
 	if err != nil {
-		log.Fatalf("AWS configuration error: %v\n", err)
+		fatal("AWS configuration error", err)
 	}
 
 	handler.S3Client = s3.NewFromConfig(cfg)
 	handler.DyDBClient = dynamodb.NewFromConfig(cfg)
 	handler.SQSClient = sqs.NewFromConfig(cfg)
+}
+
+// fatal reports an unrecoverable cold-start failure and exits. See the same
+// helper in the service and asset-cleanup lambdas: one consistent mechanism
+// (structured slog.Error + os.Exit(1)) rather than a mix of panic and
+// log.Fatalf.
+func fatal(msg string, err error) {
+	slog.Error(msg, slog.Any(logging.KeyError, err))
+	os.Exit(1)
 }
 
 func main() {

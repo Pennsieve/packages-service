@@ -6,16 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambdacontext"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/google/uuid"
 	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/packages-service/api/store/restore"
 	changelog2 "github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
-	log "github.com/sirupsen/logrus"
 	"os"
 )
 
@@ -70,7 +71,7 @@ func handleBatches(ctx context.Context, event events.SQSEvent, base BaseStore) (
 		BatchItemFailures: []events.SQSBatchItemFailure{},
 	}
 	for _, r := range event.Records {
-		handler := NewMessageHandler(r, base)
+		handler := NewMessageHandlerWithContext(ctx, r, base)
 		if err := handler.handleBatch(ctx); err != nil {
 			handler.LogError(err)
 			response.BatchItemFailures = append(response.BatchItemFailures, handler.newBatchItemFailure())
@@ -86,17 +87,47 @@ type MessageHandler struct {
 }
 
 func NewMessageHandler(message events.SQSMessage, base BaseStore) *MessageHandler {
-	plog := pennsievelog.NewLogWithFields(log.Fields{
-		"messageId": message.MessageId,
-	})
+	return NewMessageHandlerWithContext(context.Background(), message, base)
+}
+
+// NewMessageHandlerWithContext builds the per-message, request-scoped logger.
+//
+// Both the per-hop AWS id (the SQS message id) and this service's own trace id
+// are attached, under distinct keys: the SQS message id identifies this queue
+// hop only, whereas traceId is meant to follow the logical restore operation.
+// The Lambda invocation id is added too when the context carries one — note
+// that one Lambda invocation covers a whole batch, so it is deliberately not
+// used as the per-message correlation id.
+func NewMessageHandlerWithContext(ctx context.Context, message events.SQSMessage, base BaseStore) *MessageHandler {
+	fields := pennsievelog.Fields{
+		pennsievelog.KeySQSMessageID: message.MessageId,
+		pennsievelog.KeyTraceID:      traceIDForMessage(message),
+	}
+	if lc, ok := lambdacontext.FromContext(ctx); ok && lc != nil {
+		fields[pennsievelog.KeyAWSRequestID] = lc.AwsRequestID
+	}
+	plog := pennsievelog.NewLogWithFields(fields)
 	storeWithLogger := base.NewStore(plog)
 	handler := MessageHandler{
 		Message: message,
 		Store:   storeWithLogger,
 		Log:     plog,
 	}
-	handler.LogInfoWithFields(log.Fields{"body": message.Body}, "received message")
+	handler.LogInfoWithFields(pennsievelog.Fields{pennsievelog.KeyBody: message.Body}, "received message")
 	return &handler
+}
+
+// traceIDForMessage adopts a correlation id supplied by the producer via an SQS
+// message attribute, if there is one, so that a restore initiated by the
+// service lambda keeps a single id across the queue hop. Otherwise a new one is
+// minted here.
+func traceIDForMessage(message events.SQSMessage) string {
+	for _, name := range []string{"TraceId", "traceId", "X-Request-Id"} {
+		if attr, ok := message.MessageAttributes[name]; ok && attr.StringValue != nil && *attr.StringValue != "" {
+			return *attr.StringValue
+		}
+	}
+	return uuid.NewString()
 }
 
 func (h *MessageHandler) handleBatch(ctx context.Context) error {
@@ -123,7 +154,7 @@ func (h *MessageHandler) handleMessage(ctx context.Context, message models.Resto
 		return h.errorf("could not restore folder %s in org %d: %w", p.NodeId, message.OrgId, err)
 	}
 	if err := h.Store.Changelog.LogRestores(ctx, int64(message.OrgId), message.DatasetId, message.UserId, changelog); err != nil {
-		h.LogWarnWithFields(log.Fields{"error": err}, "unable to send changelog events")
+		h.LogWarnWithFields(pennsievelog.Fields{pennsievelog.KeyError: err}, "unable to send changelog events")
 	}
 
 	return nil

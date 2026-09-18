@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
+	"github.com/pennsieve/packages-service/api/logging"
 )
 
 type DiscoverCloudFrontSignedURLHandler struct {
@@ -55,10 +56,11 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	)
 
 	if packageNodeID != "" {
-		h.logger.WithField("packageId", packageNodeID).Info("handling GET request for discover viewer assets")
+		h.logger.LogInfoWithFields(logging.Fields{logging.KeyPackageNodeID: packageNodeID},
+			"handling GET request for discover viewer assets")
 		orgID, datasetIntID, packageIntID, err = h.resolveDiscoverPackage(ctx, packageNodeID)
 		if err != nil {
-			return h.logAndBuildError(fmt.Sprintf("failed to resolve published package: %v", err), http.StatusNotFound), nil
+			return h.logAndBuildErrorCause("failed to resolve published package", http.StatusNotFound, err), nil
 		}
 		query = fmt.Sprintf(`
 			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
@@ -73,10 +75,11 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if parseErr != nil {
 			return h.logAndBuildError("'dataset_id' must be a positive integer (the published-dataset ID)", http.StatusBadRequest), nil
 		}
-		h.logger.WithField("publishedDatasetId", publishedDatasetID).Info("handling GET request for discover viewer assets by dataset")
+		h.logger.LogInfoWithFields(logging.Fields{logging.KeyPublishedDatasetID: publishedDatasetID},
+			"handling GET request for discover viewer assets by dataset")
 		orgID, datasetIntID, err = h.resolveDiscoverDataset(ctx, publishedDatasetID)
 		if err != nil {
-			return h.logAndBuildError(fmt.Sprintf("failed to resolve published dataset: %v", err), http.StatusNotFound), nil
+			return h.logAndBuildErrorCause("failed to resolve published dataset", http.StatusNotFound, err), nil
 		}
 		query = fmt.Sprintf(`
 			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
@@ -93,12 +96,12 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	// Resolve dataset node ID for the response
 	dsQuery := fmt.Sprintf(`SELECT node_id FROM "%d".datasets WHERE id = $1`, orgID)
 	if err := PennsieveDB.QueryRowContext(ctx, dsQuery, datasetIntID).Scan(&datasetNodeID); err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to resolve dataset node ID: %v", err), http.StatusInternalServerError), nil
+		return h.logAndBuildErrorCause("failed to resolve dataset node ID", http.StatusInternalServerError, err), nil
 	}
 
 	rows, err := PennsieveDB.QueryContext(ctx, query, queryArg)
 	if err != nil {
-		return h.logAndBuildError(fmt.Sprintf("failed to query assets: %v", err), http.StatusInternalServerError), nil
+		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
 	defer rows.Close()
 
@@ -117,7 +120,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	for rows.Next() {
 		var a viewerAssetRow
 		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
-			return h.logAndBuildError(fmt.Sprintf("failed to scan asset row: %v", err), http.StatusInternalServerError), nil
+			return h.logAndBuildErrorCause("failed to scan asset row", http.StatusInternalServerError, err), nil
 		}
 
 		// Get linked package node IDs
@@ -169,7 +172,8 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
 			authHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
 			if err := authHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-				h.logger.WithError(err).Warn("failed to load CloudFront signing keys")
+				h.logger.LogWarnWithFields(logging.Fields{logging.KeyError: err, logging.KeySecretName: secretName},
+					"failed to load CloudFront signing keys")
 			}
 		}
 	}
@@ -215,14 +219,20 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverPackage(ctx context.
 	`
 	err = DiscoverDB.QueryRowContext(ctx, discoverQuery, packageNodeID).Scan(&orgID, &datasetIntID)
 	if err != nil {
-		h.logger.WithError(err).WithField("packageNodeId", packageNodeID).Error("failed to look up package in discover database")
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:         err,
+			logging.KeyPackageNodeID: packageNodeID,
+		}, "failed to look up package in discover database")
 		return 0, 0, 0, fmt.Errorf("published package not found")
 	}
 
 	pennsieveQuery := fmt.Sprintf(`SELECT id FROM "%d".packages WHERE node_id = $1`, orgID)
 	err = PennsieveDB.QueryRowContext(ctx, pennsieveQuery, packageNodeID).Scan(&packageIntID)
 	if err != nil {
-		h.logger.WithError(err).WithField("packageNodeId", packageNodeID).Error("failed to get package integer ID")
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:         err,
+			logging.KeyPackageNodeID: packageNodeID,
+		}, "failed to get package integer ID")
 		return 0, 0, 0, fmt.Errorf("package not found in platform")
 	}
 
@@ -244,7 +254,10 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverDataset(ctx context.
 	`
 	err = DiscoverDB.QueryRowContext(ctx, discoverQuery, publishedDatasetID).Scan(&orgID, &datasetIntID)
 	if err != nil {
-		h.logger.WithError(err).WithField("publishedDatasetId", publishedDatasetID).Error("failed to look up dataset in discover database")
+		h.logger.LogErrorWithFields(logging.Fields{
+			logging.KeyError:              err,
+			logging.KeyPublishedDatasetID: publishedDatasetID,
+		}, "failed to look up dataset in discover database")
 		return 0, 0, fmt.Errorf("published dataset not found")
 	}
 

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/uuid"
+	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
-	log "github.com/sirupsen/logrus"
 	"strings"
 )
 
@@ -73,7 +73,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			return h.errorf("publish status error for package %s: %w", restoreInfo.NodeId, err)
 		}
 		if isPublished {
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId}, "package is published; No S3 delete")
+			sqlStore.LogInfoWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId}, "package is published; No S3 delete")
 		} else {
 			deleteMarkerResp, err := h.Store.NoSQL.GetDeleteMarkerVersions(ctx, &restoreInfo)
 			if err != nil {
@@ -83,17 +83,17 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 			if !ok {
 				return h.errorf("no delete record found for %v", restoreInfo)
 			}
-			sqlStore.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "deleteMarker": *deleteMarker}, "delete marker found")
+			sqlStore.LogInfoWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyDeleteMarker: *deleteMarker}, "delete marker found")
 			if deleteResponse, err := h.Store.Object.DeleteObjectsVersion(ctx, *deleteMarker); err != nil {
 				return h.errorf("error restoring S3 object %s: %w", deleteMarker, err)
 			} else if len(deleteResponse.AWSErrors) > 0 {
-				sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "s3Info": *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
+				sqlStore.LogErrorWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyS3Info: *deleteMarker}, "AWS error during S3 restore", deleteResponse.AWSErrors)
 				return h.errorf("AWS error restoring S3 object %s: %v", *deleteMarker, deleteResponse.AWSErrors[0])
 			}
 		}
 		if err = h.Store.NoSQL.RemoveDeleteRecords(ctx, []string{restoreInfo.NodeId}); err != nil {
 			// Don't think this should cause the whole restore to fail
-			sqlStore.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": err}, "error removing delete record")
+			sqlStore.LogErrorWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyError: err}, "error removing delete record")
 		}
 
 		// capture size for post-commit storage update
@@ -121,10 +121,10 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 	// the restore — consistent with prior best-effort semantics.
 	simpleStore := h.Store.SQLFactory.NewSimpleStore(orgId)
 	if storageErr := h.restoreStorage(ctx, int64(orgId), datasetId, restoreInfo, restoredSize, simpleStore); storageErr != nil {
-		h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": storageErr}, "could not update storage after restore")
+		h.LogErrorWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyError: storageErr}, "could not update storage after restore")
 	}
 
-	h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "size": restoredSize}, "restore complete")
+	h.LogInfoWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeySize: restoredSize}, "restore complete")
 	return changelogEvents, nil
 }
 
@@ -142,12 +142,12 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 	err = store.UpdatePackageName(ctx, restoreInfo.Id, originalName)
 	for retryCtx = NewRetryContext(originalName, err); retryCtx.TryAgain; retryCtx.Update(err) {
 		newName = retryCtx.Parts.Next()
-		h.LogDebugWithFields(log.Fields{"previousError": retryCtx.Err, "newName": newName}, "retrying name update")
+		h.LogDebugWithFields(pennsievelog.Fields{pennsievelog.KeyPreviousError: retryCtx.Err, pennsievelog.KeyNewName: newName}, "retrying name update")
 		if spErr := store.RollbackToSavepoint(ctx, savepoint); spErr != nil {
 			return nil, spErr
 		}
 		err = store.UpdatePackageName(ctx, restoreInfo.Id, newName)
-		h.LogDebugWithFields(log.Fields{"error": err, "newName": newName}, "retried name update")
+		h.LogDebugWithFields(pennsievelog.Fields{pennsievelog.KeyError: err, pennsievelog.KeyNewName: newName}, "retried name update")
 	}
 	if retryCtx.Err != nil {
 		// The last UPDATE failed and the tx is aborted. Rollback so callers can
@@ -246,7 +246,7 @@ func (h *MessageHandler) restoreStorages(ctx context.Context, organizationId, da
 func (h *MessageHandler) parseSize(objInfo *store.S3ObjectInfo) int64 {
 	size, err := objInfo.GetSize()
 	if err != nil {
-		h.LogErrorWithFields(log.Fields{"nodeId": objInfo.NodeId, "error": err}, "error parsing package size; using zero")
+		h.LogErrorWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: objInfo.NodeId, pennsievelog.KeyError: err}, "error parsing package size; using zero")
 		size = 0
 	}
 	return size

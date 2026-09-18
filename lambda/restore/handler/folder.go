@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
+	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/changelog"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
-	log "github.com/sirupsen/logrus"
 	"maps"
 	"slices"
 )
@@ -63,7 +63,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 		nonFolderDescNodeIdToInfos := map[string]*models.RestorePackageInfo{}
 		// restore descendant names
 		for _, p := range restoring {
-			sqlStore.LogDebugWithFields(log.Fields{"nodeId": p.NodeId, "state": p.PackageState}, "restoring descendant package name")
+			sqlStore.LogDebugWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: p.NodeId, pennsievelog.KeyPackageState: p.PackageState}, "restoring descendant package name")
 			descRestoreInfo := models.NewRestorePackageInfo(p)
 			if restoredName, err := h.restoreName(ctx, descRestoreInfo, sqlStore); err != nil {
 				return h.errorf("error restoring descendant %s of %s: %w", p.NodeId, restoreInfo.NodeId, err)
@@ -167,9 +167,9 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 	// Storage counters run outside the main tx — see handleFilePackage for rationale.
 	simpleStore := h.Store.SQLFactory.NewSimpleStore(orgId)
 	if storageErr := h.restoreStorages(ctx, int64(orgId), datasetId, restoredFileInfosOut, simpleStore); storageErr != nil {
-		h.LogErrorWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "error": storageErr}, "could not update storage after restore")
+		h.LogErrorWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyError: storageErr}, "could not update storage after restore")
 	}
 
-	h.LogInfoWithFields(log.Fields{"nodeId": restoreInfo.NodeId, "descendantCount": len(restoredFileInfosOut)}, "restore complete")
+	h.LogInfoWithFields(pennsievelog.Fields{pennsievelog.KeyPackageNodeID: restoreInfo.NodeId, pennsievelog.KeyDescendantCount: len(restoredFileInfosOut)}, "restore complete")
 	return changelogEvents, nil
 }

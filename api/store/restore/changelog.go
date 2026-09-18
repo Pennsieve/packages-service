@@ -48,6 +48,10 @@ func (s *sqsChangelogStore) LogRestores(ctx context.Context, orgId, datasetId in
 			Timestamp:   now,
 		}
 	}
+	// NOTE: TraceId here is part of the outbound changelog event schema consumed
+	// by the Jobs Service — it is a business-domain field, NOT this service's
+	// logging correlation id (logging.KeyTraceID). They are deliberately
+	// separate; do not wire one into the other.
 	params := changelog.MessageParams{
 		OrganizationId: orgId,
 		DatasetId:      datasetId,

@@ -15,17 +15,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/store"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/organization"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Test fixtures and helpers
 var (
-	testLogger     = logrus.NewEntry(logrus.New())
+	testLogger     = logging.NewLogWithFields(nil)
 	testPrivateKey *rsa.PrivateKey
 	testPublicKey  *rsa.PublicKey
 	testKeyPEM     string
