@@ -83,7 +83,7 @@ package:
 	@echo "*******************************"
 	@echo ""
 	cd ${WORKING_DIR}/lambda/service; \
-  		env GOOS=linux GOARCH=amd64 go build -o $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_EXEC); \
+  		env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_EXEC); \
 		cd $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/ ; \
 			zip -r $(WORKING_DIR)/lambda/bin/$(SERVICE_PACK)/$(SERVICE_PACKAGE_NAME) .
 	@echo ""
@@ -92,7 +92,7 @@ package:
 	@echo "***************************************"
 	@echo ""
 	cd ${WORKING_DIR}/lambda/restore; \
-  		env GOOS=linux GOARCH=amd64 go build -o $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_EXEC); \
+  		env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_EXEC); \
 		cd $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/ ; \
 			zip -r $(WORKING_DIR)/lambda/bin/$(RESTORE_PACK)/$(RESTORE_PACKAGE_NAME) .
 	@echo ""
