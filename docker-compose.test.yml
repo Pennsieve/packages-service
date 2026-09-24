@@ -18,7 +18,7 @@ services:
     restart: always
   #    command: [ "postgres", "-c", "log_statement=all" ]
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: chainguard/minio:latest
     environment:
       - MINIO_ROOT_USER=awstestkey
       - MINIO_ROOT_PASSWORD=awstestsecret
