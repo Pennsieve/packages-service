@@ -159,7 +159,6 @@ func NewHandlerWithContext(ctx context.Context, request *events.APIGatewayV2HTTP
 		logging.KeyMethod:           requestHandler.method,
 		logging.KeyPath:             requestHandler.path,
 		logging.KeyQueryParams:      requestHandler.queryParams,
-		logging.KeyRequestBody:      requestHandler.body,
 		logging.KeyClaims:           requestHandler.claims,
 		logging.KeyTraceIDInherited: inheritedTrace,
 	}, "creating RequestHandler")
@@ -234,8 +233,8 @@ func (h *RequestHandler) buildResponse(body any, status int) (*events.APIGateway
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		h.logger.LogErrorWithFields(logging.Fields{
-			logging.KeyError:       err,
-			logging.KeyRequestBody: fmt.Sprintf("%v", body),
+			logging.KeyError: err,
+			"responseType":   fmt.Sprintf("%T", body),
 		}, "error marshalling response body")
 		return nil, err
 	}
