@@ -1,8 +1,6 @@
 module github.com/pennsieve/packages-service/lambda/key-rotation
 
-go 1.22
-
-toolchain go1.23.12
+go 1.27.2
 
 require (
 	github.com/aws/aws-lambda-go v1.47.0
