@@ -6,7 +6,6 @@ A serverless microservice that provides secure access to package assets and data
 
 The Packages Service handles:
 - **Package restoration** from deleted/archived state
-- **Download manifest generation** for secure S3 access
 - **CloudFront signed URLs** for optimized content delivery
 
 ## Architecture
@@ -54,48 +53,7 @@ POST /packages/restore?dataset_id=N:dataset:123
 }
 ```
 
-### 2. Download manifest with S3 Presigned URLs (`POST /download-manifest`)
-Generates a download manifest that includes presigned URLs for direct S3 access to package files.
-
-**Authentication**: Required (dataset-level permissions)
-
-**Request**:
-```bash
-POST /packages/download-manifest?dataset_id=N:dataset:123
-{
-  "nodeIds": [
-    "string"
-  ]
-}
-```
-
-**Response**:
-```json
-{
-  "header": {
-    "count": 0,
-    "size": 0
-  },
-  "data": [
-    {
-      "nodeId": "string",
-      "fileName": "string",
-      "packageName": "string",
-      "path": [
-        "string"
-      ],
-      "url": "string",
-      "size": 0,
-      "fileExtension": "string"
-    }
-  ]
-}
-```
-
-**Query Parameters**:
-- `dataset_id` (required): Dataset node ID
-
-### 3. CloudFront Signed URLs (`GET /cloudfront/sign`)
+### 2. CloudFront Signed URLs (`GET /cloudfront/sign`)
 Generates CloudFront signed URLs for optimized content delivery with CDN caching.
 
 **Authentication**: Required (dataset-level permissions)

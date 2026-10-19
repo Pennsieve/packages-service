@@ -15,9 +15,6 @@ func (h *RequestHandler) handle(ctx context.Context) (*events.APIGatewayV2HTTPRe
 	case "/restore":
 		restoreHandler := RestoreHandler{RequestHandler: *h}
 		return restoreHandler.handle(ctx)
-	case "/download-manifest":
-		downloadHandler := DownloadManifestHandler{RequestHandler: *h}
-		return downloadHandler.handle(ctx)
 	case "/formats":
 		formatsHandler := FormatsHandler{RequestHandler: *h}
 		switch h.method {

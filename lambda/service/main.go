@@ -11,9 +11,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	_ "github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/service/handler"
@@ -42,8 +40,6 @@ func init() {
 	}
 
 	handler.SQSClient = sqs.NewFromConfig(cfg)
-	handler.S3Client = s3.NewFromConfig(cfg)
-	handler.AssumeRoleClient = sts.NewFromConfig(cfg)
 
 	// Connect to discover_postgres database
 	discoverDB, err := connectRDSDiscover()

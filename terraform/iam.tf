@@ -85,47 +85,6 @@ data "aws_iam_policy_document" "packages_service_iam_policy_document" {
   }
 
   statement {
-    sid    = "PackagesServiceLambdaS3Permissions"
-    effect = "Allow"
-    actions = [
-      "s3:GetObject",
-      "s3:GetObjectVersion"
-    ]
-    resources = [
-      data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.storage_bucket_arn}/*",
-      data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.sparc_storage_bucket_arn}/*",
-      data.terraform_remote_state.platform_infrastructure.outputs.rejoin_storage_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.rejoin_storage_bucket_arn}/*",
-      data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.precision_storage_bucket_arn}/*",
-      data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn,
-      "${data.terraform_remote_state.africa_south_region.outputs.af_south_s3_storage_bucket_arn}/*",
-      data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_publish50_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.awsod_sparc_publish50_bucket_arn}/*",
-      data.terraform_remote_state.platform_infrastructure.outputs.awsod_edots_publish50_bucket_arn,
-      "${data.terraform_remote_state.platform_infrastructure.outputs.awsod_edots_publish50_bucket_arn}/*",
-      data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn,
-      "${data.terraform_remote_state.upload_service.outputs.uploads_bucket_arn}/*",
-      "arn:aws:s3:::pennsieve-*-package-*/*"
-    ]
-  }
-
-  # Allow assuming cross-account roles for external publish buckets
-  # - sparc_bucket_role_arn: SPARC account buckets
-  # - rejoin_bucket_role_arn: RE-JOIN and PRECISION account buckets (same account)
-  statement {
-    sid    = "AssumeExternalPublishBucketRoles"
-    effect = "Allow"
-    actions = ["sts:AssumeRole"]
-    resources = [
-      data.terraform_remote_state.platform_infrastructure.outputs.sparc_bucket_role_arn,
-      data.terraform_remote_state.platform_infrastructure.outputs.rejoin_bucket_role_arn,
-    ]
-  }
-
-  statement {
     sid    = "PackagesServiceLambdaSSMPermissions"
     effect = "Allow"
     actions = [
