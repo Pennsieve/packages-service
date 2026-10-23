@@ -59,6 +59,8 @@ locals {
     "https://discover.pennsieve.net",
     "https://app.pennsieve.net",
     "https://dev.epilepsy.science",
+    "https://sparc.science",
+    "https://staging.sparc.science",
   ])
   external_bucket_roles = {
     // NIH account SPARC publish bucket to role
