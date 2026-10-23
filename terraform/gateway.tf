@@ -3,7 +3,7 @@ resource "aws_apigatewayv2_api" "packages_service_api" {
   protocol_type = "HTTP"
   description   = "API for the lambda-based Packages API"
   cors_configuration {
-    allow_origins     = local.cors_allowed_origins
+    allow_origins     = var.cors_allowed_origins
     allow_methods = ["OPTIONS", "GET", "POST", "PATCH", "DELETE"]
     allow_headers = ["*"]
     allow_credentials = true
