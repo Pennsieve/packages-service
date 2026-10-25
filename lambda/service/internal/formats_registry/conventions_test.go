@@ -26,6 +26,10 @@ var fileTypesNotInGoCore = map[string]bool{
 	// MATLAB, the script type); remove from this allowlist once
 	// packages-service depends on that version.
 	"MAT": true,
+	// Added in pennsieve-go-core#64; remove once packages-service depends on
+	// that version.
+	"OMEZarr": true,
+	"TSZarr":  true,
 }
 
 // Every go-core file type has a registry entry, so a package of that type

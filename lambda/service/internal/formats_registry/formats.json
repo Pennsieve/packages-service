@@ -382,6 +382,15 @@
       "edam": "format_3727"
     },
     {
+      "id": "ome-zarr",
+      "name": "OME-Zarr",
+      "description": "Multiscale image in the OME-NGFF Zarr layout. Uploaded as a single zip (.ozx / .ome.zarr.zip); also the platform's image bundles.",
+      "mediaTypes": ["application/vnd.pennsieve.ome-zarr"],
+      "fileTypes": ["OMEZarr"],
+      "extensions": [".ozx", ".ome.zarr.zip"],
+      "edam": "format_3915"
+    },
+    {
       "id": "bruker-tiff",
       "name": "Bruker TIFF",
       "description": "Bruker multi-frame TIFF image.",
@@ -475,6 +484,15 @@
       "mediaTypes": ["application/vnd.pennsieve.mef3"],
       "fileTypes": ["MEF3"],
       "extensions": [".mefd.gz"]
+    },
+    {
+      "id": "ts-zarr",
+      "name": "TS-Zarr timeseries",
+      "description": "Pennsieve's timeseries format: a Zarr v3 bundle of multi-resolution channels (TS-Zarr spec). Uploaded as a single zip (.ts.zarr.zip); also the platform's timeseries bundles.",
+      "mediaTypes": ["application/vnd.pennsieve.ts-zarr"],
+      "fileTypes": ["TSZarr"],
+      "extensions": [".ts.zarr.zip"],
+      "edam": "format_3915"
     },
     {
       "id": "feather",

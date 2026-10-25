@@ -58,4 +58,6 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
        them. The registry keeps describing them.
      - **MAT:** added to go-core in pennsieve-go-core#63. Remove it from the
        allowlist once packages-service depends on that version.
+     - **OMEZarr, TSZarr:** added in pennsieve-go-core#64. Remove them once
+       packages-service depends on that version.
 3. Open a PR. Reviewed by the packages-service owners.
