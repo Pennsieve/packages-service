@@ -929,9 +929,9 @@
       "id": "pennsieve-published-dataset",
       "name": "Pennsieve Published Dataset (PPD)",
       "description": "A dataset as Pennsieve publishes it: manifest.json (schema.org Dataset metadata listing every file), readme.md, changelog.md and banner.jpg at the root, and the data under files/. The data under files/ may follow another structure, such as BIDS.",
-      "uri": "https://schemas.pennsieve.io/structures/pennsieve-published-dataset/v1",
-      "spec": "https://schemas.pennsieve.io/structures/pennsieve-published-dataset/v1",
-      "versions": ["1", "2", "3.0", "4", "5.0"],
+      "uri": "https://schemas.pennsieve.io/structures/pennsieve-published-dataset",
+      "spec": "https://schemas.pennsieve.io/structures/pennsieve-published-dataset/v5.0",
+      "versions": ["1", "2", "3.0", "4.0", "5.0"],
       "contentRoot": "files"
     },
     {

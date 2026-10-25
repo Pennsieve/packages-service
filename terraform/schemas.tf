@@ -21,12 +21,14 @@ resource "aws_s3_object" "formats_registry" {
 }
 
 # Specifications of the folder structures Pennsieve defines (formats.json
-# "structures"), published at their uri. Plain text so a browser shows them.
+# "structures"), published at their spec link, one per version (a Pennsieve
+# Published Dataset's version is manifest.json's pennsieveSchemaVersion).
+# Plain text so a browser shows them.
 resource "aws_s3_object" "structure_pennsieve_published_dataset" {
   count = var.publish_schemas ? 1 : 0
 
   bucket        = data.terraform_remote_state.platform_infrastructure.outputs.schemas_bucket_name
-  key           = "structures/pennsieve-published-dataset/v1"
+  key           = "structures/pennsieve-published-dataset/v5.0"
   source        = "${path.module}/../lambda/service/internal/formats_registry/structures/pennsieve-published-dataset.md"
   etag          = filemd5("${path.module}/../lambda/service/internal/formats_registry/structures/pennsieve-published-dataset.md")
   content_type  = "text/plain; charset=utf-8"
