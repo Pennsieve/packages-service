@@ -9,8 +9,10 @@ import (
 //go:embed formats.json
 var formatsData []byte
 
-// Kind is "directory" for a format that is a folder (OME-Zarr), stored as one
-// zip per package; empty means a single file.
+// Kind is "directory" for a format that is a folder (OME-Zarr, MEF3), stored
+// as one compressed file per package; empty means a single file.
+// FolderExtensions are the folder's own endings (.ome.zarr, .mefd), how a
+// folder of that format is recognised; Extensions are the stored file's.
 type Format struct {
 	ID          string   `json:"id"`
 	Kind        string   `json:"kind,omitempty"`
@@ -20,6 +22,8 @@ type Format struct {
 	FileTypes   []string `json:"fileTypes,omitempty"`
 	Extensions  []string `json:"extensions,omitempty"`
 	EDAM        string   `json:"edam,omitempty"`
+	// Only for kind directory.
+	FolderExtensions []string `json:"folderExtensions,omitempty"`
 }
 
 // Structure is a folder layout a whole input or output can follow (BIDS), named

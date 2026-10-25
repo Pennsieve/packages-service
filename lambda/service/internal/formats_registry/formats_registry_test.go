@@ -83,7 +83,36 @@ func TestAll_Kinds(t *testing.T) {
 			dirs = append(dirs, f.ID)
 		}
 	}
-	assert.ElementsMatch(t, []string{"ome-zarr", "ts-zarr"}, dirs)
+	assert.ElementsMatch(t, []string{"mef3", "ome-zarr", "ts-zarr"}, dirs)
+}
+
+// Folder extensions belong to folder formats, start with a dot, and differ
+// from every stored extension, so a folder and its compressed file are never
+// confused.
+func TestAll_FolderExtensions(t *testing.T) {
+	stored := map[string]bool{}
+	for _, f := range All().Formats {
+		for _, e := range f.Extensions {
+			stored[e] = true
+		}
+	}
+	seen := map[string]string{}
+	for _, f := range All().Formats {
+		if f.Kind != "directory" {
+			assert.Emptyf(t, f.FolderExtensions, "%q isn't a folder format", f.ID)
+			continue
+		}
+		for _, e := range f.FolderExtensions {
+			assert.Regexpf(t, `^\.[a-z0-9.]+$`, e, "folder extension of %q", f.ID)
+			assert.Falsef(t, stored[e], "%q is also a stored extension", e)
+			if prev, dup := seen[e]; dup {
+				t.Errorf("formats %q and %q share folder extension %q", prev, f.ID, e)
+			}
+			seen[e] = f.ID
+		}
+	}
+	mef3, _ := Get("mef3")
+	assert.Equal(t, []string{".mefd"}, mef3.FolderExtensions)
 }
 
 // Structures are what app.yml's conformsTo names (bids, bids@1.9): ids follow

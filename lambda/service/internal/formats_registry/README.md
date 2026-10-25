@@ -41,9 +41,12 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
 
 ## Folder formats and structures
 
-- **`kind: directory`** marks a format that is a folder (OME-Zarr, TS-Zarr).
-  A package is still one file: the zipped form, listed in `extensions`. An
-  app says in app.yml whether it wants the folder or the zip (`container`).
+- **`kind: directory`** marks a format that is a folder (OME-Zarr, TS-Zarr,
+  MEF3). A package is still one file, its compressed form, listed in
+  `extensions`. `folderExtensions` lists the folder's own endings (`.ome.zarr`,
+  `.mefd`): how a folder of that format is recognised, e.g. among an app's
+  outputs. An app says in app.yml whether it wants the folder or the stored
+  file (`container`).
 - **`structures`** lists folder layouts a whole input or output can follow,
   such as BIDS. They aren't file formats and have no media type. App
   manifests name them with `conformsTo: <id>` or `<id>@<version>` (the term
@@ -57,7 +60,8 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
    - required: `id` (lowercase, dashes), `name`, `mediaTypes` (following the
      convention above);
    - optional: `description`, `fileTypes` (go-core `fileType` names),
-     `extensions` (with the dot), `edam`.
+     `extensions` (with the dot), `edam`, and for a folder format `kind:
+     directory` with `folderExtensions`.
 2. Run `go test ./internal/formats_registry/`. The tests check:
    - ids are unique and the required fields are set;
    - EDAM ids are well formed;

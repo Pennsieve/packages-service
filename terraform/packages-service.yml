@@ -775,7 +775,13 @@ components:
         kind:
           type: string
           enum: [directory]
-          description: directory for a format that is a folder (OME-Zarr), stored as one zip per package. Absent for a single file.
+          description: directory for a format that is a folder (OME-Zarr, MEF3), stored as one compressed file per package. Absent for a single file.
+        folderExtensions:
+          type: array
+          items:
+            type: string
+          description: For a folder format, the folder's own endings (.ome.zarr, .mefd)
+          example: [".ome.zarr"]
 
     structure:
       type: object

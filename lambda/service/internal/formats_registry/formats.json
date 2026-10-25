@@ -389,6 +389,7 @@
       "mediaTypes": ["application/vnd.pennsieve.ome-zarr"],
       "fileTypes": ["OMEZarr"],
       "extensions": [".ozx", ".ome.zarr.zip"],
+      "folderExtensions": [".ome.zarr"],
       "edam": "format_3915"
     },
     {
@@ -480,11 +481,13 @@
     },
     {
       "id": "mef3",
+      "kind": "directory",
       "name": "MEF3 Timeseries",
-      "description": "Multiscale Electrophysiology Format version 3.",
+      "description": "Multiscale Electrophysiology Format version 3: a .mefd session folder of channel (.timd) and segment (.segd) folders. Uploaded compressed (.mefd.gz).",
       "mediaTypes": ["application/vnd.pennsieve.mef3"],
       "fileTypes": ["MEF3"],
-      "extensions": [".mefd.gz"]
+      "extensions": [".mefd.gz"],
+      "folderExtensions": [".mefd"]
     },
     {
       "id": "ts-zarr",
@@ -494,6 +497,7 @@
       "mediaTypes": ["application/vnd.pennsieve.ts-zarr"],
       "fileTypes": ["TSZarr"],
       "extensions": [".ts.zarr.zip"],
+      "folderExtensions": [".ts.zarr"],
       "edam": "format_3915"
     },
     {
