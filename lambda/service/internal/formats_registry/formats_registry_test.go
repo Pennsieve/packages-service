@@ -1,7 +1,10 @@
 package formatsregistry
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,4 +155,44 @@ func getStructure(id string) (Structure, bool) {
 		}
 	}
 	return Structure{}, false
+}
+
+// A structure Pennsieve defines (its uri on schemas.pennsieve.io) has its
+// specification in structures/<id>/v<version>.md, which terraform publishes
+// at its spec link. Every listed version has a file, the spec link names one
+// of them, and every file belongs to a structure and a listed version.
+func TestStructures_PennsieveSpecsArePublished(t *testing.T) {
+	const host = "https://schemas.pennsieve.io/structures/"
+	files, err := filepath.Glob("structures/*/v*.md")
+	require.NoError(t, err)
+	onDisk := map[string]bool{}
+	for _, f := range files {
+		onDisk[filepath.ToSlash(f)] = true
+	}
+	owned := map[string]bool{}
+	for _, s := range All().Structures {
+		if !strings.HasPrefix(s.URI, host) {
+			continue
+		}
+		owned[s.ID] = true
+		assert.Equalf(t, host+s.ID, s.URI, "uri of %q is unversioned", s.ID)
+		require.NotEmptyf(t, s.Versions, "%q lists its versions", s.ID)
+		for _, v := range s.Versions {
+			_, err := os.Stat("structures/" + s.ID + "/v" + v + ".md")
+			if v == s.Versions[len(s.Versions)-1] {
+				assert.NoErrorf(t, err, "%q: the current version %s has no specification file", s.ID, v)
+			}
+		}
+		version := strings.TrimPrefix(s.Spec, host+s.ID+"/v")
+		assert.Truef(t, onDisk["structures/"+s.ID+"/v"+version+".md"], "%q: spec %s has no file", s.ID, s.Spec)
+		assert.Containsf(t, s.Versions, version, "%q: spec names a version it doesn't list", s.ID)
+	}
+	for f := range onDisk {
+		parts := strings.Split(f, "/")
+		id, version := parts[1], strings.TrimSuffix(strings.TrimPrefix(parts[2], "v"), ".md")
+		require.Truef(t, owned[id], "%s: no Pennsieve structure %q", f, id)
+		s, _ := getStructure(id)
+		assert.Containsf(t, s.Versions, version, "%s: version %s isn't listed", f, version)
+	}
+	assert.True(t, owned["pennsieve-published-dataset"])
 }

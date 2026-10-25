@@ -56,9 +56,39 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
   versions known to exist) and `contentRoot` (the folder where another
   structure may start: `files` in a published dataset). Don't give a
   structure the id of a format.
-- **Structures Pennsieve defines** have their specification in
-  `structures/<id>.md`, published at their `uri` (`terraform/schemas.tf`):
-  [Pennsieve Published Dataset](structures/pennsieve-published-dataset.md).
+- **Structures Pennsieve defines** (their `uri` is
+  `https://schemas.pennsieve.io/structures/<id>`) have a specification per
+  version in `structures/<id>/v<version>.md`, published at
+  `schemas.<domain>/structures/<id>/v<version>` (`terraform/schemas.tf`
+  publishes every such file). Their `spec` links to the current version:
+  [Pennsieve Published Dataset 5.0](structures/pennsieve-published-dataset/v5.0.md).
+
+## Adding or changing a structure
+
+1. Add an entry to `structures` in `formats.json`:
+   - required: `id` (lowercase, dashes; never a format's id), `name`, `uri`
+     (the structure's identifier, unversioned) and `spec` (a link to its
+     specification);
+   - optional: `description`, `validator`, `versions` (the versions known to
+     exist, oldest first) and `contentRoot` (the folder where another
+     structure may start, e.g. `files`).
+2. **A structure Pennsieve defines:**
+   - `uri`: `https://schemas.pennsieve.io/structures/<id>`;
+   - write its specification to `structures/<id>/v<version>.md`;
+   - `spec`: `https://schemas.pennsieve.io/structures/<id>/v<version>`, the
+     current version;
+   - list every version in `versions`, the current one last.
+
+   **A new version** is a new file next to the old ones, the version added
+   to `versions`, and `spec` pointed at it. Old versions stay published,
+   because app.yml files may name them (`<id>@<version>`).
+3. Run `go test ./internal/formats_registry/`. The tests check ids, links,
+   content roots and versions, and that each Pennsieve structure's current
+   version and spec link have a file, and every file a listed version.
+4. Open a PR. Reviewed by the packages-service owners. On deploy, the API
+   serves it, and terraform publishes `formats/v1.json` and the
+   specification files to schemas.<domain>. app.yml needs no change: its
+   schema checks only the shape of an id.
 
 ## Adding a format
 

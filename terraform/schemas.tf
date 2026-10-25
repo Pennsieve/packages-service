@@ -21,16 +21,21 @@ resource "aws_s3_object" "formats_registry" {
 }
 
 # Specifications of the folder structures Pennsieve defines (formats.json
-# "structures"), published at their spec link, one per version (a Pennsieve
-# Published Dataset's version is manifest.json's pennsieveSchemaVersion).
-# Plain text so a browser shows them.
-resource "aws_s3_object" "structure_pennsieve_published_dataset" {
-  count = var.publish_schemas ? 1 : 0
+# "structures"): every structures/<id>/v<version>.md in the registry,
+# published at its spec link, schemas.<domain>/structures/<id>/v<version>.
+# A new version is a new file. Plain text so a browser shows them.
+locals {
+  structures_dir  = "${path.module}/../lambda/service/internal/formats_registry/structures"
+  structure_specs = fileset(local.structures_dir, "*/v*.md")
+}
+
+resource "aws_s3_object" "structure_specs" {
+  for_each = var.publish_schemas ? local.structure_specs : toset([])
 
   bucket        = data.terraform_remote_state.platform_infrastructure.outputs.schemas_bucket_name
-  key           = "structures/pennsieve-published-dataset/v5.0"
-  source        = "${path.module}/../lambda/service/internal/formats_registry/structures/pennsieve-published-dataset.md"
-  etag          = filemd5("${path.module}/../lambda/service/internal/formats_registry/structures/pennsieve-published-dataset.md")
+  key           = "structures/${trimsuffix(each.value, ".md")}"
+  source        = "${local.structures_dir}/${each.value}"
+  etag          = filemd5("${local.structures_dir}/${each.value}")
   content_type  = "text/plain; charset=utf-8"
   cache_control = "public, max-age=300"
 }
