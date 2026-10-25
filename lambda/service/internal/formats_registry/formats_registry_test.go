@@ -1,6 +1,7 @@
 package formatsregistry
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,4 +49,26 @@ func TestGet_Miss(t *testing.T) {
 func TestGet_CaseSensitive(t *testing.T) {
 	_, ok := Get("PDF")
 	assert.False(t, ok, "lookup should be case-sensitive on id")
+}
+
+// An EDAM id is the short form, format_ and four digits, and only formats
+// EDAM actually defines carry one (EDF, MEF and NWB don't).
+func TestAll_EDAMIds(t *testing.T) {
+	re := regexp.MustCompile(`^format_\d{4}$`)
+	n := 0
+	for _, f := range All().Formats {
+		if f.EDAM == "" {
+			continue
+		}
+		n++
+		assert.Regexpf(t, re, f.EDAM, "edam for %q", f.ID)
+	}
+	assert.NotZero(t, n, "some formats carry an EDAM id")
+	for _, id := range []string{"edf", "mef", "nwb"} {
+		f, ok := Get(id)
+		require.True(t, ok)
+		assert.Emptyf(t, f.EDAM, "%s has no EDAM format", id)
+	}
+	hdf5, _ := Get("hdf5")
+	assert.Equal(t, "format_3590", hdf5.EDAM)
 }
