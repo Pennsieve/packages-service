@@ -803,9 +803,20 @@ components:
           type: string
           description: Link to the specification
           example: "https://bids-specification.readthedocs.io/"
+        uri:
+          type: string
+          description: Canonical identifier of the structure
         validator:
           type: string
           description: Link to a validator, when one exists
+        versions:
+          type: array
+          items:
+            type: string
+          description: Versions known to exist; absent means any
+        contentRoot:
+          type: string
+          description: Folder where another structure may start (files in a published dataset)
 
     formatsResponse:
       type: object

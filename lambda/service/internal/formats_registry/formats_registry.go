@@ -28,12 +28,20 @@ type Format struct {
 
 // Structure is a folder layout a whole input or output can follow (BIDS), named
 // by app.yml's conformsTo. It isn't a file format: it has no media type.
+// URI is its canonical identifier, also outside Pennsieve (a view crate's
+// conformsTo). ContentRoot is the folder where another structure may start
+// (files/ in a published dataset), so app.yml can say
+// conformsTo: [pennsieve-published-dataset, bids]. Versions lists the
+// versions known to exist; empty means any.
 type Structure struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Spec        string `json:"spec"`
-	Validator   string `json:"validator,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	URI         string   `json:"uri"`
+	Spec        string   `json:"spec"`
+	Validator   string   `json:"validator,omitempty"`
+	Versions    []string `json:"versions,omitempty"`
+	ContentRoot string   `json:"contentRoot,omitempty"`
 }
 
 type Formats struct {

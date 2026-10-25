@@ -50,9 +50,15 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
 - **`structures`** lists folder layouts a whole input or output can follow,
   such as BIDS. They aren't file formats and have no media type. App
   manifests name them with `conformsTo: <id>` or `<id>@<version>` (the term
-  RO-Crate and DCAT use). Each one has `id`, `name`, `spec` (a link to the
-  specification) and optionally `description` and `validator`. Don't give a
+  RO-Crate and DCAT use), or a list of them, outermost first. Each one has
+  `id`, `name`, `uri` (its canonical identifier), `spec` (a link to the
+  specification) and optionally `description`, `validator`, `versions` (the
+  versions known to exist) and `contentRoot` (the folder where another
+  structure may start: `files` in a published dataset). Don't give a
   structure the id of a format.
+- **Structures Pennsieve defines** have their specification in
+  `structures/<id>.md`, published at their `uri` (`terraform/schemas.tf`):
+  [Pennsieve Published Dataset](structures/pennsieve-published-dataset.md).
 
 ## Adding a format
 

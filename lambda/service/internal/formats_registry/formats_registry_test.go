@@ -129,6 +129,27 @@ func TestStructures(t *testing.T) {
 		assert.Falsef(t, clash, "structure %q has the id of a format", s.ID)
 		assert.NotEmptyf(t, s.Name, "name for %q", s.ID)
 		assert.Regexpf(t, `^https://`, s.Spec, "spec for %q", s.ID)
+		assert.Regexpf(t, `^https://`, s.URI, "uri for %q", s.ID)
+		// A content root is one relative folder, not a path out of the tree.
+		if s.ContentRoot != "" {
+			assert.Regexpf(t, `^[a-z0-9_-]+$`, s.ContentRoot, "contentRoot for %q", s.ID)
+		}
+		for _, v := range s.Versions {
+			assert.Regexpf(t, `^[0-9A-Za-z.+-]+$`, v, "version of %q", s.ID)
+		}
 	}
-	assert.True(t, seen["bids"], "BIDS is listed")
+	for _, id := range []string{"bids", "sparc-sds", "pennsieve-published-dataset", "ro-crate"} {
+		assert.Truef(t, seen[id], "%s is listed", id)
+	}
+	ppd, _ := getStructure("pennsieve-published-dataset")
+	assert.Equal(t, "files", ppd.ContentRoot)
+}
+
+func getStructure(id string) (Structure, bool) {
+	for _, s := range All().Structures {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return Structure{}, false
 }
