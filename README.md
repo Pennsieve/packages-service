@@ -306,3 +306,12 @@ terraform apply -var="cloudfront_public_key_pem=$(cat .cloudfront-keys/public_ke
 3. Update API documentation in `terraform/packages-service.yml`
 4. Ensure all tests pass: `make test && make test-ci`
 5. Update this README for significant changes
+
+## Package formats
+
+The formats Pennsieve knows (media types, file types, extensions, EDAM ids) are
+in `lambda/service/internal/formats_registry/formats.json`. Served at
+`GET /packages/formats` and published at
+https://schemas.pennsieve.io/formats/v1.json. See that directory's README for
+the media type convention and how to add a format.
+

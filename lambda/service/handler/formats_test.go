@@ -53,6 +53,7 @@ func TestFormatsRoute_GetContainsKnownFormat(t *testing.T) {
 			foundPDF = true
 			assert.Equal(t, "PDF", f.Name)
 			assert.Contains(t, f.MediaTypes, "application/pdf")
+			assert.Equal(t, "format_3508", f.EDAM, "the response carries the EDAM id")
 			break
 		}
 	}

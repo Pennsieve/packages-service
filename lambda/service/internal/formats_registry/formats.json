@@ -7,7 +7,8 @@
       "description": "Portable Document Format.",
       "mediaTypes": ["application/pdf"],
       "fileTypes": ["PDF"],
-      "extensions": [".pdf"]
+      "extensions": [".pdf"],
+      "edam": "format_3508"
     },
     {
       "id": "mef",
@@ -63,7 +64,8 @@
       "description": "Digital Imaging and Communications in Medicine.",
       "mediaTypes": ["application/dicom"],
       "fileTypes": ["DICOM"],
-      "extensions": [".dcm", ".dicom"]
+      "extensions": [".dcm", ".dicom"],
+      "edam": "format_3548"
     },
     {
       "id": "nifti",
@@ -71,7 +73,8 @@
       "description": "Neuroimaging Informatics Technology Initiative volume.",
       "mediaTypes": ["application/x-nifti", "application/x-nifti-gz"],
       "fileTypes": ["NIFTI"],
-      "extensions": [".nii", ".nii.gz", ".nifti"]
+      "extensions": [".nii", ".nii.gz", ".nifti"],
+      "edam": "format_3549"
     },
     {
       "id": "png",
@@ -79,7 +82,8 @@
       "description": "Portable Network Graphics raster image.",
       "mediaTypes": ["image/png"],
       "fileTypes": ["PNG"],
-      "extensions": [".png"]
+      "extensions": [".png"],
+      "edam": "format_3603"
     },
     {
       "id": "bci2000",
@@ -138,7 +142,8 @@
       "description": "JavaScript Object Notation document.",
       "mediaTypes": ["application/json"],
       "fileTypes": ["Json"],
-      "extensions": [".json"]
+      "extensions": [".json"],
+      "edam": "format_3464"
     },
     {
       "id": "csv",
@@ -146,7 +151,8 @@
       "description": "Comma-separated values tabular data.",
       "mediaTypes": ["text/csv"],
       "fileTypes": ["CSV"],
-      "extensions": [".csv"]
+      "extensions": [".csv"],
+      "edam": "format_3752"
     },
     {
       "id": "tsv",
@@ -154,7 +160,8 @@
       "description": "Tab-separated values tabular data.",
       "mediaTypes": ["text/tab-separated-values"],
       "fileTypes": ["TSV"],
-      "extensions": [".tsv"]
+      "extensions": [".tsv"],
+      "edam": "format_3475"
     },
     {
       "id": "text",
@@ -162,7 +169,8 @@
       "description": "Plain text document.",
       "mediaTypes": ["text/plain"],
       "fileTypes": ["Text"],
-      "extensions": [".txt", ".text", ".rtf"]
+      "extensions": [".txt", ".text", ".rtf"],
+      "edam": "format_1964"
     },
     {
       "id": "xml",
@@ -170,7 +178,8 @@
       "description": "Extensible Markup Language document.",
       "mediaTypes": ["application/xml"],
       "fileTypes": ["XML"],
-      "extensions": [".xml"]
+      "extensions": [".xml"],
+      "edam": "format_2332"
     },
     {
       "id": "html",
@@ -178,7 +187,8 @@
       "description": "HyperText Markup Language document.",
       "mediaTypes": ["text/html"],
       "fileTypes": ["HTML"],
-      "extensions": [".html", ".htm"]
+      "extensions": [".html", ".htm"],
+      "edam": "format_2331"
     },
     {
       "id": "ms-excel",
@@ -208,7 +218,8 @@
       "description": "MPEG-4 video container.",
       "mediaTypes": ["video/mp4"],
       "fileTypes": ["MP4"],
-      "extensions": [".mp4"]
+      "extensions": [".mp4"],
+      "edam": "format_3997"
     },
     {
       "id": "webm",
@@ -240,7 +251,8 @@
       "description": "MATLAB MAT-file.",
       "mediaTypes": ["application/x-matlab-data"],
       "fileTypes": ["MAT"],
-      "extensions": [".mat", ".mex"]
+      "extensions": [".mat", ".mex"],
+      "edam": "format_3626"
     },
     {
       "id": "jpeg",
@@ -248,7 +260,8 @@
       "description": "JPEG raster image.",
       "mediaTypes": ["image/jpeg"],
       "fileTypes": ["JPEG"],
-      "extensions": [".jpg", ".jpeg"]
+      "extensions": [".jpg", ".jpeg"],
+      "edam": "format_3579"
     },
     {
       "id": "jpeg-2000",
@@ -312,7 +325,8 @@
       "description": "Compressed reference-based genomic alignment.",
       "mediaTypes": ["application/x-cram"],
       "fileTypes": ["CRAM"],
-      "extensions": [".cram"]
+      "extensions": [".cram"],
+      "edam": "format_3462"
     },
     {
       "id": "mgh",
@@ -328,7 +342,8 @@
       "description": "Audio Video Interleave container.",
       "mediaTypes": ["video/x-msvideo"],
       "fileTypes": ["AVI"],
-      "extensions": [".avi"]
+      "extensions": [".avi"],
+      "edam": "format_3990"
     },
     {
       "id": "matlab",
@@ -336,7 +351,8 @@
       "description": "MATLAB source script.",
       "mediaTypes": ["text/x-matlab"],
       "fileTypes": ["MATLAB"],
-      "extensions": [".m"]
+      "extensions": [".m"],
+      "edam": "format_4007"
     },
     {
       "id": "hdf5",
@@ -344,7 +360,8 @@
       "description": "Hierarchical Data Format version 5.",
       "mediaTypes": ["application/x-hdf5"],
       "fileTypes": ["HDF5"],
-      "extensions": [".hdf5", ".h5"]
+      "extensions": [".hdf5", ".h5"],
+      "edam": "format_3590"
     },
     {
       "id": "tiff",
@@ -352,7 +369,8 @@
       "description": "Tagged Image File Format.",
       "mediaTypes": ["image/tiff"],
       "fileTypes": ["TIFF"],
-      "extensions": [".tiff", ".tif"]
+      "extensions": [".tiff", ".tif"],
+      "edam": "format_3591"
     },
     {
       "id": "ome-tiff",
@@ -360,7 +378,8 @@
       "description": "Open Microscopy Environment TIFF with OME-XML metadata.",
       "mediaTypes": ["image/tiff"],
       "fileTypes": ["OMETIFF"],
-      "extensions": [".ome.tiff", ".ome.tif", ".ome.tf2", ".ome.tf8", ".ome.btf", ".ome.xml"]
+      "extensions": [".ome.tiff", ".ome.tif", ".ome.tf2", ".ome.tf8", ".ome.btf", ".ome.xml"],
+      "edam": "format_3727"
     },
     {
       "id": "bruker-tiff",
@@ -376,7 +395,8 @@
       "description": "Graphics Interchange Format raster image.",
       "mediaTypes": ["image/gif"],
       "fileTypes": ["GIF"],
-      "extensions": [".gif"]
+      "extensions": [".gif"],
+      "edam": "format_3467"
     },
     {
       "id": "analyze",
@@ -518,7 +538,8 @@
       "description": "Binary Alignment Map for genomic reads.",
       "mediaTypes": ["application/x-bam"],
       "fileTypes": ["BAM"],
-      "extensions": [".bam", ".bcl", ".bcl.gz"]
+      "extensions": [".bam", ".bcl", ".bcl.gz"],
+      "edam": "format_2572"
     },
     {
       "id": "biodac",
@@ -581,7 +602,8 @@
       "description": "Encapsulated PostScript image.",
       "mediaTypes": ["application/postscript"],
       "fileTypes": ["EPS"],
-      "extensions": [".eps", ".ps"]
+      "extensions": [".eps", ".ps"],
+      "edam": "format_3466"
     },
     {
       "id": "fcs",
@@ -597,7 +619,8 @@
       "description": "FASTA biological sequence format.",
       "mediaTypes": ["application/x-fasta"],
       "fileTypes": ["FASTA"],
-      "extensions": [".fasta"]
+      "extensions": [".fasta"],
+      "edam": "format_1929"
     },
     {
       "id": "fastq",
@@ -605,7 +628,8 @@
       "description": "FASTQ sequencing reads with quality scores.",
       "mediaTypes": ["application/x-fastq"],
       "fileTypes": ["FASTQ"],
-      "extensions": [".fastq"]
+      "extensions": [".fastq"],
+      "edam": "format_1930"
     },
     {
       "id": "freesurfer-surface",
@@ -628,7 +652,8 @@
       "description": "Hierarchical Data Format (legacy).",
       "mediaTypes": ["application/x-hdf"],
       "fileTypes": ["HDF"],
-      "extensions": [".hdf", ".hdf4", ".h4", ".he2", ".he5"]
+      "extensions": [".hdf", ".hdf4", ".h4", ".he2", ".he5"],
+      "edam": "format_3873"
     },
     {
       "id": "imaris",
@@ -796,7 +821,8 @@
       "description": "Python source code.",
       "mediaTypes": ["text/x-python"],
       "fileTypes": ["Python"],
-      "extensions": [".py"]
+      "extensions": [".py"],
+      "edam": "format_3996"
     },
     {
       "id": "r",
@@ -804,7 +830,8 @@
       "description": "R source code.",
       "mediaTypes": ["text/x-r"],
       "fileTypes": ["R"],
-      "extensions": [".r"]
+      "extensions": [".r"],
+      "edam": "format_3999"
     },
     {
       "id": "rdata",
@@ -836,7 +863,8 @@
       "description": "Variant Call Format genomic variants.",
       "mediaTypes": ["application/x-vcf"],
       "fileTypes": ["VariantData"],
-      "extensions": [".vcf"]
+      "extensions": [".vcf"],
+      "edam": "format_3016"
     },
     {
       "id": "yaml",
@@ -844,7 +872,8 @@
       "description": "YAML Ain't Markup Language document.",
       "mediaTypes": ["application/yaml"],
       "fileTypes": ["YAML"],
-      "extensions": [".yaml", ".yml"]
+      "extensions": [".yaml", ".yml"],
+      "edam": "format_3750"
     },
     {
       "id": "zip",
@@ -852,7 +881,8 @@
       "description": "Compressed archive (ZIP or tar.gz).",
       "mediaTypes": ["application/zip"],
       "fileTypes": ["ZIP"],
-      "extensions": [".zip", ".tar", ".tar.gz"]
+      "extensions": [".zip", ".tar", ".tar.gz"],
+      "edam": "format_3987"
     }
   ]
 }

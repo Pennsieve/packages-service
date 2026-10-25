@@ -60,3 +60,10 @@ locals {
     (data.terraform_remote_state.platform_infrastructure.outputs.precision_publish50_bucket_id) = data.terraform_remote_state.platform_infrastructure.outputs.rejoin_bucket_role_arn
   }
 }
+
+# Publish the formats registry to schemas.<domain>/formats/v1.json (set in
+# the dev and prod wrapper stacks in Pennsieve/infrastructure).
+variable "publish_schemas" {
+  type    = bool
+  default = false
+}
