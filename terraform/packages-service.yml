@@ -772,6 +772,34 @@ components:
         edam:
           type: string
           description: EDAM ontology identifier, when applicable
+        kind:
+          type: string
+          enum: [directory]
+          description: directory for a format that is a folder (OME-Zarr), stored as one zip per package. Absent for a single file.
+
+    structure:
+      type: object
+      required:
+        - id
+        - name
+        - spec
+      properties:
+        id:
+          type: string
+          description: What app.yml's conformsTo names, optionally with @version
+          example: "bids"
+        name:
+          type: string
+          example: "BIDS"
+        description:
+          type: string
+        spec:
+          type: string
+          description: Link to the specification
+          example: "https://bids-specification.readthedocs.io/"
+        validator:
+          type: string
+          description: Link to a validator, when one exists
 
     formatsResponse:
       type: object
@@ -782,8 +810,13 @@ components:
         schemaVersion:
           type: string
           description: Semantic version of the registry payload
-          example: "1.0.0"
+          example: "1.1.0"
         formats:
           type: array
           items:
             $ref: '#/components/schemas/format'
+        structures:
+          type: array
+          description: Folder layouts a whole input or output can follow (BIDS); not file formats
+          items:
+            $ref: '#/components/schemas/structure'

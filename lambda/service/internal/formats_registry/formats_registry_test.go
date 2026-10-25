@@ -10,7 +10,7 @@ import (
 
 func TestAll_SchemaVersion(t *testing.T) {
 	all := All()
-	assert.Equal(t, "1.0.0", all.SchemaVersion)
+	assert.Equal(t, "1.1.0", all.SchemaVersion)
 	assert.NotEmpty(t, all.Formats)
 }
 
@@ -71,4 +71,35 @@ func TestAll_EDAMIds(t *testing.T) {
 	}
 	hdf5, _ := Get("hdf5")
 	assert.Equal(t, "format_3590", hdf5.EDAM)
+}
+
+// A format's kind is empty (a single file) or directory (a folder, stored as
+// one zip per package). The folder formats are OME-Zarr and TS-Zarr.
+func TestAll_Kinds(t *testing.T) {
+	var dirs []string
+	for _, f := range All().Formats {
+		assert.Containsf(t, []string{"", "directory"}, f.Kind, "kind for %q", f.ID)
+		if f.Kind == "directory" {
+			dirs = append(dirs, f.ID)
+		}
+	}
+	assert.ElementsMatch(t, []string{"ome-zarr", "ts-zarr"}, dirs)
+}
+
+// Structures are what app.yml's conformsTo names (bids, bids@1.9): ids follow
+// its pattern, are unique and don't clash with a format id, and each links to
+// its specification.
+func TestStructures(t *testing.T) {
+	re := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	seen := map[string]bool{}
+	for _, s := range All().Structures {
+		assert.Regexpf(t, re, s.ID, "structure id")
+		assert.Falsef(t, seen[s.ID], "duplicate structure id %q", s.ID)
+		seen[s.ID] = true
+		_, clash := Get(s.ID)
+		assert.Falsef(t, clash, "structure %q has the id of a format", s.ID)
+		assert.NotEmptyf(t, s.Name, "name for %q", s.ID)
+		assert.Regexpf(t, `^https://`, s.Spec, "spec for %q", s.ID)
+	}
+	assert.True(t, seen["bids"], "BIDS is listed")
 }

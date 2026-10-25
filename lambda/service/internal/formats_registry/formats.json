@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "formats": [
     {
       "id": "pdf",
@@ -383,6 +383,7 @@
     },
     {
       "id": "ome-zarr",
+      "kind": "directory",
       "name": "OME-Zarr",
       "description": "Multiscale image in the OME-NGFF Zarr layout. Uploaded as a single zip (.ozx / .ome.zarr.zip); also the platform's image bundles.",
       "mediaTypes": ["application/vnd.pennsieve.ome-zarr"],
@@ -487,6 +488,7 @@
     },
     {
       "id": "ts-zarr",
+      "kind": "directory",
       "name": "TS-Zarr timeseries",
       "description": "Pennsieve's timeseries format: a Zarr v3 bundle of multi-resolution channels (TS-Zarr spec). Uploaded as a single zip (.ts.zarr.zip); also the platform's timeseries bundles.",
       "mediaTypes": ["application/vnd.pennsieve.ts-zarr"],
@@ -901,6 +903,21 @@
       "fileTypes": ["ZIP"],
       "extensions": [".zip", ".tar", ".tar.gz"],
       "edam": "format_3987"
+    }
+  ],
+  "structures": [
+    {
+      "id": "bids",
+      "name": "BIDS",
+      "description": "Brain Imaging Data Structure: a folder layout and naming scheme for neuroimaging and physiology studies (sub-*/ses-*/<modality>/), with a dataset_description.json at the root. Derivatives follow it too.",
+      "spec": "https://bids-specification.readthedocs.io/",
+      "validator": "https://github.com/bids-standard/bids-validator"
+    },
+    {
+      "id": "ro-crate",
+      "name": "RO-Crate",
+      "description": "A folder described by an ro-crate-metadata.json at its root: the files, their formats (encodingFormat) and which specifications the folder follows (conformsTo). Pennsieve views are RO-Crates.",
+      "spec": "https://w3id.org/ro/crate"
     }
   ]
 }

@@ -39,6 +39,18 @@ marked obsolete. Many formats Pennsieve relies on have no EDAM id (EDF, BDF,
 MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
 (app.yml) get their EDAM `formats` from here, through the media type.
 
+## Folder formats and structures
+
+- **`kind: directory`** marks a format that is a folder (OME-Zarr, TS-Zarr).
+  A package is still one file: the zipped form, listed in `extensions`. An
+  app says in app.yml whether it wants the folder or the zip (`container`).
+- **`structures`** lists folder layouts a whole input or output can follow,
+  such as BIDS. They aren't file formats and have no media type. App
+  manifests name them with `conformsTo: <id>` or `<id>@<version>` (the term
+  RO-Crate and DCAT use). Each one has `id`, `name`, `spec` (a link to the
+  specification) and optionally `description` and `validator`. Don't give a
+  structure the id of a format.
+
 ## Adding a format
 
 1. Add an entry to `formats.json`:
