@@ -9,19 +9,45 @@ import (
 //go:embed formats.json
 var formatsData []byte
 
+// Kind is "directory" for a format that is a folder (OME-Zarr, MEF3), stored
+// as one compressed file per package; empty means a single file.
+// FolderExtensions are the folder's own endings (.ome.zarr, .mefd), how a
+// folder of that format is recognised; Extensions are the stored file's.
 type Format struct {
 	ID          string   `json:"id"`
+	Kind        string   `json:"kind,omitempty"`
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	MediaTypes  []string `json:"mediaTypes"`
 	FileTypes   []string `json:"fileTypes,omitempty"`
 	Extensions  []string `json:"extensions,omitempty"`
 	EDAM        string   `json:"edam,omitempty"`
+	// Only for kind directory.
+	FolderExtensions []string `json:"folderExtensions,omitempty"`
+}
+
+// Structure is a folder layout a whole input or output can follow (BIDS), named
+// by app.yml's conformsTo. It isn't a file format: it has no media type.
+// URI is its canonical identifier, also outside Pennsieve (a view crate's
+// conformsTo). ContentRoot is the folder where another structure may start
+// (files/ in a published dataset), so app.yml can say
+// conformsTo: [pennsieve-published-dataset, bids]. Versions lists the
+// versions known to exist; empty means any.
+type Structure struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	URI         string   `json:"uri"`
+	Spec        string   `json:"spec"`
+	Validator   string   `json:"validator,omitempty"`
+	Versions    []string `json:"versions,omitempty"`
+	ContentRoot string   `json:"contentRoot,omitempty"`
 }
 
 type Formats struct {
-	SchemaVersion string   `json:"schemaVersion"`
-	Formats       []Format `json:"formats"`
+	SchemaVersion string      `json:"schemaVersion"`
+	Formats       []Format    `json:"formats"`
+	Structures    []Structure `json:"structures"`
 }
 
 var loaded Formats

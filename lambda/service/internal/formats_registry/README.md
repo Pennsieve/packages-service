@@ -39,13 +39,65 @@ marked obsolete. Many formats Pennsieve relies on have no EDAM id (EDF, BDF,
 MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
 (app.yml) get their EDAM `formats` from here, through the media type.
 
+## Folder formats and structures
+
+- **`kind: directory`** marks a format that is a folder (OME-Zarr, TS-Zarr,
+  MEF3). A package is still one file, its compressed form, listed in
+  `extensions`. `folderExtensions` lists the folder's own endings (`.ome.zarr`,
+  `.mefd`): how a folder of that format is recognised, e.g. among an app's
+  outputs. An app says in app.yml whether it wants the folder or the stored
+  file (`container`).
+- **`structures`** lists folder layouts a whole input or output can follow,
+  such as BIDS. They aren't file formats and have no media type. App
+  manifests name them with `conformsTo: <id>` or `<id>@<version>` (the term
+  RO-Crate and DCAT use), or a list of them, outermost first. Each one has
+  `id`, `name`, `uri` (its canonical identifier), `spec` (a link to the
+  specification) and optionally `description`, `validator`, `versions` (the
+  versions known to exist) and `contentRoot` (the folder where another
+  structure may start: `files` in a published dataset). Don't give a
+  structure the id of a format.
+- **Structures Pennsieve defines** (their `uri` is
+  `https://schemas.pennsieve.io/structures/<id>`) have a specification per
+  version in `structures/<id>/v<version>.md`, published at
+  `schemas.<domain>/structures/<id>/v<version>` (`terraform/schemas.tf`
+  publishes every such file). Their `spec` links to the current version:
+  [Pennsieve Published Dataset 5.0](structures/pennsieve-published-dataset/v5.0.md).
+
+## Adding or changing a structure
+
+1. Add an entry to `structures` in `formats.json`:
+   - required: `id` (lowercase, dashes; never a format's id), `name`, `uri`
+     (the structure's identifier, unversioned) and `spec` (a link to its
+     specification);
+   - optional: `description`, `validator`, `versions` (the versions known to
+     exist, oldest first) and `contentRoot` (the folder where another
+     structure may start, e.g. `files`).
+2. **A structure Pennsieve defines:**
+   - `uri`: `https://schemas.pennsieve.io/structures/<id>`;
+   - write its specification to `structures/<id>/v<version>.md`;
+   - `spec`: `https://schemas.pennsieve.io/structures/<id>/v<version>`, the
+     current version;
+   - list every version in `versions`, the current one last.
+
+   **A new version** is a new file next to the old ones, the version added
+   to `versions`, and `spec` pointed at it. Old versions stay published,
+   because app.yml files may name them (`<id>@<version>`).
+3. Run `go test ./internal/formats_registry/`. The tests check ids, links,
+   content roots and versions, and that each Pennsieve structure's current
+   version and spec link have a file, and every file a listed version.
+4. Open a PR. Reviewed by the packages-service owners. On deploy, the API
+   serves it, and terraform publishes `formats/v1.json` and the
+   specification files to schemas.<domain>. app.yml needs no change: its
+   schema checks only the shape of an id.
+
 ## Adding a format
 
 1. Add an entry to `formats.json`:
    - required: `id` (lowercase, dashes), `name`, `mediaTypes` (following the
      convention above);
    - optional: `description`, `fileTypes` (go-core `fileType` names),
-     `extensions` (with the dot), `edam`.
+     `extensions` (with the dot), `edam`, and for a folder format `kind:
+     directory` with `folderExtensions`.
 2. Run `go test ./internal/formats_registry/`. The tests check:
    - ids are unique and the required fields are set;
    - EDAM ids are well formed;
@@ -58,4 +110,6 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
        them. The registry keeps describing them.
      - **MAT:** added to go-core in pennsieve-go-core#63. Remove it from the
        allowlist once packages-service depends on that version.
+     - **OMEZarr, TSZarr:** added in pennsieve-go-core#64. Remove them once
+       packages-service depends on that version.
 3. Open a PR. Reviewed by the packages-service owners.

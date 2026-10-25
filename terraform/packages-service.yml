@@ -772,6 +772,51 @@ components:
         edam:
           type: string
           description: EDAM ontology identifier, when applicable
+        kind:
+          type: string
+          enum: [directory]
+          description: directory for a format that is a folder (OME-Zarr, MEF3), stored as one compressed file per package. Absent for a single file.
+        folderExtensions:
+          type: array
+          items:
+            type: string
+          description: For a folder format, the folder's own endings (.ome.zarr, .mefd)
+          example: [".ome.zarr"]
+
+    structure:
+      type: object
+      required:
+        - id
+        - name
+        - spec
+      properties:
+        id:
+          type: string
+          description: What app.yml's conformsTo names, optionally with @version
+          example: "bids"
+        name:
+          type: string
+          example: "BIDS"
+        description:
+          type: string
+        spec:
+          type: string
+          description: Link to the specification
+          example: "https://bids-specification.readthedocs.io/"
+        uri:
+          type: string
+          description: Canonical identifier of the structure
+        validator:
+          type: string
+          description: Link to a validator, when one exists
+        versions:
+          type: array
+          items:
+            type: string
+          description: Versions known to exist; absent means any
+        contentRoot:
+          type: string
+          description: Folder where another structure may start (files in a published dataset)
 
     formatsResponse:
       type: object
@@ -782,8 +827,13 @@ components:
         schemaVersion:
           type: string
           description: Semantic version of the registry payload
-          example: "1.0.0"
+          example: "1.1.0"
         formats:
           type: array
           items:
             $ref: '#/components/schemas/format'
+        structures:
+          type: array
+          description: Folder layouts a whole input or output can follow (BIDS); not file formats
+          items:
+            $ref: '#/components/schemas/structure'
