@@ -51,5 +51,11 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
    - EDAM ids are well formed;
    - the media type convention;
    - every go-core file type has a format, and every listed file type exists
-     in go-core.
+     in go-core, apart from the allowlist in `conventions_test.go`:
+     - **legacy types** (BCI2000, BNI1, Blackrock, DirectoryViewerData,
+       FSFast, StaticViewerData, WFDB): present on older packages (pennsieve-api's
+       Scala `FileType`), never assigned on upload, since no extension maps to
+       them. The registry keeps describing them.
+     - **MAT:** added to go-core in pennsieve-go-core#63. Remove it from the
+       allowlist once packages-service depends on that version.
 3. Open a PR. Reviewed by the packages-service owners.

@@ -10,16 +10,22 @@ import (
 )
 
 // File types the registry lists that pennsieve-go-core's fileType enum
-// doesn't define (yet). TODO: add them to go-core, or drop them here.
+// doesn't define.
 var fileTypesNotInGoCore = map[string]bool{
+	// Legacy: present on older packages (Scala FileType), never assigned on
+	// upload. No extension maps to them in pennsieve-api either; old importers
+	// set them. The registry keeps describing them.
 	"BCI2000":             true,
 	"BNI1":                true,
 	"Blackrock":           true,
 	"DirectoryViewerData": true,
 	"FSFast":              true,
-	"MAT":                 true,
 	"StaticViewerData":    true,
 	"WFDB":                true,
+	// Added to go-core in pennsieve-go-core#63 (.mat/.mex were classified as
+	// MATLAB, the script type); remove from this allowlist once
+	// packages-service depends on that version.
+	"MAT": true,
 }
 
 // Every go-core file type has a registry entry, so a package of that type
