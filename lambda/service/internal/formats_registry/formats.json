@@ -915,6 +915,155 @@
       "fileTypes": ["ZIP"],
       "extensions": [".zip", ".tar", ".tar.gz"],
       "edam": "format_3987"
+    },
+    {
+      "id": "zarr",
+      "kind": "directory",
+      "name": "Zarr",
+      "description": "A Zarr store (v2 or v3): a folder of chunked, compressed n-dimensional arrays with JSON metadata. Use OME-Zarr, NWB (Zarr) or TS-Zarr when the store follows one of those.",
+      "mediaTypes": ["application/vnd.pennsieve.zarr"],
+      "folderExtensions": [".zarr"]
+    },
+    {
+      "id": "n5",
+      "kind": "directory",
+      "name": "N5",
+      "description": "A chunked n-dimensional array store from the Java ecosystem (Fiji, BigDataViewer): a folder ending in .n5.",
+      "mediaTypes": ["application/vnd.pennsieve.n5"],
+      "folderExtensions": [".n5"]
+    },
+    {
+      "id": "neuroglancer-precomputed",
+      "kind": "directory",
+      "name": "Neuroglancer precomputed",
+      "description": "Multi-resolution volumes, meshes or skeletons for Neuroglancer (large EM and light-sheet data): a folder with an info file at its root.",
+      "mediaTypes": ["application/vnd.pennsieve.neuroglancer-precomputed"]
+    },
+    {
+      "id": "micromanager-ndtiff",
+      "kind": "directory",
+      "name": "Micro-Manager NDTiff",
+      "description": "A Micro-Manager 2 acquisition: a dataset folder of TIFF files with an NDTiff.index.",
+      "mediaTypes": ["application/vnd.pennsieve.micromanager-ndtiff"]
+    },
+    {
+      "id": "bruker-paravision",
+      "kind": "directory",
+      "name": "Bruker ParaVision",
+      "description": "Bruker preclinical MRI raw data: a study or scan folder with acqp and method files and reconstructions under pdata/.",
+      "mediaTypes": ["application/vnd.pennsieve.bruker-paravision"]
+    },
+    {
+      "id": "trx",
+      "kind": "directory",
+      "name": "TRX tractography",
+      "description": "Tractography streamlines and their data: a folder of arrays with a header.json, also used zipped as a .trx file.",
+      "mediaTypes": ["application/vnd.pennsieve.trx"]
+    },
+    {
+      "id": "open-ephys-binary",
+      "kind": "directory",
+      "name": "Open Ephys binary",
+      "description": "The current Open Ephys recording format: a recording folder with structure.oebin and continuous/ and events/ folders.",
+      "mediaTypes": ["application/vnd.pennsieve.open-ephys-binary"]
+    },
+    {
+      "id": "natus-neuroworks",
+      "kind": "directory",
+      "name": "Natus NeuroWorks (Xltek)",
+      "description": "A clinical EEG or long-term monitoring study from Natus NeuroWorks (formerly Xltek): a study folder of .erd, .etc, .ent, .snc, .stc and .vtc files.",
+      "mediaTypes": ["application/vnd.pennsieve.natus-neuroworks"]
+    },
+    {
+      "id": "compumedics-profusion",
+      "kind": "directory",
+      "name": "Compumedics ProFusion",
+      "description": "A Compumedics ProFusion EEG or sleep study: a study folder of the recording's files.",
+      "mediaTypes": ["application/vnd.pennsieve.compumedics-profusion"]
+    },
+    {
+      "id": "tdt-block",
+      "kind": "directory",
+      "name": "Tucker-Davis (TDT) block",
+      "description": "A Tucker-Davis Technologies recording block: a folder of .tev, .tsq, .tbk and related files, read together.",
+      "mediaTypes": ["application/vnd.pennsieve.tdt-block"]
+    },
+    {
+      "id": "spikeglx",
+      "kind": "directory",
+      "name": "SpikeGLX run",
+      "description": "A SpikeGLX acquisition (Neuropixels): a run folder (*_g0) of .bin data files, each with its .meta file.",
+      "mediaTypes": ["application/vnd.pennsieve.spikeglx"]
+    },
+    {
+      "id": "illumina-run",
+      "kind": "directory",
+      "name": "Illumina run folder",
+      "description": "An Illumina sequencing run: a folder with RunInfo.xml and base calls (BCL) under Data/Intensities/BaseCalls/.",
+      "mediaTypes": ["application/vnd.pennsieve.illumina-run"]
+    },
+    {
+      "id": "bruker-d",
+      "kind": "directory",
+      "name": "Bruker .d",
+      "description": "Bruker mass spectrometry data (e.g. timsTOF): a folder ending in .d with an analysis.tdf. Agilent also uses .d folders; see Agilent .d.",
+      "mediaTypes": ["application/vnd.pennsieve.bruker-d"]
+    },
+    {
+      "id": "agilent-d",
+      "kind": "directory",
+      "name": "Agilent .d",
+      "description": "Agilent mass spectrometry data: a folder ending in .d with an AcqData folder. Bruker also uses .d folders; see Bruker .d.",
+      "mediaTypes": ["application/vnd.pennsieve.agilent-d"]
+    },
+    {
+      "id": "waters-raw",
+      "kind": "directory",
+      "name": "Waters .raw",
+      "description": "Waters mass spectrometry data: a folder ending in .raw (unlike Thermo .raw, which is a file).",
+      "mediaTypes": ["application/vnd.pennsieve.waters-raw"]
+    },
+    {
+      "id": "tenx-feature-barcode-matrix",
+      "kind": "directory",
+      "name": "10x feature-barcode matrix",
+      "description": "10x Genomics counts (Cell Ranger, Space Ranger): a folder with matrix.mtx.gz, barcodes.tsv.gz and features.tsv.gz.",
+      "mediaTypes": ["application/vnd.pennsieve.tenx-feature-barcode-matrix"]
+    },
+    {
+      "id": "tiledb-soma",
+      "kind": "directory",
+      "name": "TileDB-SOMA",
+      "description": "Single-cell data as TileDB arrays (as used by CELLxGENE Census): a folder of arrays and groups.",
+      "mediaTypes": ["application/vnd.pennsieve.tiledb-soma"]
+    },
+    {
+      "id": "imc-mcd",
+      "name": "Imaging mass cytometry (MCD)",
+      "description": "An imaging mass cytometry acquisition (Hyperion), with its panoramas and regions of interest.",
+      "mediaTypes": ["application/vnd.pennsieve.imc-mcd"],
+      "extensions": [".mcd"]
+    },
+    {
+      "id": "anndata",
+      "name": "AnnData (h5ad)",
+      "description": "An annotated data matrix for single-cell data (scanpy, AnnData), stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.anndata"],
+      "extensions": [".h5ad"]
+    },
+    {
+      "id": "mzml",
+      "name": "mzML",
+      "description": "The open mass spectrometry data format from HUPO-PSI (XML).",
+      "mediaTypes": ["application/vnd.pennsieve.mzml"],
+      "extensions": [".mzml", ".mzML"]
+    },
+    {
+      "id": "pod5",
+      "name": "Oxford Nanopore POD5",
+      "description": "Raw Oxford Nanopore signal data.",
+      "mediaTypes": ["application/vnd.pennsieve.pod5"],
+      "extensions": [".pod5"]
     }
   ],
   "structures": [
