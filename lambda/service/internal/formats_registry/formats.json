@@ -1064,6 +1064,116 @@
       "description": "Raw Oxford Nanopore signal data.",
       "mediaTypes": ["application/vnd.pennsieve.pod5"],
       "extensions": [".pod5"]
+    },
+    {
+      "id": "rds",
+      "name": "R object (RDS)",
+      "description": "A single R object saved with saveRDS: a Seurat, SingleCellExperiment or any other R object. Apps say which object they expect in their description.",
+      "mediaTypes": ["application/x-rds"],
+      "extensions": [".rds"]
+    },
+    {
+      "id": "parquet",
+      "name": "Apache Parquet",
+      "description": "Columnar table file (Apache Parquet).",
+      "mediaTypes": ["application/vnd.apache.parquet"],
+      "extensions": [".parquet"]
+    },
+    {
+      "id": "h5seurat",
+      "name": "h5Seurat",
+      "description": "A Seurat object stored as HDF5 (SeuratDisk).",
+      "mediaTypes": ["application/vnd.pennsieve.h5seurat"],
+      "extensions": [".h5seurat"]
+    },
+    {
+      "id": "loom",
+      "name": "Loom",
+      "description": "Single-cell expression matrix with row and column attributes, stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.loom"],
+      "extensions": [".loom"]
+    },
+    {
+      "id": "mudata",
+      "name": "MuData (h5mu)",
+      "description": "Multimodal single-cell data (muon, MuData), stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.mudata"],
+      "extensions": [".h5mu"]
+    },
+    {
+      "id": "tenx-h5",
+      "name": "10x feature-barcode matrix (HDF5)",
+      "description": "10x Genomics counts as one HDF5 file (filtered_feature_bc_matrix.h5); the same data as the 10x feature-barcode matrix folder.",
+      "mediaTypes": ["application/vnd.pennsieve.tenx-h5"]
+    },
+    {
+      "id": "atac-fragments",
+      "name": "ATAC fragments",
+      "description": "Single-cell ATAC fragments (fragments.tsv.gz, usually with its .tbi index), as used by Signac, ArchR and Cell Ranger ATAC.",
+      "mediaTypes": ["application/vnd.pennsieve.atac-fragments"]
+    },
+    {
+      "id": "bpcells-matrix",
+      "kind": "directory",
+      "name": "BPCells matrix",
+      "description": "An on-disk counts matrix written by BPCells (used by Seurat v5 for large data): a folder of the matrix's binary files.",
+      "mediaTypes": ["application/vnd.pennsieve.bpcells-matrix"]
+    },
+    {
+      "id": "anndata-zarr",
+      "kind": "directory",
+      "name": "AnnData (Zarr)",
+      "description": "An AnnData object stored as Zarr instead of HDF5: a folder (usually ending in .zarr).",
+      "mediaTypes": ["application/vnd.pennsieve.anndata-zarr"]
+    },
+    {
+      "id": "spatialdata-zarr",
+      "kind": "directory",
+      "name": "SpatialData (Zarr)",
+      "description": "Spatial omics data (SpatialData): a Zarr folder of images (OME-Zarr), labels, points, shapes and tables.",
+      "mediaTypes": ["application/vnd.pennsieve.spatialdata-zarr"]
+    },
+    {
+      "id": "spaceranger-outs",
+      "kind": "directory",
+      "name": "Space Ranger output (Visium)",
+      "description": "10x Genomics Visium results: the outs folder with the counts matrix and spatial/ (images and spot positions).",
+      "mediaTypes": ["application/vnd.pennsieve.spaceranger-outs"]
+    },
+    {
+      "id": "xenium-bundle",
+      "kind": "directory",
+      "name": "Xenium output bundle",
+      "description": "10x Genomics Xenium results: a folder with experiment.xenium, transcripts, cells and morphology images.",
+      "mediaTypes": ["application/vnd.pennsieve.xenium-bundle"]
+    },
+    {
+      "id": "merscope-output",
+      "kind": "directory",
+      "name": "MERSCOPE output",
+      "description": "Vizgen MERSCOPE results: a region folder with cell-by-gene counts, cell metadata, detected transcripts and images.",
+      "mediaTypes": ["application/vnd.pennsieve.merscope-output"]
+    },
+    {
+      "id": "cosmx-output",
+      "kind": "directory",
+      "name": "CosMx output",
+      "description": "NanoString/Bruker CosMx SMI results: a folder of expression matrix, metadata, transcript and field-of-view files.",
+      "mediaTypes": ["application/vnd.pennsieve.cosmx-output"]
+    },
+    {
+      "id": "archr-project",
+      "kind": "directory",
+      "name": "ArchR project",
+      "description": "A single-cell ATAC analysis project from ArchR: a folder with the saved project and its Arrow files.",
+      "mediaTypes": ["application/vnd.pennsieve.archr-project"]
+    },
+    {
+      "id": "parquet-dataset",
+      "kind": "directory",
+      "name": "Partitioned Parquet dataset",
+      "description": "One table split into many Parquet files in a folder (often partitioned by column, e.g. year=2024/).",
+      "mediaTypes": ["application/vnd.pennsieve.parquet-dataset"]
     }
   ],
   "structures": [
