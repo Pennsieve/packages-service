@@ -73,16 +73,18 @@ var unregisteredMediaTypes = map[string]bool{
 	"application/x-matlab-data": true,
 	"application/x-nifti":       true,
 	"application/x-nifti-gz":    true,
-	"application/x-sh":          true,
-	"application/x-vcf":         true,
-	"text/x-c++src":             true,
-	"text/x-csharp":             true,
-	"text/x-dockerfile":         true,
-	"text/x-java-source":        true,
-	"text/x-matlab":             true,
-	"text/x-python":             true,
-	"text/x-r":                  true,
-	"video/x-msvideo":           true,
+	// Declared by deployed apps (seurat-processor) before the registry had it.
+	"application/x-rds":  true,
+	"application/x-sh":   true,
+	"application/x-vcf":  true,
+	"text/x-c++src":      true,
+	"text/x-csharp":      true,
+	"text/x-dockerfile":  true,
+	"text/x-java-source": true,
+	"text/x-matlab":      true,
+	"text/x-python":      true,
+	"text/x-r":           true,
+	"video/x-msvideo":    true,
 }
 
 // Media types shared by more than one format. Each format should have its

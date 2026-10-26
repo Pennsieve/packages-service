@@ -385,7 +385,7 @@
       "id": "ome-zarr",
       "kind": "directory",
       "name": "OME-Zarr",
-      "description": "Multiscale image in the OME-NGFF Zarr layout. Uploaded as a single zip (.ozx / .ome.zarr.zip); also the platform's image bundles.",
+      "description": "Multiscale image in the OME-NGFF Zarr layout: a folder ending in .ome.zarr.",
       "mediaTypes": ["application/vnd.pennsieve.ome-zarr"],
       "fileTypes": ["OMEZarr"],
       "extensions": [".ozx", ".ome.zarr.zip"],
@@ -483,7 +483,7 @@
       "id": "mef3",
       "kind": "directory",
       "name": "MEF3 Timeseries",
-      "description": "Multiscale Electrophysiology Format version 3: a .mefd session folder of channel (.timd) and segment (.segd) folders. Uploaded compressed (.mefd.gz).",
+      "description": "Multiscale Electrophysiology Format version 3: a .mefd session folder of channel (.timd) and segment (.segd) folders.",
       "mediaTypes": ["application/vnd.pennsieve.mef3"],
       "fileTypes": ["MEF3"],
       "extensions": [".mefd.gz"],
@@ -493,7 +493,7 @@
       "id": "ts-zarr",
       "kind": "directory",
       "name": "TS-Zarr timeseries",
-      "description": "Pennsieve's timeseries format: a Zarr v3 bundle of multi-resolution channels (TS-Zarr spec). Uploaded as a single zip (.ts.zarr.zip); also the platform's timeseries bundles.",
+      "description": "Pennsieve's timeseries format: a Zarr v3 folder ending in .ts.zarr, with multi-resolution channels (TS-Zarr spec).",
       "mediaTypes": ["application/vnd.pennsieve.ts-zarr"],
       "fileTypes": ["TSZarr"],
       "extensions": [".ts.zarr.zip"],
@@ -783,6 +783,14 @@
       "extensions": [".nwb"]
     },
     {
+      "id": "nwb-zarr",
+      "kind": "directory",
+      "name": "NWB (Zarr)",
+      "description": "Neurodata Without Borders stored with the Zarr backend (hdmf-zarr) instead of HDF5: a folder ending in .nwb.zarr. Same NWB data model; readers need Zarr support (e.g. PyNWB's NWBZarrIO).",
+      "mediaTypes": ["application/vnd.pennsieve.nwb-zarr"],
+      "folderExtensions": [".nwb.zarr"]
+    },
+    {
       "id": "neuron",
       "name": "NEURON Model",
       "description": "NEURON simulation model source.",
@@ -907,6 +915,265 @@
       "fileTypes": ["ZIP"],
       "extensions": [".zip", ".tar", ".tar.gz"],
       "edam": "format_3987"
+    },
+    {
+      "id": "zarr",
+      "kind": "directory",
+      "name": "Zarr",
+      "description": "A Zarr store (v2 or v3): a folder of chunked, compressed n-dimensional arrays with JSON metadata. Use OME-Zarr, NWB (Zarr) or TS-Zarr when the store follows one of those.",
+      "mediaTypes": ["application/vnd.pennsieve.zarr"],
+      "folderExtensions": [".zarr"]
+    },
+    {
+      "id": "n5",
+      "kind": "directory",
+      "name": "N5",
+      "description": "A chunked n-dimensional array store from the Java ecosystem (Fiji, BigDataViewer): a folder ending in .n5.",
+      "mediaTypes": ["application/vnd.pennsieve.n5"],
+      "folderExtensions": [".n5"]
+    },
+    {
+      "id": "neuroglancer-precomputed",
+      "kind": "directory",
+      "name": "Neuroglancer precomputed",
+      "description": "Multi-resolution volumes, meshes or skeletons for Neuroglancer (large EM and light-sheet data): a folder with an info file at its root.",
+      "mediaTypes": ["application/vnd.pennsieve.neuroglancer-precomputed"]
+    },
+    {
+      "id": "micromanager-ndtiff",
+      "kind": "directory",
+      "name": "Micro-Manager NDTiff",
+      "description": "A Micro-Manager 2 acquisition: a dataset folder of TIFF files with an NDTiff.index.",
+      "mediaTypes": ["application/vnd.pennsieve.micromanager-ndtiff"]
+    },
+    {
+      "id": "bruker-paravision",
+      "kind": "directory",
+      "name": "Bruker ParaVision",
+      "description": "Bruker preclinical MRI raw data: a study or scan folder with acqp and method files and reconstructions under pdata/.",
+      "mediaTypes": ["application/vnd.pennsieve.bruker-paravision"]
+    },
+    {
+      "id": "trx",
+      "kind": "directory",
+      "name": "TRX tractography",
+      "description": "Tractography streamlines and their data: a folder of arrays with a header.json, also used zipped as a .trx file.",
+      "mediaTypes": ["application/vnd.pennsieve.trx"]
+    },
+    {
+      "id": "open-ephys-binary",
+      "kind": "directory",
+      "name": "Open Ephys binary",
+      "description": "The current Open Ephys recording format: a recording folder with structure.oebin and continuous/ and events/ folders.",
+      "mediaTypes": ["application/vnd.pennsieve.open-ephys-binary"]
+    },
+    {
+      "id": "natus-neuroworks",
+      "kind": "directory",
+      "name": "Natus NeuroWorks (Xltek)",
+      "description": "A clinical EEG or long-term monitoring study from Natus NeuroWorks (formerly Xltek): a study folder of .erd, .etc, .ent, .snc, .stc and .vtc files.",
+      "mediaTypes": ["application/vnd.pennsieve.natus-neuroworks"]
+    },
+    {
+      "id": "compumedics-profusion",
+      "kind": "directory",
+      "name": "Compumedics ProFusion",
+      "description": "A Compumedics ProFusion EEG or sleep study: a study folder of the recording's files.",
+      "mediaTypes": ["application/vnd.pennsieve.compumedics-profusion"]
+    },
+    {
+      "id": "tdt-block",
+      "kind": "directory",
+      "name": "Tucker-Davis (TDT) block",
+      "description": "A Tucker-Davis Technologies recording block: a folder of .tev, .tsq, .tbk and related files, read together.",
+      "mediaTypes": ["application/vnd.pennsieve.tdt-block"]
+    },
+    {
+      "id": "spikeglx",
+      "kind": "directory",
+      "name": "SpikeGLX run",
+      "description": "A SpikeGLX acquisition (Neuropixels): a run folder (*_g0) of .bin data files, each with its .meta file.",
+      "mediaTypes": ["application/vnd.pennsieve.spikeglx"]
+    },
+    {
+      "id": "illumina-run",
+      "kind": "directory",
+      "name": "Illumina run folder",
+      "description": "An Illumina sequencing run: a folder with RunInfo.xml and base calls (BCL) under Data/Intensities/BaseCalls/.",
+      "mediaTypes": ["application/vnd.pennsieve.illumina-run"]
+    },
+    {
+      "id": "bruker-d",
+      "kind": "directory",
+      "name": "Bruker .d",
+      "description": "Bruker mass spectrometry data (e.g. timsTOF): a folder ending in .d with an analysis.tdf. Agilent also uses .d folders; see Agilent .d.",
+      "mediaTypes": ["application/vnd.pennsieve.bruker-d"]
+    },
+    {
+      "id": "agilent-d",
+      "kind": "directory",
+      "name": "Agilent .d",
+      "description": "Agilent mass spectrometry data: a folder ending in .d with an AcqData folder. Bruker also uses .d folders; see Bruker .d.",
+      "mediaTypes": ["application/vnd.pennsieve.agilent-d"]
+    },
+    {
+      "id": "waters-raw",
+      "kind": "directory",
+      "name": "Waters .raw",
+      "description": "Waters mass spectrometry data: a folder ending in .raw (unlike Thermo .raw, which is a file).",
+      "mediaTypes": ["application/vnd.pennsieve.waters-raw"]
+    },
+    {
+      "id": "tenx-feature-barcode-matrix",
+      "kind": "directory",
+      "name": "10x feature-barcode matrix",
+      "description": "10x Genomics counts (Cell Ranger, Space Ranger): a folder with matrix.mtx.gz, barcodes.tsv.gz and features.tsv.gz.",
+      "mediaTypes": ["application/vnd.pennsieve.tenx-feature-barcode-matrix"]
+    },
+    {
+      "id": "tiledb-soma",
+      "kind": "directory",
+      "name": "TileDB-SOMA",
+      "description": "Single-cell data as TileDB arrays (as used by CELLxGENE Census): a folder of arrays and groups.",
+      "mediaTypes": ["application/vnd.pennsieve.tiledb-soma"]
+    },
+    {
+      "id": "imc-mcd",
+      "name": "Imaging mass cytometry (MCD)",
+      "description": "An imaging mass cytometry acquisition (Hyperion), with its panoramas and regions of interest.",
+      "mediaTypes": ["application/vnd.pennsieve.imc-mcd"],
+      "extensions": [".mcd"]
+    },
+    {
+      "id": "anndata",
+      "name": "AnnData (h5ad)",
+      "description": "An annotated data matrix for single-cell data (scanpy, AnnData), stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.anndata"],
+      "extensions": [".h5ad"]
+    },
+    {
+      "id": "mzml",
+      "name": "mzML",
+      "description": "The open mass spectrometry data format from HUPO-PSI (XML).",
+      "mediaTypes": ["application/vnd.pennsieve.mzml"],
+      "extensions": [".mzml", ".mzML"]
+    },
+    {
+      "id": "pod5",
+      "name": "Oxford Nanopore POD5",
+      "description": "Raw Oxford Nanopore signal data.",
+      "mediaTypes": ["application/vnd.pennsieve.pod5"],
+      "extensions": [".pod5"]
+    },
+    {
+      "id": "rds",
+      "name": "R object (RDS)",
+      "description": "A single R object saved with saveRDS: a Seurat, SingleCellExperiment or any other R object. Apps say which object they expect in their description.",
+      "mediaTypes": ["application/x-rds"],
+      "extensions": [".rds"]
+    },
+    {
+      "id": "parquet",
+      "name": "Apache Parquet",
+      "description": "Columnar table file (Apache Parquet).",
+      "mediaTypes": ["application/vnd.apache.parquet"],
+      "extensions": [".parquet"]
+    },
+    {
+      "id": "h5seurat",
+      "name": "h5Seurat",
+      "description": "A Seurat object stored as HDF5 (SeuratDisk).",
+      "mediaTypes": ["application/vnd.pennsieve.h5seurat"],
+      "extensions": [".h5seurat"]
+    },
+    {
+      "id": "loom",
+      "name": "Loom",
+      "description": "Single-cell expression matrix with row and column attributes, stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.loom"],
+      "extensions": [".loom"]
+    },
+    {
+      "id": "mudata",
+      "name": "MuData (h5mu)",
+      "description": "Multimodal single-cell data (muon, MuData), stored as HDF5.",
+      "mediaTypes": ["application/vnd.pennsieve.mudata"],
+      "extensions": [".h5mu"]
+    },
+    {
+      "id": "tenx-h5",
+      "name": "10x feature-barcode matrix (HDF5)",
+      "description": "10x Genomics counts as one HDF5 file (filtered_feature_bc_matrix.h5); the same data as the 10x feature-barcode matrix folder.",
+      "mediaTypes": ["application/vnd.pennsieve.tenx-h5"]
+    },
+    {
+      "id": "atac-fragments",
+      "name": "ATAC fragments",
+      "description": "Single-cell ATAC fragments (fragments.tsv.gz, usually with its .tbi index), as used by Signac, ArchR and Cell Ranger ATAC.",
+      "mediaTypes": ["application/vnd.pennsieve.atac-fragments"]
+    },
+    {
+      "id": "bpcells-matrix",
+      "kind": "directory",
+      "name": "BPCells matrix",
+      "description": "An on-disk counts matrix written by BPCells (used by Seurat v5 for large data): a folder of the matrix's binary files.",
+      "mediaTypes": ["application/vnd.pennsieve.bpcells-matrix"]
+    },
+    {
+      "id": "anndata-zarr",
+      "kind": "directory",
+      "name": "AnnData (Zarr)",
+      "description": "An AnnData object stored as Zarr instead of HDF5: a folder (usually ending in .zarr).",
+      "mediaTypes": ["application/vnd.pennsieve.anndata-zarr"]
+    },
+    {
+      "id": "spatialdata-zarr",
+      "kind": "directory",
+      "name": "SpatialData (Zarr)",
+      "description": "Spatial omics data (SpatialData): a Zarr folder of images (OME-Zarr), labels, points, shapes and tables.",
+      "mediaTypes": ["application/vnd.pennsieve.spatialdata-zarr"]
+    },
+    {
+      "id": "spaceranger-outs",
+      "kind": "directory",
+      "name": "Space Ranger output (Visium)",
+      "description": "10x Genomics Visium results: the outs folder with the counts matrix and spatial/ (images and spot positions).",
+      "mediaTypes": ["application/vnd.pennsieve.spaceranger-outs"]
+    },
+    {
+      "id": "xenium-bundle",
+      "kind": "directory",
+      "name": "Xenium output bundle",
+      "description": "10x Genomics Xenium results: a folder with experiment.xenium, transcripts, cells and morphology images.",
+      "mediaTypes": ["application/vnd.pennsieve.xenium-bundle"]
+    },
+    {
+      "id": "merscope-output",
+      "kind": "directory",
+      "name": "MERSCOPE output",
+      "description": "Vizgen MERSCOPE results: a region folder with cell-by-gene counts, cell metadata, detected transcripts and images.",
+      "mediaTypes": ["application/vnd.pennsieve.merscope-output"]
+    },
+    {
+      "id": "cosmx-output",
+      "kind": "directory",
+      "name": "CosMx output",
+      "description": "NanoString/Bruker CosMx SMI results: a folder of expression matrix, metadata, transcript and field-of-view files.",
+      "mediaTypes": ["application/vnd.pennsieve.cosmx-output"]
+    },
+    {
+      "id": "archr-project",
+      "kind": "directory",
+      "name": "ArchR project",
+      "description": "A single-cell ATAC analysis project from ArchR: a folder with the saved project and its Arrow files.",
+      "mediaTypes": ["application/vnd.pennsieve.archr-project"]
+    },
+    {
+      "id": "parquet-dataset",
+      "kind": "directory",
+      "name": "Partitioned Parquet dataset",
+      "description": "One table split into many Parquet files in a folder (often partitioned by column, e.g. year=2024/).",
+      "mediaTypes": ["application/vnd.pennsieve.parquet-dataset"]
     }
   ],
   "structures": [
