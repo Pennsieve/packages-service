@@ -385,7 +385,7 @@
       "id": "ome-zarr",
       "kind": "directory",
       "name": "OME-Zarr",
-      "description": "Multiscale image in the OME-NGFF Zarr layout. Uploaded as a single zip (.ozx / .ome.zarr.zip); also the platform's image bundles.",
+      "description": "Multiscale image in the OME-NGFF Zarr layout: a folder ending in .ome.zarr.",
       "mediaTypes": ["application/vnd.pennsieve.ome-zarr"],
       "fileTypes": ["OMEZarr"],
       "extensions": [".ozx", ".ome.zarr.zip"],
@@ -483,7 +483,7 @@
       "id": "mef3",
       "kind": "directory",
       "name": "MEF3 Timeseries",
-      "description": "Multiscale Electrophysiology Format version 3: a .mefd session folder of channel (.timd) and segment (.segd) folders. Uploaded compressed (.mefd.gz).",
+      "description": "Multiscale Electrophysiology Format version 3: a .mefd session folder of channel (.timd) and segment (.segd) folders.",
       "mediaTypes": ["application/vnd.pennsieve.mef3"],
       "fileTypes": ["MEF3"],
       "extensions": [".mefd.gz"],
@@ -493,7 +493,7 @@
       "id": "ts-zarr",
       "kind": "directory",
       "name": "TS-Zarr timeseries",
-      "description": "Pennsieve's timeseries format: a Zarr v3 bundle of multi-resolution channels (TS-Zarr spec). Uploaded as a single zip (.ts.zarr.zip); also the platform's timeseries bundles.",
+      "description": "Pennsieve's timeseries format: a Zarr v3 folder ending in .ts.zarr, with multi-resolution channels (TS-Zarr spec).",
       "mediaTypes": ["application/vnd.pennsieve.ts-zarr"],
       "fileTypes": ["TSZarr"],
       "extensions": [".ts.zarr.zip"],
@@ -781,6 +781,14 @@
       "mediaTypes": ["application/x-hdf5"],
       "fileTypes": ["NeuroDataWithoutBorders"],
       "extensions": [".nwb"]
+    },
+    {
+      "id": "nwb-zarr",
+      "kind": "directory",
+      "name": "NWB (Zarr)",
+      "description": "Neurodata Without Borders stored with the Zarr backend (hdmf-zarr) instead of HDF5: a folder ending in .nwb.zarr. Same NWB data model; readers need Zarr support (e.g. PyNWB's NWBZarrIO).",
+      "mediaTypes": ["application/vnd.pennsieve.nwb-zarr"],
+      "folderExtensions": [".nwb.zarr"]
     },
     {
       "id": "neuron",

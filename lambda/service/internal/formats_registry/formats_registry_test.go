@@ -86,7 +86,7 @@ func TestAll_Kinds(t *testing.T) {
 			dirs = append(dirs, f.ID)
 		}
 	}
-	assert.ElementsMatch(t, []string{"mef3", "ome-zarr", "ts-zarr"}, dirs)
+	assert.ElementsMatch(t, []string{"mef3", "nwb-zarr", "ome-zarr", "ts-zarr"}, dirs)
 }
 
 // Folder extensions belong to folder formats, start with a dot, and differ
