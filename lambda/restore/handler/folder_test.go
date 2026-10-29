@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
+	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageState"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/packageInfo/packageType"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/pgdb"
 	"github.com/stretchr/testify/assert"
@@ -126,11 +127,11 @@ func TestMessageHandler_handleFolderPackage(t *testing.T) {
 
 	actualUnpublishedSourcePackage, err := v.GetPackageByNodeId(ctx, unpublishedSourcePackage.Package.NodeId)
 	require.NoError(t, err)
-	assertRestoredPackage(t, FileRestoredState, unpublishedSourcePackage.Package.AsPackage(), actualUnpublishedSourcePackage)
+	assertRestoredPackage(t, packageState.Ready, unpublishedSourcePackage.Package.AsPackage(), actualUnpublishedSourcePackage)
 
 	actualPublishedSourcePackage, err := v.GetPackageByNodeId(ctx, publishedSourcePackage.Package.NodeId)
 	require.NoError(t, err)
-	assertRestoredPackage(t, FileRestoredState, publishedSourcePackage.Package.AsPackage(), actualPublishedSourcePackage)
+	assertRestoredPackage(t, packageState.Ready, publishedSourcePackage.Package.AsPackage(), actualPublishedSourcePackage)
 
 	listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(storageBucketName)})
 	require.NoError(t, err)

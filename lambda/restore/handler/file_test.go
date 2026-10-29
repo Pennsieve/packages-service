@@ -237,6 +237,8 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 
 	for scenario, tt := range map[string]struct {
 		sourcePackage *TestSourcePackage
+		// expectedState is the restored packages.state; READY when empty.
+		expectedState string
 	}{
 		"unpublished file package": {
 			sourcePackage: NewTestSourcePackage(1, datasetId, 1, func(testPackage *store.TestPackage) {
@@ -251,6 +253,37 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
 				testFile.WithPublished(store.StringPtr(uuid.NewString()))
 			}),
+		},
+		"oversized file cleared unscanned": {
+			sourcePackage: NewTestSourcePackage(3, datasetId, 1, func(testPackage *store.TestPackage) {
+				testPackage.Restoring()
+			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+				testFile.WithPublished(nil).WithScanStatus("unscanned")
+			}),
+		},
+		"file not scanned yet": {
+			sourcePackage: NewTestSourcePackage(4, datasetId, 1, func(testPackage *store.TestPackage) {
+				testPackage.Restoring()
+			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+				testFile.WithPublished(nil).WithScanStatus("pending")
+			}),
+			expectedState: "UPLOADED",
+		},
+		"file whose scan failed": {
+			sourcePackage: NewTestSourcePackage(5, datasetId, 1, func(testPackage *store.TestPackage) {
+				testPackage.Restoring()
+			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+				testFile.WithPublished(nil).WithScanStatus("failed")
+			}),
+			expectedState: "UPLOADED",
+		},
+		"infected file": {
+			sourcePackage: NewTestSourcePackage(6, datasetId, 1, func(testPackage *store.TestPackage) {
+				testPackage.Restoring()
+			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
+				testFile.WithPublished(nil).WithScanStatus("infected")
+			}),
+			expectedState: "INFECTED",
 		},
 	} {
 
@@ -312,7 +345,15 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			v := subDB.Queries(orgId)
 			actual, err := v.GetPackageByNodeId(ctx, tt.sourcePackage.Package.NodeId)
 			require.NoError(t, err)
-			assertRestoredPackage(t, FileRestoredState, tt.sourcePackage.Package.AsPackage(), actual)
+			assertRestoredName(t, tt.sourcePackage.Package.NodeId, tt.sourcePackage.Package.Name, actual.Name)
+			// Read the raw state from the table.
+			expectedState := tt.expectedState
+			if expectedState == "" {
+				expectedState = packageState.Ready.String()
+			}
+			var actualState string
+			require.NoError(t, subDB.QueryRow(fmt.Sprintf(`SELECT state FROM "%d".packages WHERE node_id = $1`, orgId), tt.sourcePackage.Package.NodeId).Scan(&actualState))
+			assert.Equal(t, expectedState, actualState)
 
 			listOut, err := s3Fixture.Client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{Bucket: aws.String(bucketName)})
 			require.NoError(t, err)

@@ -2,7 +2,7 @@ package store
 
 import "github.com/pennsieve/pennsieve-go-core/pkg/models/fileInfo/objectType"
 
-var filesColumns = []string{"id", "package_id", "size", "object_type", "published_s3_version_id"}
+var filesColumns = []string{"id", "package_id", "size", "object_type", "published_s3_version_id", "scan_status"}
 
 type File struct {
 	ID                   int
@@ -10,6 +10,9 @@ type File struct {
 	Size                 int64
 	ObjectType           objectType.ObjectType
 	PublishedS3VersionID *string
+	// ScanStatus is files.scan_status as scan-service writes it
+	// (pending, clean, format_validated, unscanned, infected, failed, ...).
+	ScanStatus string
 }
 
 func (f File) IsPublished() bool {
@@ -27,7 +30,8 @@ func (f FilesScanner) Scan(scanner RowScanner, file *File) error {
 		&file.PackageId,
 		&file.Size,
 		&objectTypeString,
-		&file.PublishedS3VersionID)
+		&file.PublishedS3VersionID,
+		&file.ScanStatus)
 	objType, ok := objectType.Dict[objectTypeString]
 	if !ok {
 		// this is the default for an unknown type in objectType.String()
@@ -45,7 +49,8 @@ func (f FilesScanner) JoinScan(scanner RowScanner, packageNodeId *string, file *
 		&file.PackageId,
 		&file.Size,
 		&objectTypeString,
-		&file.PublishedS3VersionID)
+		&file.PublishedS3VersionID,
+		&file.ScanStatus)
 	objType, ok := objectType.Dict[objectTypeString]
 	if !ok {
 		// this is the default for an unknown type in objectType.String()
