@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql/driver"
 	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
 	"github.com/pennsieve/packages-service/api/store"
@@ -156,7 +155,7 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			stateRestores[i] = p.RestorePackageInfo
 			i++
 		}
-		fileStates := make(map[string]driver.Valuer, len(restoredFileInfos))
+		fileStates := make(map[string]packageState.State, len(restoredFileInfos))
 		for _, f := range restoredFileInfos {
 			fileStates[f.NodeId] = FileRestoredState(f.SourceFiles)
 		}

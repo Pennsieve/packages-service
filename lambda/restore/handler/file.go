@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql/driver"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -29,10 +28,10 @@ const CollectionRestoredState = packageState.Ready
 // so its source files' scan_status decides:
 //
 //   - clean, format_validated, unscanned (over the size cap), not_required → READY
-//   - infected (any source file) → ERROR
+//   - infected (any source file) → INFECTED (quarantined)
 //   - anything else (pending, scanning, failed, no source file) → UPLOADED, still
 //     waiting for its scan; scan-service moves it on when the verdict arrives.
-func FileRestoredState(sourceFiles []store.File) driver.Valuer {
+func FileRestoredState(sourceFiles []store.File) packageState.State {
 	if len(sourceFiles) == 0 {
 		return packageState.Uploaded
 	}
@@ -40,7 +39,7 @@ func FileRestoredState(sourceFiles []store.File) driver.Valuer {
 	for _, f := range sourceFiles {
 		switch f.ScanStatus {
 		case "infected":
-			return store.PackageStateError
+			return packageState.Infected
 		case "clean", "format_validated", "unscanned", "not_required":
 		default:
 			cleared = false
@@ -135,7 +134,7 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		for i, a := range ancestors {
 			stateRestores[i+1] = &a
 		}
-		fileStates := map[string]driver.Valuer{restoreInfo.NodeId: FileRestoredState(sourceFiles)}
+		fileStates := map[string]packageState.State{restoreInfo.NodeId: FileRestoredState(sourceFiles)}
 		if err = h.restoreStates(ctx, datasetId, stateRestores, fileStates, sqlStore); err != nil {
 			return err
 		}
@@ -199,13 +198,13 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 // restoreStates moves each package from RESTORING to its restored state: collections
 // to CollectionRestoredState, file packages to fileStates[nodeId] (see
 // FileRestoredState). A file package missing from fileStates goes to UPLOADED.
-func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, restoreInfos []*models.RestorePackageInfo, fileStates map[string]driver.Valuer, sqlStore store.SQLStore) error {
+func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, restoreInfos []*models.RestorePackageInfo, fileStates map[string]packageState.State, sqlStore store.SQLStore) error {
 	if len(restoreInfos) == 0 {
 		return nil
 	}
 	transitions := make([]store.PackageStateTransition, len(restoreInfos))
 	for i, r := range restoreInfos {
-		var finalState driver.Valuer = packageState.Uploaded
+		finalState := packageState.Uploaded
 		if r.Type == packageType.Collection {
 			finalState = CollectionRestoredState
 		} else if s, ok := fileStates[r.NodeId]; ok {

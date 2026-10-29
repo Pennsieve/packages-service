@@ -283,7 +283,7 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			}).WithSources(1, bucketName, func(testFile *store.TestFile) {
 				testFile.WithPublished(nil).WithScanStatus("infected")
 			}),
-			expectedState: "ERROR",
+			expectedState: "INFECTED",
 		},
 	} {
 
@@ -346,7 +346,7 @@ func TestMessageHandler_handleFilePackage(t *testing.T) {
 			actual, err := v.GetPackageByNodeId(ctx, tt.sourcePackage.Package.NodeId)
 			require.NoError(t, err)
 			assertRestoredName(t, tt.sourcePackage.Package.NodeId, tt.sourcePackage.Package.Name, actual.Name)
-			// Read the raw state: go-core's packageState enum has no ERROR.
+			// Read the raw state from the table.
 			expectedState := tt.expectedState
 			if expectedState == "" {
 				expectedState = packageState.Ready.String()

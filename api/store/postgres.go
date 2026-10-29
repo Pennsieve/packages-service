@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
 	"github.com/lib/pq"
@@ -120,21 +119,9 @@ type PackageStateTransition struct {
 	NodeId string
 	// Expected: expected current state of package
 	Expected packageState.State
-	// Target: desired state of package. A packageState.State, or RawPackageState for
-	// a state go-core's enum doesn't have (ERROR).
-	Target driver.Valuer
+	// Target: desired state of package
+	Target packageState.State
 }
-
-// RawPackageState is a packages.state value written as-is. go-core's packageState
-// enum has no ERROR, which pennsieve-api and the app use for a failed package.
-type RawPackageState string
-
-func (s RawPackageState) Value() (driver.Value, error) { return string(s), nil }
-
-func (s RawPackageState) String() string { return string(s) }
-
-// PackageStateError is the state of a package whose file failed its virus scan.
-const PackageStateError RawPackageState = "ERROR"
 
 func (t PackageStateTransition) insertAt(insertionIndex int, s []any) (nextIndex int) {
 	nextIndex = insertionIndex

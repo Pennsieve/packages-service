@@ -24,20 +24,17 @@ func TestFileRestoredState(t *testing.T) {
 		"format validated":           {files("format_validated"), "READY"},
 		"unscanned (over size cap)":  {files("unscanned"), "READY"},
 		"not required":               {files("not_required"), "READY"},
-		"infected":                   {files("infected"), "ERROR"},
+		"infected":                   {files("infected"), "INFECTED"},
 		"pending":                    {files("pending"), "UPLOADED"},
 		"scanning":                   {files("scanning"), "UPLOADED"},
 		"failed":                     {files("failed"), "UPLOADED"},
 		"no source file":             {nil, "UPLOADED"},
 		"legacy multi-file, all ok":  {files("clean", "unscanned"), "READY"},
 		"legacy multi-file, waiting": {files("clean", "pending"), "UPLOADED"},
-		"legacy multi-file, one bad": {files("pending", "infected"), "ERROR"},
+		"legacy multi-file, one bad": {files("pending", "infected"), "INFECTED"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			actual := FileRestoredState(tt.sourceFiles)
-			v, err := actual.Value()
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, v)
+			assert.Equal(t, tt.expected, FileRestoredState(tt.sourceFiles).String())
 		})
 	}
 	// CollectionRestoredState is unchanged.
