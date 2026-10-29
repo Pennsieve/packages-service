@@ -624,6 +624,8 @@ func RandPackageState() packageState.State {
 
 type TestFile struct {
 	pgdb.File
+	// ScanStatus is written to files.scan_status. NewTestFile sets "clean".
+	ScanStatus string
 }
 
 func NewTestFile(packageId int) *TestFile {
@@ -643,7 +645,12 @@ func NewTestFile(packageId int) *TestFile {
 		UploadedState:        randInt64Type(uploadState.Uploaded),
 		PublishedS3VersionId: nil,
 	}
-	return &TestFile{file}
+	return &TestFile{File: file, ScanStatus: "clean"}
+}
+
+func (f *TestFile) WithScanStatus(scanStatus string) *TestFile {
+	f.ScanStatus = scanStatus
+	return f
 }
 
 func (f *TestFile) WithPublished(publishedS3VersionID *string) *TestFile {
@@ -663,8 +670,8 @@ func (f *TestFile) WithBucket(bucketName string) *TestFile {
 }
 
 func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
-	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published_s3_version_id) 
-                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+	query := fmt.Sprintf(`INSERT into "%d".files (package_id, name, file_type, s3_bucket, s3_key, object_type, size, checksum, processing_state, uploaded_state, published_s3_version_id, scan_status) 
+                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
                           RETURNING id`, orgId)
 	var fileId string
 	require.NoError(db.t, db.QueryRowContext(ctx, query,
@@ -678,7 +685,8 @@ func (f *TestFile) Insert(ctx context.Context, db *TestDB, orgId int) string {
 		f.CheckSum,
 		f.ProcessingState.String(),
 		f.UploadedState.String(),
-		f.PublishedS3VersionId).
+		f.PublishedS3VersionId,
+		f.ScanStatus).
 		Scan(&fileId), "error inserting test file")
 	// Why is pgdb.File.Id defined as string?
 	f.Id = fileId
