@@ -155,7 +155,11 @@ func (h *MessageHandler) handleFolderPackage(ctx context.Context, orgId int, dat
 			stateRestores[i] = p.RestorePackageInfo
 			i++
 		}
-		if err = h.restoreStates(ctx, datasetId, stateRestores, sqlStore); err != nil {
+		fileStates := make(map[string]packageState.State, len(restoredFileInfos))
+		for _, f := range restoredFileInfos {
+			fileStates[f.NodeId] = FileRestoredState(f.SourceFiles)
+		}
+		if err = h.restoreStates(ctx, datasetId, stateRestores, fileStates, sqlStore); err != nil {
 			return err
 		}
 		return nil

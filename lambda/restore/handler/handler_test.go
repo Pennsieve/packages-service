@@ -252,7 +252,7 @@ func TestHandleMessage(t *testing.T) {
 		for _, restoring := range restoringFilePackages {
 			actual, err := v.GetPackageByNodeId(ctx, restoring.Package.NodeId)
 			if assert.NoError(t, err) {
-				assertRestoredPackage(t, FileRestoredState, restoring.Package.AsPackage(), actual)
+				assertRestoredPackage(t, packageState.Ready, restoring.Package.AsPackage(), actual)
 			}
 		}
 

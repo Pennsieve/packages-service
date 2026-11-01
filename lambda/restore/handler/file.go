@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+
 	"github.com/google/uuid"
 	pennsievelog "github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/packages-service/api/models"
@@ -18,10 +19,37 @@ type RestoredName struct {
 	OriginalName string
 }
 
-const (
-	CollectionRestoredState = packageState.Ready
-	FileRestoredState       = packageState.Ready
-)
+// CollectionRestoredState: collections have no file to scan, so they come back READY.
+const CollectionRestoredState = packageState.Ready
+
+// FileRestoredState is the state a restored file package returns to. READY means the
+// file has been cleared by the virus scanner, and a restored file was scanned when it
+// was uploaded (scan-service writes scan_status even while a package is in the trash),
+// so its source files' scan_status decides:
+//
+//   - clean, format_validated, unscanned (over the size cap), not_required → READY
+//   - infected (any source file) → INFECTED (quarantined)
+//   - anything else (pending, scanning, failed, no source file) → UPLOADED, still
+//     waiting for its scan; scan-service moves it on when the verdict arrives.
+func FileRestoredState(sourceFiles []store.File) packageState.State {
+	if len(sourceFiles) == 0 {
+		return packageState.Uploaded
+	}
+	cleared := true
+	for _, f := range sourceFiles {
+		switch f.ScanStatus {
+		case "infected":
+			return packageState.Infected
+		case "clean", "format_validated", "unscanned", "not_required":
+		default:
+			cleared = false
+		}
+	}
+	if cleared {
+		return packageState.Ready
+	}
+	return packageState.Uploaded
+}
 
 var savepointReplacer = strings.NewReplacer(":", "", "-", "")
 
@@ -106,7 +134,8 @@ func (h *MessageHandler) handleFilePackage(ctx context.Context, orgId int, datas
 		for i, a := range ancestors {
 			stateRestores[i+1] = &a
 		}
-		if err = h.restoreStates(ctx, datasetId, stateRestores, sqlStore); err != nil {
+		fileStates := map[string]packageState.State{restoreInfo.NodeId: FileRestoredState(sourceFiles)}
+		if err = h.restoreStates(ctx, datasetId, stateRestores, fileStates, sqlStore); err != nil {
 			return err
 		}
 		return nil
@@ -166,27 +195,20 @@ func (h *MessageHandler) restoreName(ctx context.Context, restoreInfo models.Res
 	return &restoredName, nil
 }
 
-func (h *MessageHandler) restoreState(ctx context.Context, datasetId int64, restoreInfo models.RestorePackageInfo, store store.SQLStore) error {
-	finalState := packageState.Uploaded
-	if restoreInfo.Type == packageType.Collection {
-		finalState = packageState.Ready
-	}
-	_, err := store.TransitionPackageState(ctx, datasetId, restoreInfo.NodeId, packageState.Restoring, finalState)
-	if err != nil {
-		return fmt.Errorf("error restoring state of %s to %s: %w", restoreInfo.NodeId, finalState, err)
-	}
-	return nil
-}
-
-func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, restoreInfos []*models.RestorePackageInfo, sqlStore store.SQLStore) error {
+// restoreStates moves each package from RESTORING to its restored state: collections
+// to CollectionRestoredState, file packages to fileStates[nodeId] (see
+// FileRestoredState). A file package missing from fileStates goes to UPLOADED.
+func (h *MessageHandler) restoreStates(ctx context.Context, datasetId int64, restoreInfos []*models.RestorePackageInfo, fileStates map[string]packageState.State, sqlStore store.SQLStore) error {
 	if len(restoreInfos) == 0 {
 		return nil
 	}
 	transitions := make([]store.PackageStateTransition, len(restoreInfos))
 	for i, r := range restoreInfos {
-		finalState := FileRestoredState
+		finalState := packageState.Uploaded
 		if r.Type == packageType.Collection {
 			finalState = CollectionRestoredState
+		} else if s, ok := fileStates[r.NodeId]; ok {
+			finalState = s
 		}
 		transitions[i] = store.PackageStateTransition{NodeId: r.NodeId, Expected: packageState.Restoring, Target: finalState}
 	}
