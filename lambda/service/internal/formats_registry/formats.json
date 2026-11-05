@@ -1048,7 +1048,7 @@
       "id": "anndata",
       "name": "AnnData (h5ad)",
       "description": "An annotated data matrix for single-cell data (scanpy, AnnData), stored as HDF5.",
-      "mediaTypes": ["application/vnd.pennsieve.anndata"],
+      "mediaTypes": ["application/x-hdf5; profile=anndata"],
       "extensions": [".h5ad"]
     },
     {
@@ -1090,7 +1090,7 @@
       "id": "loom",
       "name": "Loom",
       "description": "Single-cell expression matrix with row and column attributes, stored as HDF5.",
-      "mediaTypes": ["application/vnd.pennsieve.loom"],
+      "mediaTypes": ["application/x-hdf5; profile=loom"],
       "extensions": [".loom"]
     },
     {

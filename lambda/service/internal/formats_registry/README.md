@@ -14,7 +14,8 @@ https://schemas.pennsieve.io/formats/v1.json (`terraform/schemas.tf`).
   `id`: `application/vnd.pennsieve.edf`.
 - **Each format gets its own media type,** because apps and workflows match
   files by media type.
-- **A format that is a kind of another** (NWB is HDF5, OME-TIFF is TIFF) is
+- **A format that is a kind of another** (NWB, AnnData and Loom are HDF5;
+  OME-TIFF is TIFF) is
   its container's type with a profile named after its id:
   `application/x-hdf5; profile=nwb`, `image/tiff; profile=ome-tiff`. An app
   port taking the bare type takes its profiles too; one naming a profile takes
@@ -32,7 +33,8 @@ https://schemas.pennsieve.io/formats/v1.json (`terraform/schemas.tf`).
 | `application/octet-stream` | `generic-data`, `data` |
 | `application/postscript` | `adobe-illustrator`, `eps` |
 
-NWB and OME-TIFF, once exceptions here, are profiles of HDF5 and TIFF.
+NWB and OME-TIFF, once exceptions here, are profiles of HDF5 and TIFF;
+AnnData and Loom, once `vnd.pennsieve` types, are profiles of HDF5.
 
 ## EDAM
 
