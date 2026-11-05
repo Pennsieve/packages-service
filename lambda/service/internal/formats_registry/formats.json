@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "formats": [
     {
       "id": "pdf",
@@ -376,7 +376,7 @@
       "id": "ome-tiff",
       "name": "OME-TIFF",
       "description": "Open Microscopy Environment TIFF with OME-XML metadata.",
-      "mediaTypes": ["image/tiff"],
+      "mediaTypes": ["image/tiff; profile=ome-tiff"],
       "fileTypes": ["OMETIFF"],
       "extensions": [".ome.tiff", ".ome.tif", ".ome.tf2", ".ome.tf8", ".ome.btf", ".ome.xml"],
       "edam": "format_3727"
@@ -778,7 +778,7 @@
       "id": "nwb",
       "name": "NeuroData Without Borders",
       "description": "NWB neurophysiology data (HDF5-based).",
-      "mediaTypes": ["application/x-hdf5"],
+      "mediaTypes": ["application/x-hdf5; profile=nwb"],
       "fileTypes": ["NeuroDataWithoutBorders"],
       "extensions": [".nwb"]
     },

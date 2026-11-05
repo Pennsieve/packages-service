@@ -13,6 +13,11 @@ var formatsData []byte
 // as one compressed file per package; empty means a single file.
 // FolderExtensions are the folder's own endings (.ome.zarr, .mefd), how a
 // folder of that format is recognised; Extensions are the stored file's.
+// A format sharing its container's media type names itself with a profile
+// parameter (NWB is "application/x-hdf5; profile=nwb"), so app ports can ask
+// for it alone while the bare type still takes it. The parameter is a
+// Pennsieve convention (after RFC 6906): these types register none. It names
+// port types; it isn't a Content-Type.
 type Format struct {
 	ID          string   `json:"id"`
 	Kind        string   `json:"kind,omitempty"`
