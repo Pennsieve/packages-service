@@ -14,6 +14,14 @@ https://schemas.pennsieve.io/formats/v1.json (`terraform/schemas.tf`).
   `id`: `application/vnd.pennsieve.edf`.
 - **Each format gets its own media type,** because apps and workflows match
   files by media type.
+- **A format that is a kind of another** (NWB, AnnData and Loom are HDF5;
+  OME-TIFF is TIFF) is
+  its container's type with a profile named after its id:
+  `application/x-hdf5; profile=nwb`, `image/tiff; profile=ome-tiff`. An app
+  port taking the bare type takes its profiles too; one naming a profile takes
+  only that format. The container must be another format's type. This is a
+  Pennsieve convention (after RFC 6906's profiles): these types register no
+  `profile` parameter. It names port types; it isn't sent as a Content-Type.
 - Don't add new `x-` types. The existing ones are de facto types kept as they
   are, because changing a format's media type changes what stored packages say
   they are; they're allowlisted in `conventions_test.go`.
@@ -22,13 +30,11 @@ https://schemas.pennsieve.io/formats/v1.json (`terraform/schemas.tf`).
 
 | Media type | Formats |
 |---|---|
-| `application/x-hdf5` | `hdf5`, `nwb` |
-| `image/tiff` | `tiff`, `ome-tiff` |
 | `application/octet-stream` | `generic-data`, `data` |
 | `application/postscript` | `adobe-illustrator`, `eps` |
 
-NWB should get its own type, `application/x-nwb`, in a follow-up. That needs
-care for packages already stored as `application/x-hdf5`.
+NWB and OME-TIFF, once exceptions here, are profiles of HDF5 and TIFF;
+AnnData and Loom, once `vnd.pennsieve` types, are profiles of HDF5.
 
 ## EDAM
 

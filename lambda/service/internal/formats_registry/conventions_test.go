@@ -88,21 +88,38 @@ var unregisteredMediaTypes = map[string]bool{
 }
 
 // Media types shared by more than one format. Each format should have its
-// own; NWB (application/x-hdf5 with HDF5) should move to application/x-nwb.
+// own, or its own profile of its container's (NWB, OME-TIFF).
 var sharedMediaTypes = map[string]bool{
-	"application/x-hdf5":       true, // hdf5, nwb
-	"image/tiff":               true, // tiff, ome-tiff
 	"application/octet-stream": true, // generic-data, data
 	"application/postscript":   true, // adobe-illustrator, eps
 }
 
 // The convention (README.md): an IANA type where one exists, otherwise
-// application/vnd.pennsieve.<id>; one format per media type.
+// application/vnd.pennsieve.<id>; one format per media type. A format that is
+// a kind of another (NWB is HDF5) may instead be its container's type with
+// "; profile=<id>", the container being another format's type.
 func TestMediaTypes_FollowTheConvention(t *testing.T) {
 	shape := regexp.MustCompile(`^[a-z]+/[a-z0-9][a-z0-9.+-]*$`)
 	owner := map[string]string{}
+	types := map[string]bool{}
 	for _, f := range All().Formats {
 		for _, m := range f.MediaTypes {
+			types[m] = true
+		}
+	}
+	for _, f := range All().Formats {
+		for _, m := range f.MediaTypes {
+			if base, profile, ok := strings.Cut(m, "; profile="); ok {
+				assert.Equalf(t, f.ID, profile, "format %q: a profile is named after its format id", f.ID)
+				assert.Truef(t, types[base], "format %q: profile of %q, which no format has", f.ID, base)
+				m = base
+				if prev, ok := owner[f.ID+"@"+base]; ok {
+					t.Errorf("formats %q and %q share profile %q", prev, f.ID, profile)
+				}
+				owner[f.ID+"@"+base] = f.ID
+				assert.Regexpf(t, shape, m, "format %q media type", f.ID)
+				continue
+			}
 			assert.Regexpf(t, shape, m, "format %q media type", f.ID)
 			sub := m[strings.Index(m, "/")+1:]
 			if strings.HasPrefix(sub, "x-") {

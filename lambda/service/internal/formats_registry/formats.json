@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "formats": [
     {
       "id": "pdf",
@@ -376,7 +376,7 @@
       "id": "ome-tiff",
       "name": "OME-TIFF",
       "description": "Open Microscopy Environment TIFF with OME-XML metadata.",
-      "mediaTypes": ["image/tiff"],
+      "mediaTypes": ["image/tiff; profile=ome-tiff"],
       "fileTypes": ["OMETIFF"],
       "extensions": [".ome.tiff", ".ome.tif", ".ome.tf2", ".ome.tf8", ".ome.btf", ".ome.xml"],
       "edam": "format_3727"
@@ -778,7 +778,7 @@
       "id": "nwb",
       "name": "NeuroData Without Borders",
       "description": "NWB neurophysiology data (HDF5-based).",
-      "mediaTypes": ["application/x-hdf5"],
+      "mediaTypes": ["application/x-hdf5; profile=nwb"],
       "fileTypes": ["NeuroDataWithoutBorders"],
       "extensions": [".nwb"]
     },
@@ -1048,7 +1048,7 @@
       "id": "anndata",
       "name": "AnnData (h5ad)",
       "description": "An annotated data matrix for single-cell data (scanpy, AnnData), stored as HDF5.",
-      "mediaTypes": ["application/vnd.pennsieve.anndata"],
+      "mediaTypes": ["application/x-hdf5; profile=anndata"],
       "extensions": [".h5ad"]
     },
     {
@@ -1090,7 +1090,7 @@
       "id": "loom",
       "name": "Loom",
       "description": "Single-cell expression matrix with row and column attributes, stored as HDF5.",
-      "mediaTypes": ["application/vnd.pennsieve.loom"],
+      "mediaTypes": ["application/x-hdf5; profile=loom"],
       "extensions": [".loom"]
     },
     {
