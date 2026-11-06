@@ -76,7 +76,8 @@ func TestAll_EDAMIds(t *testing.T) {
 	assert.Equal(t, "format_3590", hdf5.EDAM)
 }
 
-// NWB, AnnData and Loom are HDF5 and OME-TIFF is TIFF: each is its
+// NWB, AnnData, Loom, h5Seurat, MuData and 10x .h5 are HDF5 and OME-TIFF
+// is TIFF: each is its
 // container's type with its own profile, so ports tell them apart while the
 // bare type takes them all.
 func TestAll_MediaTypeProfiles(t *testing.T) {
@@ -85,6 +86,9 @@ func TestAll_MediaTypeProfiles(t *testing.T) {
 		"nwb":      "application/x-hdf5; profile=nwb",
 		"anndata":  "application/x-hdf5; profile=anndata",
 		"loom":     "application/x-hdf5; profile=loom",
+		"h5seurat": "application/x-hdf5; profile=h5seurat",
+		"mudata":   "application/x-hdf5; profile=mudata",
+		"tenx-h5":  "application/x-hdf5; profile=tenx-h5",
 		"tiff":     "image/tiff",
 		"ome-tiff": "image/tiff; profile=ome-tiff",
 	} {
