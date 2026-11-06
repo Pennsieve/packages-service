@@ -1083,7 +1083,7 @@
       "id": "h5seurat",
       "name": "h5Seurat",
       "description": "A Seurat object stored as HDF5 (SeuratDisk).",
-      "mediaTypes": ["application/vnd.pennsieve.h5seurat"],
+      "mediaTypes": ["application/x-hdf5; profile=h5seurat"],
       "extensions": [".h5seurat"]
     },
     {
@@ -1097,14 +1097,14 @@
       "id": "mudata",
       "name": "MuData (h5mu)",
       "description": "Multimodal single-cell data (muon, MuData), stored as HDF5.",
-      "mediaTypes": ["application/vnd.pennsieve.mudata"],
+      "mediaTypes": ["application/x-hdf5; profile=mudata"],
       "extensions": [".h5mu"]
     },
     {
       "id": "tenx-h5",
       "name": "10x feature-barcode matrix (HDF5)",
       "description": "10x Genomics counts as one HDF5 file (filtered_feature_bc_matrix.h5); the same data as the 10x feature-barcode matrix folder.",
-      "mediaTypes": ["application/vnd.pennsieve.tenx-h5"]
+      "mediaTypes": ["application/x-hdf5; profile=tenx-h5"]
     },
     {
       "id": "atac-fragments",
