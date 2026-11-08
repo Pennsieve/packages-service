@@ -92,6 +92,9 @@ resource "aws_iam_role_policy" "key_rotation_lambda" {
         Action = [
           "cloudfront:CreatePublicKey",
           "cloudfront:GetPublicKey",
+          # cleanupOldKeys deletes a key once it's out of the key group;
+          # without this every rotation left one behind (quota: 10 per account)
+          "cloudfront:DeletePublicKey",
           "cloudfront:GetKeyGroup",
           "cloudfront:UpdateKeyGroup",
           "cloudfront:ListPublicKeys"
