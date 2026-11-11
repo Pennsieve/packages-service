@@ -519,7 +519,11 @@ components:
       properties:
         base_url:
           type: string
-          description: Base URL prefix for constructing additional URLs within the same package
+          description: |
+            Base URL prefix for constructing additional URLs within the same package.
+            For viewer assets whose dataset spans more than one bucket, this has the
+            routing prefix of only one of them; build file URLs from each asset's
+            `asset_url` instead.
           example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/"
         policy:
           type: string
