@@ -169,8 +169,22 @@ paths:
           description: |
             Published-dataset integer PK (i.e. `discover.public_datasets.id`,
             the same numeric ID used in `https://discover.pennsieve.io/datasets/{id}`
-            URLs). Returns dataset-scoped viewer assets (those with no package
-            links). Mutually exclusive with `package_id`.
+            URLs). By default returns dataset-scoped viewer assets (those with no
+            package links); with `scope=all`, every asset in the dataset. Chat
+            figures are never returned. Mutually exclusive with `package_id`.
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [all]
+          required: false
+          description: |
+            Only with `dataset_id`. `all` returns every viewer asset in the
+            published dataset: assets with no package links plus assets linked
+            to a package that is in a successfully published version of the
+            dataset (e.g. the thumbnails for a gallery), newest first. Each
+            asset's `package_ids` lists only its published packages. Omit for
+            the default dataset-scoped list.
       responses:
         '200':
           description: List of viewer assets with CloudFront access
