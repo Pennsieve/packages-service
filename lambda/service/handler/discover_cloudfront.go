@@ -2,16 +2,13 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/pennsieve/packages-service/api/logging"
 )
 
@@ -105,18 +102,8 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	}
 	defer rows.Close()
 
-	// Build asset URL base: https://{domain}{pathPrefix}/O{orgID}/D{datasetID}/
-	var assetURLBase string
-	if cloudfrontDistributionDomain != "" {
-		pathPrefix, _ := getOrganizationCloudFrontPathByOrgId(ctx, orgID)
-		if pathPrefix != "" {
-			assetURLBase = fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
-		} else {
-			assetURLBase = fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
-		}
-	}
-
 	var assets []viewerAssetResponse
+	var pathPrefixes []string
 	for rows.Next() {
 		var a viewerAssetRow
 		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
@@ -143,18 +130,14 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if pkgIDs == nil {
 			pkgIDs = []string{}
 		}
-
-		var assetURL string
-		if assetURLBase != "" {
-			assetURL = assetURLBase + a.ID + "/"
-		}
+		pathPrefixes = append(pathPrefixes, cloudFrontPathPrefixForBucket(a.S3Bucket))
 
 		assets = append(assets, viewerAssetResponse{
 			ID:         a.ID,
 			DatasetID:  datasetNodeID,
 			Name:       a.Name,
 			AssetType:  a.AssetType,
-			AssetURL:   assetURL,
+			AssetURL:   viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties: &a.Properties,
 			Status:     a.Status,
 			PackageIDs: pkgIDs,
@@ -178,18 +161,30 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		}
 	}
 
-	// Generate CloudFront signed policy
+	// Generate CloudFront signed policy covering every bucket the assets are in
 	var cookies []string
 	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
-		s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
-		signedURL, expiresAt, err := h.generateDiscoverCloudFrontSignedURL(ctx, s3Prefix, "", orgID)
-		if err == nil {
-			components, err := h.extractDiscoverURLComponents(ctx, signedURL, expiresAt, s3Prefix, orgID)
-			if err == nil {
-				resp.CloudFront = components
-				cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
-				cookies = components.CloudFrontCookies(cookieDomain)
+		if len(pathPrefixes) == 0 {
+			defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
+			if err != nil {
+				h.logger.LogWarnWithFields(logging.Fields{
+					logging.KeyError:          err,
+					logging.KeyOrganizationID: orgID,
+				}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
 			}
+			pathPrefixes = []string{defaultPrefix}
+		}
+		components, err := signViewerAssetsPolicy(orgID, datasetIntID, pathPrefixes)
+		if err == nil {
+			resp.CloudFront = components
+			cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
+			cookies = components.CloudFrontCookies(cookieDomain)
+		} else {
+			h.logger.LogWarnWithFields(logging.Fields{
+				logging.KeyError:          err,
+				logging.KeyOrganizationID: orgID,
+				logging.KeyDatasetID:      datasetIntID,
+			}, "failed to sign CloudFront policy for discover viewer assets")
 		}
 	}
 
@@ -262,136 +257,4 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverDataset(ctx context.
 	}
 
 	return orgID, datasetIntID, nil
-}
-
-// generateDiscoverCloudFrontSignedURL generates a signed URL for a discover package.
-// Similar to the authenticated version but uses the provided orgId instead of claims.
-func (h *DiscoverCloudFrontSignedURLHandler) generateDiscoverCloudFrontSignedURL(ctx context.Context, s3Prefix string, optionalPath string, orgId int64) (string, time.Time, error) {
-	cloudfrontPathPrefix, err := getOrganizationCloudFrontPathByOrgId(ctx, orgId)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to get organization CloudFront path: %w", err)
-	}
-
-	var resourcePattern string
-	if cloudfrontPathPrefix != "" {
-		resourcePattern = fmt.Sprintf("https://%s%s/%s*", cloudfrontDistributionDomain, cloudfrontPathPrefix, s3Prefix)
-	} else {
-		resourcePattern = fmt.Sprintf("https://%s/%s*", cloudfrontDistributionDomain, s3Prefix)
-	}
-
-	expiresAt := time.Now().Add(1 * time.Hour)
-
-	policy := &sign.Policy{
-		Statements: []sign.Statement{
-			{
-				Resource: resourcePattern,
-				Condition: sign.Condition{
-					DateLessThan: sign.NewAWSEpochTime(expiresAt),
-				},
-			},
-		},
-	}
-
-	signer := sign.NewURLSigner(cloudfrontKeyID, cloudfrontPrivateKey)
-
-	var baseURL string
-	if cloudfrontPathPrefix != "" {
-		if optionalPath != "" {
-			baseURL = fmt.Sprintf("https://%s%s/%s%s", cloudfrontDistributionDomain, cloudfrontPathPrefix, s3Prefix, optionalPath)
-		} else {
-			baseURL = fmt.Sprintf("https://%s%s/%s", cloudfrontDistributionDomain, cloudfrontPathPrefix, s3Prefix)
-		}
-	} else {
-		if optionalPath != "" {
-			baseURL = fmt.Sprintf("https://%s/%s%s", cloudfrontDistributionDomain, s3Prefix, optionalPath)
-		} else {
-			baseURL = fmt.Sprintf("https://%s/%s", cloudfrontDistributionDomain, s3Prefix)
-		}
-	}
-
-	signedURL, err := signer.SignWithPolicy(baseURL, policy)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to sign URL with policy: %w", err)
-	}
-
-	return signedURL, expiresAt, nil
-}
-
-// extractDiscoverURLComponents extracts URL components for the discover endpoint.
-func (h *DiscoverCloudFrontSignedURLHandler) extractDiscoverURLComponents(ctx context.Context, signedURL string, expiresAt time.Time, s3Prefix string, orgId int64) (*CloudFrontURLComponents, error) {
-	parts := strings.Split(signedURL, "?")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid signed URL format")
-	}
-
-	baseURL := parts[0]
-	queryString := parts[1]
-
-	queryParts := strings.Split(queryString, "&")
-	var policyStr, signature, keyPairID string
-
-	for _, part := range queryParts {
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		switch kv[0] {
-		case "Policy":
-			policyStr = kv[1]
-		case "Signature":
-			signature = kv[1]
-		case "Key-Pair-Id":
-			keyPairID = kv[1]
-		}
-	}
-
-	var extractedBaseURL string
-	cloudfrontPathPrefix, err := getOrganizationCloudFrontPathByOrgId(ctx, orgId)
-	if err == nil {
-		if cloudfrontPathPrefix != "" {
-			extractedBaseURL = fmt.Sprintf("https://%s%s/%s", cloudfrontDistributionDomain, cloudfrontPathPrefix, s3Prefix)
-		} else {
-			extractedBaseURL = fmt.Sprintf("https://%s/%s", cloudfrontDistributionDomain, s3Prefix)
-		}
-	} else {
-		if idx := strings.LastIndex(baseURL, "/"); idx != -1 {
-			extractedBaseURL = baseURL[:idx+1]
-		} else {
-			extractedBaseURL = baseURL
-		}
-	}
-
-	components := &CloudFrontURLComponents{
-		BaseURL:   extractedBaseURL,
-		Policy:    policyStr,
-		Signature: signature,
-		KeyPairID: keyPairID,
-	}
-
-	if policyStr != "" {
-		authHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-		policyInfo, err := authHandler.extractPolicyInfo(policyStr, expiresAt)
-		if err == nil {
-			components.PolicyInfo = policyInfo
-		}
-	}
-
-	return components, nil
-}
-
-// getOrganizationCloudFrontPathByOrgId is a standalone version that queries by org ID
-// without requiring auth claims.
-func getOrganizationCloudFrontPathByOrgId(ctx context.Context, orgId int64) (string, error) {
-	query := `SELECT storage_bucket FROM pennsieve.organizations WHERE id = $1`
-	var bucketName sql.NullString
-	err := PennsieveDB.QueryRowContext(ctx, query, orgId).Scan(&bucketName)
-	if err != nil && err != sql.ErrNoRows {
-		return "", fmt.Errorf("failed to query organization storage bucket: %w", err)
-	}
-
-	if bucketName.Valid && bucketName.String != "" {
-		pathPrefix := generateDeterministicPath(bucketName.String)
-		return "/" + pathPrefix, nil
-	}
-	return "", nil
 }

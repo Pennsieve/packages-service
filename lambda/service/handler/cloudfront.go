@@ -181,6 +181,118 @@ func (h *CloudFrontSignedURLHandler) getOrganizationCloudFrontPath(ctx context.C
 	}
 }
 
+// cloudFrontPathPrefixForBucket returns the CloudFront path prefix that routes to
+// the given bucket on the package-assets distribution: "" for the default origin
+// (ViewerAssetsBucket, the main storage bucket) and "/{8-char hash}" for every
+// other bucket, which the distribution serves through a per-bucket cache behavior.
+func cloudFrontPathPrefixForBucket(bucketName string) string {
+	if bucketName == "" || strings.EqualFold(bucketName, ViewerAssetsBucket) {
+		return ""
+	}
+	return "/" + generateDeterministicPath(bucketName)
+}
+
+// viewerAssetURL returns the CloudFront base URL of a viewer asset stored in
+// bucketName, or "" when CloudFront is not configured. The bucket is the one
+// recorded on the asset, not the organization's current storage bucket: an
+// organization's storage bucket can change while its existing assets stay put.
+func viewerAssetURL(orgID, datasetID int64, assetID, bucketName string) string {
+	if cloudfrontDistributionDomain == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://%s%s/O%d/D%d/%s/",
+		cloudfrontDistributionDomain, cloudFrontPathPrefixForBucket(bucketName), orgID, datasetID, assetID)
+}
+
+// defaultViewerAssetPathPrefix returns the path prefix for the bucket new viewer
+// assets of the organization go to (see resolveStorageBucket). Used to scope
+// signing when there are no assets to go by. On error it also returns the
+// default bucket's prefix, "", so callers can log and carry on.
+func defaultViewerAssetPathPrefix(ctx context.Context, orgID int64) (string, error) {
+	bucketName, err := resolveStorageBucket(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	return cloudFrontPathPrefixForBucket(bucketName), nil
+}
+
+// viewerAssetsResourcePattern returns the signed-policy resource for a dataset's
+// viewer assets under the given CloudFront path prefixes. With a single prefix
+// it is that prefix's O{org}/D{dataset}/ path. When a dataset's assets live in
+// more than one bucket (e.g. after its organization's storage bucket changed),
+// a CloudFront policy can only hold one statement, so the pattern instead
+// matches O{org}/D{dataset}/ under any prefix.
+func viewerAssetsResourcePattern(orgID, datasetID int64, pathPrefixes []string) string {
+	s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetID)
+	distinct := map[string]bool{}
+	for _, p := range pathPrefixes {
+		distinct[p] = true
+	}
+	if len(distinct) == 1 {
+		return fmt.Sprintf("https://%s%s/%s*", cloudfrontDistributionDomain, pathPrefixes[0], s3Prefix)
+	}
+	return fmt.Sprintf("https://%s/*%s*", cloudfrontDistributionDomain, s3Prefix)
+}
+
+// signViewerAssetsPolicy signs a one-hour CloudFront policy covering a dataset's
+// viewer assets under the given path prefixes (at least one; the first one is
+// used for BaseURL). The signing keys must already be loaded.
+func signViewerAssetsPolicy(orgID, datasetID int64, pathPrefixes []string) (*CloudFrontURLComponents, error) {
+	if cloudfrontPrivateKey == nil {
+		return nil, fmt.Errorf("CloudFront signing keys not loaded")
+	}
+	if len(pathPrefixes) == 0 {
+		return nil, fmt.Errorf("no CloudFront path prefix to sign for")
+	}
+
+	resourcePattern := viewerAssetsResourcePattern(orgID, datasetID, pathPrefixes)
+	expiresAt := time.Now().Add(1 * time.Hour)
+	policy := &sign.Policy{
+		Statements: []sign.Statement{
+			{
+				Resource: resourcePattern,
+				Condition: sign.Condition{
+					DateLessThan: sign.NewAWSEpochTime(expiresAt),
+				},
+			},
+		},
+	}
+
+	baseURL := fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefixes[0], orgID, datasetID)
+	signedURL, err := sign.NewURLSigner(cloudfrontKeyID, cloudfrontPrivateKey).SignWithPolicy(baseURL, policy)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign URL with policy: %w", err)
+	}
+
+	parts := strings.SplitN(signedURL, "?", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid signed URL format")
+	}
+	components := &CloudFrontURLComponents{BaseURL: baseURL}
+	for _, part := range strings.Split(parts[1], "&") {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		switch kv[0] {
+		case "Policy":
+			components.Policy = kv[1]
+		case "Signature":
+			components.Signature = kv[1]
+		case "Key-Pair-Id":
+			components.KeyPairID = kv[1]
+		}
+	}
+	// Built from the inputs rather than decoded from the signed policy: CloudFront's
+	// policy encoding ('~' for '/') is not standard or URL-safe base64.
+	components.PolicyInfo = &PolicyInfo{
+		ResourcePattern: resourcePattern,
+		ExpiresAt:       expiresAt.Unix(),
+		ExpiresAtISO:    time.Unix(expiresAt.Unix(), 0).UTC().Format(time.RFC3339),
+	}
+	return components, nil
+}
+
 // generateDeterministicPath creates a deterministic 8-character path from bucket name
 func generateDeterministicPath(bucketName string) string {
 	// Create MD5 hash of bucket name for deterministic result
