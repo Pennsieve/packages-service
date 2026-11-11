@@ -205,19 +205,15 @@ func viewerAssetURL(orgID, datasetID int64, assetID, bucketName string) string {
 }
 
 // defaultViewerAssetPathPrefix returns the path prefix for the bucket new viewer
-// assets of the organization go to: its storage bucket if set, otherwise
-// ViewerAssetsBucket. Used to scope signing when there are no assets to go by.
+// assets of the organization go to (see resolveStorageBucket). Used to scope
+// signing when there are no assets to go by. On error it also returns the
+// default bucket's prefix, "", so callers can log and carry on.
 func defaultViewerAssetPathPrefix(ctx context.Context, orgID int64) (string, error) {
-	query := `SELECT storage_bucket FROM pennsieve.organizations WHERE id = $1`
-	var bucketName sql.NullString
-	err := PennsieveDB.QueryRowContext(ctx, query, orgID).Scan(&bucketName)
-	if err != nil && err != sql.ErrNoRows {
-		return "", fmt.Errorf("failed to query organization storage bucket: %w", err)
+	bucketName, err := resolveStorageBucket(ctx, orgID)
+	if err != nil {
+		return "", err
 	}
-	if bucketName.Valid && bucketName.String != "" {
-		return cloudFrontPathPrefixForBucket(bucketName.String), nil
-	}
-	return cloudFrontPathPrefixForBucket(ViewerAssetsBucket), nil
+	return cloudFrontPathPrefixForBucket(bucketName), nil
 }
 
 // viewerAssetsResourcePattern returns the signed-policy resource for a dataset's

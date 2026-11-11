@@ -149,7 +149,7 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 		}
 	}
 
-	storageBucket, err := h.resolveStorageBucket(ctx, orgID)
+	storageBucket, err := resolveStorageBucket(ctx, orgID)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to resolve storage bucket", http.StatusInternalServerError, err), nil
 	}
@@ -663,7 +663,9 @@ func (h *ViewerAssetsHandler) resolvePackageIDs(ctx context.Context, orgID, data
 	return intIDs, nodeIDs, nil
 }
 
-func (h *ViewerAssetsHandler) resolveStorageBucket(ctx context.Context, orgID int64) (string, error) {
+// resolveStorageBucket returns the bucket new viewer assets of the organization go
+// to: its storage bucket if set, otherwise ViewerAssetsBucket.
+func resolveStorageBucket(ctx context.Context, orgID int64) (string, error) {
 	query := `SELECT storage_bucket FROM pennsieve.organizations WHERE id = $1`
 	var bucketName sql.NullString
 	if err := PennsieveDB.QueryRowContext(ctx, query, orgID).Scan(&bucketName); err != nil {
