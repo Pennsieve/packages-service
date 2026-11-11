@@ -314,18 +314,13 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 
 	pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
 
-	var assetURL string
-	if assetURLBase := h.buildAssetURLBase(ctx, orgID, datasetIntID); assetURLBase != "" {
-		assetURL = assetURLBase + a.ID + "/"
-	}
-
 	resp := getViewerAssetResponse{
 		Asset: viewerAssetResponse{
 			ID:            a.ID,
 			DatasetID:     datasetNodeID,
 			Name:          a.Name,
 			AssetType:     a.AssetType,
-			AssetURL:      assetURL,
+			AssetURL:      viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties:    &a.Properties,
 			Status:        a.Status,
 			PackageIDs:    pkgIDs,
@@ -334,7 +329,8 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 		},
 	}
 
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID)
+	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID,
+		[]string{cloudFrontPathPrefixForBucket(a.S3Bucket)})
 	if components != nil {
 		resp.CloudFront = components
 	}
@@ -359,9 +355,8 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 	}
 	defer rows.Close()
 
-	assetURLBase := h.buildAssetURLBase(ctx, orgID, datasetIntID)
-
 	var assets []viewerAssetResponse
+	var pathPrefixes []string
 	for rows.Next() {
 		var a viewerAssetRow
 		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
@@ -369,18 +364,14 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 		}
 
 		pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
-
-		var assetURL string
-		if assetURLBase != "" {
-			assetURL = assetURLBase + a.ID + "/"
-		}
+		pathPrefixes = append(pathPrefixes, cloudFrontPathPrefixForBucket(a.S3Bucket))
 
 		assets = append(assets, viewerAssetResponse{
 			ID:         a.ID,
 			DatasetID:  datasetNodeID,
 			Name:       a.Name,
 			AssetType:  a.AssetType,
-			AssetURL:   assetURL,
+			AssetURL:   viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties: &a.Properties,
 			Status:     a.Status,
 			PackageIDs: pkgIDs,
@@ -392,7 +383,7 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID)
+	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
 	if components != nil {
 		resp.CloudFront = components
 	}
@@ -407,34 +398,12 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 	return apiResp, nil
 }
 
-// buildAssetURLBase returns the CloudFront URL prefix for a dataset's assets
-// (e.g. "https://cdn/.../O{org}/D{dataset}/"), or "" when CloudFront is not configured.
-func (h *ViewerAssetsHandler) buildAssetURLBase(ctx context.Context, orgID, datasetIntID int64) string {
-	if cloudfrontDistributionDomain == "" {
-		return ""
-	}
-	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-	pathPrefix, err := cfHandler.getOrganizationCloudFrontPath(ctx, orgID)
-	if err != nil {
-		// Not fatal: we fall back to an unprefixed CloudFront URL. But that
-		// silently produces a different (possibly non-resolving) asset URL, so
-		// it must not go unlogged.
-		h.logger.LogWarnWithFields(logging.Fields{
-			logging.KeyError:          err,
-			logging.KeyOrganizationID: orgID,
-			logging.KeyDatasetID:      datasetIntID,
-		}, "could not resolve organization CloudFront path; falling back to unprefixed CloudFront asset URL")
-	}
-	if pathPrefix != "" {
-		return fmt.Sprintf("https://%s%s/O%d/D%d/", cloudfrontDistributionDomain, pathPrefix, orgID, datasetIntID)
-	}
-	return fmt.Sprintf("https://%s/O%d/D%d/", cloudfrontDistributionDomain, orgID, datasetIntID)
-}
-
 // signDatasetCloudFront generates CloudFront signing components and cookies covering
-// every asset under O{org}/D{dataset}/. Returns (nil, nil) if signing is not configured
-// or fails — callers treat that as "no signing", not an error.
-func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, datasetIntID int64) (*CloudFrontURLComponents, []string) {
+// the dataset's assets under O{org}/D{dataset}/ in every bucket named by pathPrefixes
+// (one entry per asset, from cloudFrontPathPrefixForBucket). With no assets it signs
+// for the bucket the organization's new assets go to. Returns (nil, nil) if signing
+// is not configured or fails — callers treat that as "no signing", not an error.
+func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, datasetIntID int64, pathPrefixes []string) (*CloudFrontURLComponents, []string) {
 	if cloudfrontDistributionDomain == "" {
 		return nil, nil
 	}
@@ -451,14 +420,23 @@ func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, 
 		return nil, nil
 	}
 
-	s3Prefix := fmt.Sprintf("O%d/D%d/", orgID, datasetIntID)
-	cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-	signedURL, expiresAt, err := cfHandler.generateCloudFrontSignedURLWithPolicy(s3Prefix, "")
-	if err != nil {
-		return nil, nil
+	if len(pathPrefixes) == 0 {
+		defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
+		if err != nil {
+			h.logger.LogWarnWithFields(logging.Fields{
+				logging.KeyError:          err,
+				logging.KeyOrganizationID: orgID,
+			}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
+		}
+		pathPrefixes = []string{defaultPrefix}
 	}
-	components, err := cfHandler.extractURLComponents(signedURL, expiresAt, s3Prefix)
+	components, err := signViewerAssetsPolicy(orgID, datasetIntID, pathPrefixes)
 	if err != nil {
+		h.logger.LogWarnWithFields(logging.Fields{
+			logging.KeyError:          err,
+			logging.KeyOrganizationID: orgID,
+			logging.KeyDatasetID:      datasetIntID,
+		}, "failed to sign CloudFront policy for viewer assets")
 		return nil, nil
 	}
 	cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")

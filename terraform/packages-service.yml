@@ -542,7 +542,10 @@ components:
       properties:
         resource_pattern:
           type: string
-          description: The resource pattern allowed by this policy
+          description: |
+            The resource pattern allowed by this policy. For viewer assets it covers
+            the dataset's path under the bucket prefix its assets use; when they span
+            more than one bucket it is `https://{domain}/*O{org}/D{dataset}/*`.
           example: "https://d1xck3bfkf5p24.cloudfront.net/O19/D2049/P2243538/*"
         expires_at:
           type: integer
@@ -607,9 +610,11 @@ components:
         asset_url:
           type: string
           description: |
-            CloudFront base URL for the asset's files. To access a file, append the
-            relative file path and the CloudFront signing query params from the
-            `cloudfront` object in the response. Example full URL:
+            CloudFront base URL for the asset's files. The path starts with a routing
+            prefix for the bucket the asset is stored in (none for the default storage
+            bucket), so assets of one dataset can have different prefixes. To access a
+            file, append the relative file path and the CloudFront signing query params
+            from the `cloudfront` object in the response. Example full URL:
             `{asset_url}.zattrs?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
           example: "https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-e5f6-7890-abcd-ef1234567890/"
         properties:
