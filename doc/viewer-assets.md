@@ -216,9 +216,11 @@ List viewer assets for a published package or dataset. No authentication require
 - **Query params**: exactly one of
   - `package_id` — the **source package node ID** (e.g. `N:package:abc-123`). Returns assets linked to that package.
   - `dataset_id` — the **published-dataset PK** as an integer, i.e. `discover.public_datasets.id` (the same numeric ID that appears in `https://discover.pennsieve.io/datasets/{id}` URLs). Returns dataset-scoped assets (those with no package links).
+- **Optional**: `scope=all` (only with `dataset_id`) — returns every asset in the published dataset instead: assets with no package links plus assets linked to a package that has a file in a successfully published (`PUBLISH_SUCCEEDED`) version of the dataset. Use it to load a dataset's gallery thumbnails in one call. Each asset's `package_ids` lists only its published packages; assets linked only to unpublished packages (e.g. files added after publication) are left out.
+- **Chat figures** (`chat_session_id` set) are never returned in dataset mode.
 - **Validation**: Checks the Discover database to confirm the package or dataset is published. Note the asymmetry: the package side accepts a *node ID* (because `discover.public_file_versions` stores `source_package_id` as a node ID), while the dataset side accepts the *published-dataset integer PK* (because `discover.public_datasets` does not store the source dataset node ID).
-- **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
-- **Errors**: 400 if neither or both query params are supplied, or if `dataset_id` is non-numeric. 404 if the package/dataset is not published.
+- **Returns**: Array of assets (each with `asset_url`), newest first, plus CloudFront signing params
+- **Errors**: 400 if neither or both of `package_id`/`dataset_id` are supplied, if `dataset_id` is non-numeric, or if `scope` is anything other than `all` or is combined with `package_id`. 404 if the package/dataset is not published.
 
 ## Accessing Viewer Assets from the Front-End
 

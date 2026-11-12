@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/logging"
 )
 
@@ -29,27 +30,56 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleOptions(ctx context.Context) 
 	}, nil
 }
 
+// discoverScopeAll is the `scope` query value that makes dataset mode return
+// every asset in the dataset, not only the ones with no package links.
+const discoverScopeAll = "all"
+
+// publishSucceededStatus is the discover.public_dataset_versions status of a
+// version that finished publishing (pennsieve-api PublishStatus.PublishSucceeded).
+const publishSucceededStatus = "PUBLISH_SUCCEEDED"
+
+// linkedPackageNodeIDsColumn selects, for each viewer asset row `va`, the node IDs
+// of the packages it is linked to (empty array when none), so a list query needs
+// no follow-up query per asset. %[1]d is the organization ID.
+const linkedPackageNodeIDsColumn = `COALESCE((
+				SELECT array_agg(p.node_id ORDER BY p.node_id)
+				FROM "%[1]d".packages p
+				JOIN "%[1]d".viewer_asset_packages vap2 ON p.id = vap2.package_id
+				WHERE vap2.viewer_asset_id = va.id
+			), '{}') AS package_ids`
+
 // handleListAssets lists viewer assets for a published package or dataset (unauthenticated).
 // Accepts exactly one of:
 //   - package_id: the source package node ID (returns assets linked to that package)
-//   - dataset_id: the published-dataset PK from discover.public_datasets.id (returns
-//     dataset-scoped assets — those with no package links)
+//   - dataset_id: the published-dataset PK from discover.public_datasets.id. By default
+//     it returns dataset-scoped assets (those with no package links). With scope=all it
+//     returns every asset in the dataset: those with no package links plus those linked
+//     to a package that is in a successfully published version of the dataset. In both
+//     cases chat-scoped assets are excluded.
 func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	packageNodeID := h.queryParams["package_id"]
 	publishedDatasetIDStr := h.queryParams["dataset_id"]
+	scope := h.queryParams["scope"]
 
 	if (packageNodeID == "") == (publishedDatasetIDStr == "") {
 		return h.logAndBuildError("exactly one of 'package_id' or 'dataset_id' is required", http.StatusBadRequest), nil
 	}
+	if scope != "" && scope != discoverScopeAll {
+		return h.logAndBuildError("'scope' must be 'all' when supplied", http.StatusBadRequest), nil
+	}
+	if scope == discoverScopeAll && packageNodeID != "" {
+		return h.logAndBuildError("'scope' is only supported with 'dataset_id'", http.StatusBadRequest), nil
+	}
 
 	var (
-		orgID         int64
-		datasetIntID  int64
-		packageIntID  int64
-		datasetNodeID string
-		query         string
-		queryArg      interface{}
-		err           error
+		orgID              int64
+		datasetIntID       int64
+		packageIntID       int64
+		publishedDatasetID int64
+		datasetNodeID      string
+		query              string
+		queryArg           interface{}
+		err                error
 	)
 
 	if packageNodeID != "" {
@@ -60,15 +90,17 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			return h.logAndBuildErrorCause("failed to resolve published package", http.StatusNotFound, err), nil
 		}
 		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%d".viewer_assets va
-			JOIN "%d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at,
+			`+linkedPackageNodeIDsColumn+`
+			FROM "%[1]d".viewer_assets va
+			JOIN "%[1]d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
 			WHERE vap.package_id = $1
 			ORDER BY va.created_at DESC
-		`, orgID, orgID)
+		`, orgID)
 		queryArg = packageIntID
 	} else {
-		publishedDatasetID, parseErr := strconv.ParseInt(publishedDatasetIDStr, 10, 64)
+		var parseErr error
+		publishedDatasetID, parseErr = strconv.ParseInt(publishedDatasetIDStr, 10, 64)
 		if parseErr != nil {
 			return h.logAndBuildError("'dataset_id' must be a positive integer (the published-dataset ID)", http.StatusBadRequest), nil
 		}
@@ -78,15 +110,23 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve published dataset", http.StatusNotFound, err), nil
 		}
-		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%d".viewer_assets va
-			WHERE va.dataset_id = $1
+		// Default: only assets with no package links. scope=all: every asset; the
+		// ones linked to unpublished packages are dropped below.
+		packageFilter := `
 			  AND NOT EXISTS (
-			    SELECT 1 FROM "%d".viewer_asset_packages vap WHERE vap.viewer_asset_id = va.id
-			  )
+			    SELECT 1 FROM "%[1]d".viewer_asset_packages vap WHERE vap.viewer_asset_id = va.id
+			  )`
+		if scope == discoverScopeAll {
+			packageFilter = ""
+		}
+		query = fmt.Sprintf(`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at,
+			`+linkedPackageNodeIDsColumn+`
+			FROM "%[1]d".viewer_assets va
+			WHERE va.dataset_id = $1
+			  AND va.chat_session_id IS NULL`+packageFilter+`
 			ORDER BY va.created_at DESC
-		`, orgID, orgID)
+		`, orgID)
 		queryArg = datasetIntID
 	}
 
@@ -102,31 +142,60 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	}
 	defer rows.Close()
 
-	var assets []viewerAssetResponse
-	var pathPrefixes []string
+	type assetWithPackages struct {
+		row    viewerAssetRow
+		pkgIDs []string
+	}
+	var found []assetWithPackages
 	for rows.Next() {
-		var a viewerAssetRow
-		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
+		var a assetWithPackages
+		if err := rows.Scan(&a.row.ID, &a.row.DatasetID, &a.row.Name, &a.row.AssetType, &a.row.Properties,
+			&a.row.S3Bucket, &a.row.Status, &a.row.CreatedAt, pq.Array(&a.pkgIDs)); err != nil {
 			return h.logAndBuildErrorCause("failed to scan asset row", http.StatusInternalServerError, err), nil
 		}
+		found = append(found, a)
+	}
+	if err := rows.Err(); err != nil {
+		return h.logAndBuildErrorCause("failed to read asset rows", http.StatusInternalServerError, err), nil
+	}
 
-		// Get linked package node IDs
-		pkgQuery := fmt.Sprintf(`
-			SELECT p.node_id FROM "%d".packages p
-			JOIN "%d".viewer_asset_packages vap ON p.id = vap.package_id
-			WHERE vap.viewer_asset_id = $1
-		`, orgID, orgID)
-		pkgRows, err := PennsieveDB.QueryContext(ctx, pkgQuery, a.ID)
-		var pkgIDs []string
-		if err == nil {
-			for pkgRows.Next() {
-				var nodeID string
-				if pkgRows.Scan(&nodeID) == nil {
-					pkgIDs = append(pkgIDs, nodeID)
+	// scope=all includes package-linked assets, which must only be public when the
+	// package was published. Keep an asset if it has no package links or at least
+	// one published linked package, and report only the published links.
+	if scope == discoverScopeAll {
+		var linked []string
+		for _, a := range found {
+			linked = append(linked, a.pkgIDs...)
+		}
+		published, err := h.publishedPackageNodeIDs(ctx, publishedDatasetID, linked)
+		if err != nil {
+			return h.logAndBuildErrorCause("failed to look up published packages", http.StatusInternalServerError, err), nil
+		}
+		kept := found[:0]
+		for _, a := range found {
+			if len(a.pkgIDs) == 0 {
+				kept = append(kept, a)
+				continue
+			}
+			var publishedIDs []string
+			for _, id := range a.pkgIDs {
+				if published[id] {
+					publishedIDs = append(publishedIDs, id)
 				}
 			}
-			pkgRows.Close()
+			if len(publishedIDs) > 0 {
+				a.pkgIDs = publishedIDs
+				kept = append(kept, a)
+			}
 		}
+		found = kept
+	}
+
+	assets := make([]viewerAssetResponse, 0, len(found))
+	var pathPrefixes []string
+	for _, f := range found {
+		a := f.row
+		pkgIDs := f.pkgIDs
 		if pkgIDs == nil {
 			pkgIDs = []string{}
 		}
@@ -143,9 +212,6 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			PackageIDs: pkgIDs,
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
-	}
-	if assets == nil {
-		assets = []viewerAssetResponse{}
 	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
@@ -257,4 +323,44 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverDataset(ctx context.
 	}
 
 	return orgID, datasetIntID, nil
+}
+
+// publishedPackageNodeIDs returns which of the given package node IDs have a file
+// in a successfully published version of the published dataset (an embargoed or
+// failed version does not count). Older versions stay public after a new one is
+// published, so any published version qualifies, not only the latest.
+// publishedDatasetID is discover.public_datasets.id.
+func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context.Context, publishedDatasetID int64, packageNodeIDs []string) (map[string]bool, error) {
+	published := map[string]bool{}
+	if len(packageNodeIDs) == 0 {
+		return published, nil
+	}
+	if DiscoverDB == nil {
+		return nil, fmt.Errorf("discover database not configured")
+	}
+
+	query := `
+		SELECT DISTINCT fv.source_package_id
+		FROM discover.public_file_versions fv
+		JOIN discover.public_dataset_version_files vf
+		  ON vf.file_id = fv.id AND vf.dataset_id = fv.dataset_id
+		JOIN discover.public_dataset_versions v
+		  ON v.dataset_id = vf.dataset_id AND v.version = vf.dataset_version
+		WHERE fv.dataset_id = $1
+		  AND v.status = $2
+		  AND fv.source_package_id = ANY($3::text[])
+	`
+	rows, err := DiscoverDB.QueryContext(ctx, query, publishedDatasetID, publishSucceededStatus, pq.Array(packageNodeIDs))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query published packages: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			return nil, err
+		}
+		published[nodeID] = true
+	}
+	return published, rows.Err()
 }
