@@ -665,7 +665,7 @@ func packageRefsByAsset(ctx context.Context, orgID int64, assetIDs []string) (ma
 		refs[assetID] = append(refs[assetID], ref)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read linked packages: %w", err)
 	}
 	return refs, nil
 }
@@ -688,12 +688,17 @@ func (h *ViewerAssetsHandler) linkedPackagesOrEmpty(ctx context.Context, orgID i
 	if err == nil {
 		return refs
 	}
-	// Keep this message as is: it is searched for in the prod logs.
-	h.logger.LogErrorWithFields(logging.Fields{
+	fields := logging.Fields{
 		logging.KeyError:          err,
 		logging.KeyOrganizationID: orgID,
 		logging.KeyCount:          len(assetIDs),
-	}, "failed to look up linked packages for viewer asset; returning empty package list")
+	}
+	// GET and PATCH look up a single asset: name it so the log says which one.
+	if len(assetIDs) == 1 {
+		fields[logging.KeyViewerAssetID] = assetIDs[0]
+	}
+	// Keep this message as is: it is searched for in the prod logs.
+	h.logger.LogErrorWithFields(fields, "failed to look up linked packages for viewer asset; returning empty package list")
 	return map[string][]packageRef{}
 }
 

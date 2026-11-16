@@ -9,9 +9,10 @@ import (
 // listMode says which of a dataset's viewer assets a list query returns.
 type listMode int
 
+// Modes start at 1 so a listQuery with no mode set fails loudly in build().
 const (
 	// listByPackage returns the assets linked to one package.
-	listByPackage listMode = iota
+	listByPackage listMode = iota + 1
 	// listDatasetUnlinked returns a dataset's assets that have no package links.
 	listDatasetUnlinked
 	// listDatasetAll returns every asset in a dataset, linked or not.
@@ -25,9 +26,15 @@ const viewerAssetStatusReady = "ready"
 // and the public one (GET /discover/assets) both build their SQL from it, so a
 // new filter only has to be added here.
 type listQuery struct {
-	orgID, datasetID, packageID int64
-	mode                        listMode
-	excludeChat, readyOnly      bool
+	orgID int64
+	// datasetID is the filter in the dataset modes. Package mode ignores it: the
+	// caller has already checked that the package belongs to the dataset.
+	datasetID int64
+	// packageID is used by listByPackage only.
+	packageID int64
+	mode      listMode
+	// excludeChat leaves out chat figures; readyOnly leaves out unfinished uploads.
+	excludeChat, readyOnly bool
 }
 
 // build returns the list SQL and its arguments. It selects the columns
@@ -45,14 +52,17 @@ func (q listQuery) build() (string, []any) {
 
 	switch q.mode {
 	case listByPackage:
-		join = fmt.Sprintf(`JOIN "%[1]d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id`, q.orgID)
+		join = fmt.Sprintf(`JOIN "%[1]d".%[2]s vap ON va.id = vap.viewer_asset_id`, q.orgID, viewerAssetPackagesTable)
 		conditions = append(conditions, "vap.package_id = "+param(q.packageID))
 	case listDatasetUnlinked:
 		conditions = append(conditions,
 			"va.dataset_id = "+param(q.datasetID),
-			fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM "%[1]d".viewer_asset_packages vap WHERE vap.viewer_asset_id = va.id)`, q.orgID))
+			fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM "%[1]d".%[2]s vap WHERE vap.viewer_asset_id = va.id)`, q.orgID, viewerAssetPackagesTable))
 	case listDatasetAll:
 		conditions = append(conditions, "va.dataset_id = "+param(q.datasetID))
+	default:
+		// A programming error, not bad input: every caller sets a mode.
+		panic(fmt.Sprintf("listQuery: unknown mode %d", q.mode))
 	}
 
 	if q.excludeChat {
@@ -64,11 +74,11 @@ func (q listQuery) build() (string, []any) {
 
 	sql := fmt.Sprintf(`
 		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-		FROM "%[1]d".viewer_assets va
-		%[2]s
-		WHERE %[3]s
+		FROM "%[1]d".%[2]s va
+		%[3]s
+		WHERE %[4]s
 		ORDER BY va.created_at DESC
-	`, q.orgID, join, strings.Join(conditions, "\n\t\t  AND "))
+	`, q.orgID, viewerAssetsTable, join, strings.Join(conditions, "\n\t\t  AND "))
 	return sql, args
 }
 
@@ -79,7 +89,7 @@ func queryViewerAssets(ctx context.Context, q listQuery) ([]viewerAssetRow, erro
 	query, args := q.build()
 	rows, err := PennsieveDB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query viewer assets: %w", err)
 	}
 	defer rows.Close()
 
@@ -91,7 +101,10 @@ func queryViewerAssets(ctx context.Context, q listQuery) ([]viewerAssetRow, erro
 		}
 		assets = append(assets, a)
 	}
-	return assets, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read viewer asset rows: %w", err)
+	}
+	return assets, nil
 }
 
 func viewerAssetIDs(assets []viewerAssetRow) []string {

@@ -115,9 +115,9 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 
 	// The default dataset mode only returns assets with no package links, so
 	// there is nothing to look up.
-	linked := map[string][]string{}
+	linked := map[string][]packageRef{}
 	if q.mode != listDatasetUnlinked {
-		linked, err = linkedPackageNodeIDs(ctx, orgID, found)
+		linked, err = packageRefsByAsset(ctx, orgID, viewerAssetIDs(found))
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to look up linked packages", http.StatusInternalServerError, err), nil
 		}
@@ -142,7 +142,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			AssetURL:   viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties: &a.Properties,
 			Status:     a.Status,
-			PackageIDs: nonNil(linked[a.ID]),
+			PackageIDs: packageNodeIDs(linked[a.ID]),
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
 	}
@@ -164,28 +164,14 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 	return apiResp, nil
 }
 
-// linkedPackageNodeIDs returns, for each asset, the node IDs of its linked
-// packages, ordered by node ID. Assets with no links are not in the map.
-func linkedPackageNodeIDs(ctx context.Context, orgID int64, assets []viewerAssetRow) (map[string][]string, error) {
-	refs, err := packageRefsByAsset(ctx, orgID, viewerAssetIDs(assets))
-	if err != nil {
-		return nil, err
-	}
-	nodeIDs := make(map[string][]string, len(refs))
-	for assetID, assetRefs := range refs {
-		nodeIDs[assetID] = packageNodeIDs(assetRefs)
-	}
-	return nodeIDs, nil
-}
-
 // keepPublishedAssets is the scope=all filter. scope=all includes package-linked
 // assets, and those must only be public once their package is published. It keeps
 // an asset if it has no package links or at least one published linked package,
 // and trims each kept asset's links down to the published ones.
-func (h *DiscoverCloudFrontSignedURLHandler) keepPublishedAssets(ctx context.Context, publishedDatasetID int64, assets []viewerAssetRow, linked map[string][]string) ([]viewerAssetRow, map[string][]string, error) {
+func (h *DiscoverCloudFrontSignedURLHandler) keepPublishedAssets(ctx context.Context, publishedDatasetID int64, assets []viewerAssetRow, linked map[string][]packageRef) ([]viewerAssetRow, map[string][]packageRef, error) {
 	var allLinked []string
-	for _, nodeIDs := range linked {
-		allLinked = append(allLinked, nodeIDs...)
+	for _, refs := range linked {
+		allLinked = append(allLinked, packageNodeIDs(refs)...)
 	}
 	published, err := h.publishedPackageNodeIDs(ctx, publishedDatasetID, allLinked)
 	if err != nil {
@@ -193,22 +179,22 @@ func (h *DiscoverCloudFrontSignedURLHandler) keepPublishedAssets(ctx context.Con
 	}
 
 	var kept []viewerAssetRow
-	keptLinks := map[string][]string{}
+	keptLinks := map[string][]packageRef{}
 	for _, a := range assets {
-		nodeIDs := linked[a.ID]
-		if len(nodeIDs) == 0 {
+		refs := linked[a.ID]
+		if len(refs) == 0 {
 			kept = append(kept, a)
 			continue
 		}
-		var publishedIDs []string
-		for _, id := range nodeIDs {
-			if published[id] {
-				publishedIDs = append(publishedIDs, id)
+		var publishedRefs []packageRef
+		for _, ref := range refs {
+			if published[ref.NodeID] {
+				publishedRefs = append(publishedRefs, ref)
 			}
 		}
-		if len(publishedIDs) > 0 {
+		if len(publishedRefs) > 0 {
 			kept = append(kept, a)
-			keptLinks[a.ID] = publishedIDs
+			keptLinks[a.ID] = publishedRefs
 		}
 	}
 	return kept, keptLinks, nil
@@ -226,14 +212,6 @@ func uniqueStrings(values []string) []string {
 		unique = append(unique, v)
 	}
 	return unique
-}
-
-// nonNil turns a nil slice into an empty one, so JSON shows [] rather than null.
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 // resolveDiscoverPackage validates that a package is published via the Discover DB
@@ -302,9 +280,9 @@ func (h *DiscoverCloudFrontSignedURLHandler) resolveDiscoverDataset(ctx context.
 // failed version does not count). Older versions stay public after a new one is
 // published, so any published version qualifies, not only the latest.
 // publishedDatasetID is discover.public_datasets.id.
-func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context.Context, publishedDatasetID int64, packageNodeIDs []string) (map[string]bool, error) {
+func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context.Context, publishedDatasetID int64, nodeIDs []string) (map[string]bool, error) {
 	published := map[string]bool{}
-	if len(packageNodeIDs) == 0 {
+	if len(nodeIDs) == 0 {
 		return published, nil
 	}
 	if DiscoverDB == nil {
@@ -312,7 +290,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context
 	}
 	// A package is often linked to several assets (e.g. a thumb and a zarr), so
 	// the same ID can come in more than once. Send each one only once.
-	packageNodeIDs = uniqueStrings(packageNodeIDs)
+	nodeIDs = uniqueStrings(nodeIDs)
 
 	query := `
 		SELECT DISTINCT fv.source_package_id
@@ -325,7 +303,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context
 		  AND v.status = $2
 		  AND fv.source_package_id = ANY($3::text[])
 	`
-	rows, err := DiscoverDB.QueryContext(ctx, query, publishedDatasetID, publishSucceededStatus, pq.Array(packageNodeIDs))
+	rows, err := DiscoverDB.QueryContext(ctx, query, publishedDatasetID, publishSucceededStatus, pq.Array(nodeIDs))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query published packages: %w", err)
 	}

@@ -190,8 +190,8 @@ func TestDiscoverListAssets_ScopeAll_NoPublishedVersion(t *testing.T) {
 }
 
 // TestDiscoverListAssets_DatasetDefault_UnlinkedOnly verifies dataset mode without
-// scope still returns only assets with no package links, and now excludes
-// chat-scoped assets.
+// scope returns only assets with no package links, and excludes chat-scoped
+// assets.
 func TestDiscoverListAssets_DatasetDefault_UnlinkedOnly(t *testing.T) {
 	db := setupAssetsTestDB(t)
 	setupDiscoverStub(t, db)
@@ -205,8 +205,7 @@ func TestDiscoverListAssets_DatasetDefault_UnlinkedOnly(t *testing.T) {
 }
 
 // TestDiscoverListAssets_PackageMode_ReturnsLinkedPackageIDs verifies package mode
-// returns the package's assets with every linked package node ID, now read in the
-// same query as the assets.
+// returns the package's assets with every linked package node ID.
 func TestDiscoverListAssets_PackageMode_ReturnsLinkedPackageIDs(t *testing.T) {
 	db := setupAssetsTestDB(t)
 	setupDiscoverStub(t, db)
