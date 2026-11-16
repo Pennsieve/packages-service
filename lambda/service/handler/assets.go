@@ -312,7 +312,7 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 		},
 	}
 
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID,
+	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID,
 		[]string{cloudFrontPathPrefixForBucket(a.S3Bucket)})
 	if components != nil {
 		resp.CloudFront = components
@@ -357,7 +357,7 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID st
 	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
+	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
 	if components != nil {
 		resp.CloudFront = components
 	}
@@ -370,51 +370,6 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID st
 		apiResp.Cookies = cookies
 	}
 	return apiResp, nil
-}
-
-// signDatasetCloudFront generates CloudFront signing components and cookies covering
-// the dataset's assets under O{org}/D{dataset}/ in every bucket named by pathPrefixes
-// (one entry per asset, from cloudFrontPathPrefixForBucket). With no assets it signs
-// for the bucket the organization's new assets go to. Returns (nil, nil) if signing
-// is not configured or fails — callers treat that as "no signing", not an error.
-func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, datasetIntID int64, pathPrefixes []string) (*CloudFrontURLComponents, []string) {
-	if cloudfrontDistributionDomain == "" {
-		return nil, nil
-	}
-	if cloudfrontPrivateKey == nil {
-		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
-			cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-			if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-				h.logger.LogWarnWithFields(logging.Fields{logging.KeyError: err, logging.KeySecretName: secretName},
-					"failed to load CloudFront signing keys")
-			}
-		}
-	}
-	if cloudfrontPrivateKey == nil {
-		return nil, nil
-	}
-
-	if len(pathPrefixes) == 0 {
-		defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
-		if err != nil {
-			h.logger.LogWarnWithFields(logging.Fields{
-				logging.KeyError:          err,
-				logging.KeyOrganizationID: orgID,
-			}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
-		}
-		pathPrefixes = []string{defaultPrefix}
-	}
-	components, err := signViewerAssetsPolicy(orgID, datasetIntID, pathPrefixes)
-	if err != nil {
-		h.logger.LogWarnWithFields(logging.Fields{
-			logging.KeyError:          err,
-			logging.KeyOrganizationID: orgID,
-			logging.KeyDatasetID:      datasetIntID,
-		}, "failed to sign CloudFront policy for viewer assets")
-		return nil, nil
-	}
-	cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
-	return components, components.CloudFrontCookies(cookieDomain)
 }
 
 func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) (*events.APIGatewayV2HTTPResponse, error) {

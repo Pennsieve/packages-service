@@ -293,6 +293,67 @@ func signViewerAssetsPolicy(orgID, datasetID int64, pathPrefixes []string) (*Clo
 	return components, nil
 }
 
+// signViewerAssetsCloudFront signs CloudFront access to a dataset's viewer
+// assets, for the authenticated and the discover asset endpoints. It returns the
+// signing components and the matching Set-Cookie values.
+//
+// pathPrefixes has one entry per asset (see cloudFrontPathPrefixForBucket), so
+// the policy covers every bucket the assets are in. With no assets it signs for
+// the bucket the organization's new assets go to.
+//
+// Returns (nil, nil) when signing is not configured or fails. Callers treat that
+// as "no signing", not as an error.
+func (h *RequestHandler) signViewerAssetsCloudFront(ctx context.Context, orgID, datasetID int64, pathPrefixes []string) (*CloudFrontURLComponents, []string) {
+	if cloudfrontDistributionDomain == "" {
+		return nil, nil
+	}
+	h.loadCloudFrontKeysIfNeeded(ctx)
+	if cloudfrontPrivateKey == nil {
+		return nil, nil
+	}
+
+	if len(pathPrefixes) == 0 {
+		defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
+		if err != nil {
+			h.logger.LogWarnWithFields(logging.Fields{
+				logging.KeyError:          err,
+				logging.KeyOrganizationID: orgID,
+			}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
+		}
+		pathPrefixes = []string{defaultPrefix}
+	}
+
+	components, err := signViewerAssetsPolicy(orgID, datasetID, pathPrefixes)
+	if err != nil {
+		h.logger.LogWarnWithFields(logging.Fields{
+			logging.KeyError:          err,
+			logging.KeyOrganizationID: orgID,
+			logging.KeyDatasetID:      datasetID,
+		}, "failed to sign CloudFront policy for viewer assets")
+		return nil, nil
+	}
+	cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
+	return components, components.CloudFrontCookies(cookieDomain)
+}
+
+// loadCloudFrontKeysIfNeeded loads the signing keys from Secrets Manager the
+// first time they're needed. They stay cached for the life of the Lambda.
+// A failure is logged; the caller then sees no key and skips signing.
+func (h *RequestHandler) loadCloudFrontKeysIfNeeded(ctx context.Context) {
+	if cloudfrontPrivateKey != nil {
+		return
+	}
+	secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME")
+	if !ok {
+		return
+	}
+	cfHandler := CloudFrontSignedURLHandler{RequestHandler: *h}
+	if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
+		h.logger.LogWarnWithFields(logging.Fields{logging.KeyError: err, logging.KeySecretName: secretName},
+			"failed to load CloudFront signing keys")
+	}
+}
+
 // generateDeterministicPath creates a deterministic 8-character path from bucket name
 func generateDeterministicPath(bucketName string) string {
 	// Create MD5 hash of bucket name for deterministic result

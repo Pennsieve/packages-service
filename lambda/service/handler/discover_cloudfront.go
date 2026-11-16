@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -150,42 +149,9 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 
 	resp := listViewerAssetsResponse{Assets: assets}
 
-	// Load CloudFront signing keys if not yet cached
-	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey == nil {
-		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
-			authHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-			if err := authHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-				h.logger.LogWarnWithFields(logging.Fields{logging.KeyError: err, logging.KeySecretName: secretName},
-					"failed to load CloudFront signing keys")
-			}
-		}
-	}
-
-	// Generate CloudFront signed policy covering every bucket the assets are in
-	var cookies []string
-	if cloudfrontDistributionDomain != "" && cloudfrontPrivateKey != nil {
-		if len(pathPrefixes) == 0 {
-			defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
-			if err != nil {
-				h.logger.LogWarnWithFields(logging.Fields{
-					logging.KeyError:          err,
-					logging.KeyOrganizationID: orgID,
-				}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
-			}
-			pathPrefixes = []string{defaultPrefix}
-		}
-		components, err := signViewerAssetsPolicy(orgID, datasetIntID, pathPrefixes)
-		if err == nil {
-			resp.CloudFront = components
-			cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
-			cookies = components.CloudFrontCookies(cookieDomain)
-		} else {
-			h.logger.LogWarnWithFields(logging.Fields{
-				logging.KeyError:          err,
-				logging.KeyOrganizationID: orgID,
-				logging.KeyDatasetID:      datasetIntID,
-			}, "failed to sign CloudFront policy for discover viewer assets")
-		}
+	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
+	if components != nil {
+		resp.CloudFront = components
 	}
 
 	apiResp, err := h.buildResponse(resp, http.StatusOK)
