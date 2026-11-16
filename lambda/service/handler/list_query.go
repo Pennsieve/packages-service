@@ -9,7 +9,8 @@ import (
 // listMode says which of a dataset's viewer assets a list query returns.
 type listMode int
 
-// Modes start at 1 so a listQuery with no mode set fails loudly in build().
+// Modes start at 1 so a listQuery with no mode set is an error in build(),
+// instead of quietly running as package mode.
 const (
 	// listByPackage returns the assets linked to one package.
 	listByPackage listMode = iota + 1
@@ -39,7 +40,7 @@ type listQuery struct {
 
 // build returns the list SQL and its arguments. It selects the columns
 // queryViewerAssets scans, newest asset first.
-func (q listQuery) build() (string, []any) {
+func (q listQuery) build() (string, []any, error) {
 	var join string
 	var conditions []string
 	var args []any
@@ -61,8 +62,8 @@ func (q listQuery) build() (string, []any) {
 	case listDatasetAll:
 		conditions = append(conditions, "va.dataset_id = "+param(q.datasetID))
 	default:
-		// A programming error, not bad input: every caller sets a mode.
-		panic(fmt.Sprintf("listQuery: unknown mode %d", q.mode))
+		// A bug in the caller, not bad user input: every caller should set a mode.
+		return "", nil, fmt.Errorf("listQuery: unknown mode %d", q.mode)
 	}
 
 	if q.excludeChat {
@@ -79,14 +80,17 @@ func (q listQuery) build() (string, []any) {
 		WHERE %[4]s
 		ORDER BY va.created_at DESC
 	`, q.orgID, viewerAssetsTable, join, strings.Join(conditions, "\n\t\t  AND "))
-	return sql, args
+	return sql, args, nil
 }
 
 // queryViewerAssets runs a list query and returns every row. The rows are
 // closed before it returns, so callers can run follow-up queries (like the
 // package lookup) without holding a second DB connection open.
 func queryViewerAssets(ctx context.Context, q listQuery) ([]viewerAssetRow, error) {
-	query, args := q.build()
+	query, args, err := q.build()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := PennsieveDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query viewer assets: %w", err)
