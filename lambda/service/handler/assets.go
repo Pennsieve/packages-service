@@ -247,35 +247,17 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 		return h.logAndBuildErrorCause("failed to resolve dataset", http.StatusBadRequest, err), nil
 	}
 
+	// Default: the dataset's own assets (no package links), minus chat figures.
+	q := listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked, excludeChat: true}
 	if packageNodeID != "" {
 		packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve package", http.StatusBadRequest, err), nil
 		}
-
-		query := fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%d".%s va
-			JOIN "%d".%s vap ON va.id = vap.viewer_asset_id
-			WHERE vap.package_id = $1
-			ORDER BY va.created_at DESC
-		`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
-
-		return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, packageIntID)
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage}
 	}
 
-	query := fmt.Sprintf(`
-		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-		FROM "%d".%s va
-		WHERE va.dataset_id = $1
-		  AND va.chat_session_id IS NULL
-		  AND NOT EXISTS (
-		    SELECT 1 FROM "%d".%s vap WHERE vap.viewer_asset_id = va.id
-		  )
-		ORDER BY va.created_at DESC
-	`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
-
-	return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, datasetIntID)
+	return h.runListQuery(ctx, datasetNodeID, q)
 }
 
 // handleGet resolves a single viewer asset by ID and returns it with a per-asset
@@ -346,11 +328,11 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 	return apiResp, nil
 }
 
-// runListQuery executes a viewer-assets list query, builds responses with per-asset
-// CloudFront URLs and signed-policy cookies, and serializes the result. Shared by
-// handleList's package-scoped and dataset-scoped modes.
-func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIntID int64, datasetNodeID, query string, arg interface{}) (*events.APIGatewayV2HTTPResponse, error) {
-	rows, err := queryViewerAssets(ctx, query, arg)
+// runListQuery runs a viewer-assets list query, builds responses with per-asset
+// CloudFront URLs and signed-policy cookies, and serializes the result.
+func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID string, q listQuery) (*events.APIGatewayV2HTTPResponse, error) {
+	orgID, datasetIntID := q.orgID, q.datasetID
+	rows, err := queryViewerAssets(ctx, q)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
@@ -691,36 +673,6 @@ func (h *ViewerAssetsHandler) batchInsertPackageLinks(ctx context.Context, orgID
 
 	_, err := PennsieveDB.ExecContext(ctx, query, args...)
 	return err
-}
-
-// queryViewerAssets runs a list query that selects the viewer asset list
-// columns (id, dataset_id, name, asset_type, properties, s3_bucket, status,
-// created_at) and returns every row. The rows are closed before it returns,
-// so callers can run follow-up queries without holding a second connection.
-func queryViewerAssets(ctx context.Context, query string, args ...any) ([]viewerAssetRow, error) {
-	rows, err := PennsieveDB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var assets []viewerAssetRow
-	for rows.Next() {
-		var a viewerAssetRow
-		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan asset row: %w", err)
-		}
-		assets = append(assets, a)
-	}
-	return assets, rows.Err()
-}
-
-func viewerAssetIDs(assets []viewerAssetRow) []string {
-	ids := make([]string, len(assets))
-	for i, a := range assets {
-		ids[i] = a.ID
-	}
-	return ids
 }
 
 // packageRef is a package linked to a viewer asset.

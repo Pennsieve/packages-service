@@ -67,8 +67,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		packageIntID       int64
 		publishedDatasetID int64
 		datasetNodeID      string
-		query              string
-		queryArg           interface{}
+		q                  listQuery
 		err                error
 	)
 
@@ -79,14 +78,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve published package", http.StatusNotFound, err), nil
 		}
-		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%[1]d".viewer_assets va
-			JOIN "%[1]d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
-			WHERE vap.package_id = $1
-			ORDER BY va.created_at DESC
-		`, orgID)
-		queryArg = packageIntID
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage}
 	} else {
 		var parseErr error
 		publishedDatasetID, parseErr = strconv.ParseInt(publishedDatasetIDStr, 10, 64)
@@ -101,21 +93,10 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		}
 		// Default: only assets with no package links. scope=all: every asset; the
 		// ones linked to unpublished packages are dropped below.
-		packageFilter := `
-			  AND NOT EXISTS (
-			    SELECT 1 FROM "%[1]d".viewer_asset_packages vap WHERE vap.viewer_asset_id = va.id
-			  )`
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked, excludeChat: true}
 		if scope == discoverScopeAll {
-			packageFilter = ""
+			q.mode = listDatasetAll
 		}
-		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%[1]d".viewer_assets va
-			WHERE va.dataset_id = $1
-			  AND va.chat_session_id IS NULL`+packageFilter+`
-			ORDER BY va.created_at DESC
-		`, orgID)
-		queryArg = datasetIntID
 	}
 
 	// Resolve dataset node ID for the response
@@ -124,7 +105,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		return h.logAndBuildErrorCause("failed to resolve dataset node ID", http.StatusInternalServerError, err), nil
 	}
 
-	found, err := queryViewerAssets(ctx, query, queryArg)
+	found, err := queryViewerAssets(ctx, q)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
