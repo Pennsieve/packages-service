@@ -44,8 +44,10 @@ const publishSucceededStatus = "PUBLISH_SUCCEEDED"
 //   - dataset_id: the published-dataset PK from discover.public_datasets.id. By default
 //     it returns dataset-scoped assets (those with no package links). With scope=all it
 //     returns every asset in the dataset: those with no package links plus those linked
-//     to a package that is in a successfully published version of the dataset. In both
-//     cases chat-scoped assets are excluded.
+//     to a package that is in a successfully published version of the dataset.
+//
+// Every mode leaves out chat figures (they belong to a chat, not the dataset) and
+// assets that are not ready yet (still uploading), since this list is public.
 func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	packageNodeID := h.queryParams["package_id"]
 	publishedDatasetIDStr := h.queryParams["dataset_id"]
@@ -78,7 +80,8 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve published package", http.StatusNotFound, err), nil
 		}
-		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage}
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage,
+			excludeChat: true, readyOnly: true}
 	} else {
 		var parseErr error
 		publishedDatasetID, parseErr = strconv.ParseInt(publishedDatasetIDStr, 10, 64)
@@ -93,7 +96,8 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		}
 		// Default: only assets with no package links. scope=all: every asset; the
 		// ones linked to unpublished packages are dropped below.
-		q = listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked, excludeChat: true}
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked,
+			excludeChat: true, readyOnly: true}
 		if scope == discoverScopeAll {
 			q.mode = listDatasetAll
 		}
@@ -110,9 +114,14 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
 
-	linked, err := linkedPackageNodeIDs(ctx, orgID, found)
-	if err != nil {
-		return h.logAndBuildErrorCause("failed to look up linked packages", http.StatusInternalServerError, err), nil
+	// The default dataset mode only returns assets with no package links, so
+	// there is nothing to look up.
+	linked := map[string][]string{}
+	if q.mode != listDatasetUnlinked {
+		linked, err = linkedPackageNodeIDs(ctx, orgID, found)
+		if err != nil {
+			return h.logAndBuildErrorCause("failed to look up linked packages", http.StatusInternalServerError, err), nil
+		}
 	}
 
 	if scope == discoverScopeAll {
@@ -239,6 +248,20 @@ func (h *DiscoverCloudFrontSignedURLHandler) keepPublishedAssets(ctx context.Con
 	return kept, keptLinks, nil
 }
 
+// uniqueStrings returns values without duplicates, keeping first-seen order.
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	var unique []string
+	for _, v := range values {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		unique = append(unique, v)
+	}
+	return unique
+}
+
 // nonNil turns a nil slice into an empty one, so JSON shows [] rather than null.
 func nonNil(s []string) []string {
 	if s == nil {
@@ -321,6 +344,9 @@ func (h *DiscoverCloudFrontSignedURLHandler) publishedPackageNodeIDs(ctx context
 	if DiscoverDB == nil {
 		return nil, fmt.Errorf("discover database not configured")
 	}
+	// A package is often linked to several assets (e.g. a thumb and a zarr), so
+	// the same ID can come in more than once. Send each one only once.
+	packageNodeIDs = uniqueStrings(packageNodeIDs)
 
 	query := `
 		SELECT DISTINCT fv.source_package_id
