@@ -38,16 +38,6 @@ const discoverScopeAll = "all"
 // version that finished publishing (pennsieve-api PublishStatus.PublishSucceeded).
 const publishSucceededStatus = "PUBLISH_SUCCEEDED"
 
-// linkedPackageNodeIDsColumn selects, for each viewer asset row `va`, the node IDs
-// of the packages it is linked to (empty array when none), so a list query needs
-// no follow-up query per asset. %[1]d is the organization ID.
-const linkedPackageNodeIDsColumn = `COALESCE((
-				SELECT array_agg(p.node_id ORDER BY p.node_id)
-				FROM "%[1]d".packages p
-				JOIN "%[1]d".viewer_asset_packages vap2 ON p.id = vap2.package_id
-				WHERE vap2.viewer_asset_id = va.id
-			), '{}') AS package_ids`
-
 // handleListAssets lists viewer assets for a published package or dataset (unauthenticated).
 // Accepts exactly one of:
 //   - package_id: the source package node ID (returns assets linked to that package)
@@ -90,8 +80,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			return h.logAndBuildErrorCause("failed to resolve published package", http.StatusNotFound, err), nil
 		}
 		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at,
-			`+linkedPackageNodeIDsColumn+`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
 			FROM "%[1]d".viewer_assets va
 			JOIN "%[1]d".viewer_asset_packages vap ON va.id = vap.viewer_asset_id
 			WHERE vap.package_id = $1
@@ -120,8 +109,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			packageFilter = ""
 		}
 		query = fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at,
-			`+linkedPackageNodeIDsColumn+`
+			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
 			FROM "%[1]d".viewer_assets va
 			WHERE va.dataset_id = $1
 			  AND va.chat_session_id IS NULL`+packageFilter+`
@@ -136,71 +124,27 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		return h.logAndBuildErrorCause("failed to resolve dataset node ID", http.StatusInternalServerError, err), nil
 	}
 
-	rows, err := PennsieveDB.QueryContext(ctx, query, queryArg)
+	found, err := queryViewerAssets(ctx, query, queryArg)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
-	defer rows.Close()
 
-	type assetWithPackages struct {
-		row    viewerAssetRow
-		pkgIDs []string
-	}
-	var found []assetWithPackages
-	for rows.Next() {
-		var a assetWithPackages
-		if err := rows.Scan(&a.row.ID, &a.row.DatasetID, &a.row.Name, &a.row.AssetType, &a.row.Properties,
-			&a.row.S3Bucket, &a.row.Status, &a.row.CreatedAt, pq.Array(&a.pkgIDs)); err != nil {
-			return h.logAndBuildErrorCause("failed to scan asset row", http.StatusInternalServerError, err), nil
-		}
-		found = append(found, a)
-	}
-	if err := rows.Err(); err != nil {
-		return h.logAndBuildErrorCause("failed to read asset rows", http.StatusInternalServerError, err), nil
+	linked, err := linkedPackageNodeIDs(ctx, orgID, found)
+	if err != nil {
+		return h.logAndBuildErrorCause("failed to look up linked packages", http.StatusInternalServerError, err), nil
 	}
 
-	// scope=all includes package-linked assets, which must only be public when the
-	// package was published. Keep an asset if it has no package links or at least
-	// one published linked package, and report only the published links.
 	if scope == discoverScopeAll {
-		var linked []string
-		for _, a := range found {
-			linked = append(linked, a.pkgIDs...)
-		}
-		published, err := h.publishedPackageNodeIDs(ctx, publishedDatasetID, linked)
+		found, linked, err = h.keepPublishedAssets(ctx, publishedDatasetID, found, linked)
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to look up published packages", http.StatusInternalServerError, err), nil
 		}
-		kept := found[:0]
-		for _, a := range found {
-			if len(a.pkgIDs) == 0 {
-				kept = append(kept, a)
-				continue
-			}
-			var publishedIDs []string
-			for _, id := range a.pkgIDs {
-				if published[id] {
-					publishedIDs = append(publishedIDs, id)
-				}
-			}
-			if len(publishedIDs) > 0 {
-				a.pkgIDs = publishedIDs
-				kept = append(kept, a)
-			}
-		}
-		found = kept
 	}
 
 	assets := make([]viewerAssetResponse, 0, len(found))
 	var pathPrefixes []string
-	for _, f := range found {
-		a := f.row
-		pkgIDs := f.pkgIDs
-		if pkgIDs == nil {
-			pkgIDs = []string{}
-		}
+	for _, a := range found {
 		pathPrefixes = append(pathPrefixes, cloudFrontPathPrefixForBucket(a.S3Bucket))
-
 		assets = append(assets, viewerAssetResponse{
 			ID:         a.ID,
 			DatasetID:  datasetNodeID,
@@ -209,7 +153,7 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 			AssetURL:   viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties: &a.Properties,
 			Status:     a.Status,
-			PackageIDs: pkgIDs,
+			PackageIDs: nonNil(linked[a.ID]),
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
 	}
@@ -262,6 +206,64 @@ func (h *DiscoverCloudFrontSignedURLHandler) handleListAssets(ctx context.Contex
 		apiResp.Cookies = cookies
 	}
 	return apiResp, nil
+}
+
+// linkedPackageNodeIDs returns, for each asset, the node IDs of its linked
+// packages, ordered by node ID. Assets with no links are not in the map.
+func linkedPackageNodeIDs(ctx context.Context, orgID int64, assets []viewerAssetRow) (map[string][]string, error) {
+	refs, err := packageRefsByAsset(ctx, orgID, viewerAssetIDs(assets))
+	if err != nil {
+		return nil, err
+	}
+	nodeIDs := make(map[string][]string, len(refs))
+	for assetID, assetRefs := range refs {
+		nodeIDs[assetID] = packageNodeIDs(assetRefs)
+	}
+	return nodeIDs, nil
+}
+
+// keepPublishedAssets is the scope=all filter. scope=all includes package-linked
+// assets, and those must only be public once their package is published. It keeps
+// an asset if it has no package links or at least one published linked package,
+// and trims each kept asset's links down to the published ones.
+func (h *DiscoverCloudFrontSignedURLHandler) keepPublishedAssets(ctx context.Context, publishedDatasetID int64, assets []viewerAssetRow, linked map[string][]string) ([]viewerAssetRow, map[string][]string, error) {
+	var allLinked []string
+	for _, nodeIDs := range linked {
+		allLinked = append(allLinked, nodeIDs...)
+	}
+	published, err := h.publishedPackageNodeIDs(ctx, publishedDatasetID, allLinked)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var kept []viewerAssetRow
+	keptLinks := map[string][]string{}
+	for _, a := range assets {
+		nodeIDs := linked[a.ID]
+		if len(nodeIDs) == 0 {
+			kept = append(kept, a)
+			continue
+		}
+		var publishedIDs []string
+		for _, id := range nodeIDs {
+			if published[id] {
+				publishedIDs = append(publishedIDs, id)
+			}
+		}
+		if len(publishedIDs) > 0 {
+			kept = append(kept, a)
+			keptLinks[a.ID] = publishedIDs
+		}
+	}
+	return kept, keptLinks, nil
+}
+
+// nonNil turns a nil slice into an empty one, so JSON shows [] rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // resolveDiscoverPackage validates that a package is published via the Discover DB
