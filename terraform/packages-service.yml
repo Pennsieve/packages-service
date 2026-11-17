@@ -146,6 +146,10 @@ paths:
         node ID, while the dataset side accepts the *published-dataset integer
         PK* because `discover.public_datasets` does not record the source
         dataset node ID.
+
+        In every mode, only finished assets (`status: ready`) are returned;
+        assets still uploading are hidden. Chat figures (`chat_session_id` set)
+        are never returned.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: discoverListViewerAssets
@@ -170,8 +174,8 @@ paths:
             Published-dataset integer PK (i.e. `discover.public_datasets.id`,
             the same numeric ID used in `https://discover.pennsieve.io/datasets/{id}`
             URLs). By default returns dataset-scoped viewer assets (those with no
-            package links); with `scope=all`, every asset in the dataset. Chat
-            figures are never returned. Mutually exclusive with `package_id`.
+            package links); with `scope=all`, every asset in the dataset.
+            Mutually exclusive with `package_id`.
         - in: query
           name: scope
           schema:
