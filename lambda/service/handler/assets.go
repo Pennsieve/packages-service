@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/lib/pq"
 	"github.com/pennsieve/packages-service/api/logging"
 	"github.com/pennsieve/pennsieve-go-core/pkg/authorizer"
 	"github.com/pennsieve/pennsieve-go-core/pkg/models/permissions"
@@ -246,35 +247,17 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 		return h.logAndBuildErrorCause("failed to resolve dataset", http.StatusBadRequest, err), nil
 	}
 
+	// Default: the dataset's own assets (no package links), minus chat figures.
+	q := listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked, excludeChat: true}
 	if packageNodeID != "" {
 		packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve package", http.StatusBadRequest, err), nil
 		}
-
-		query := fmt.Sprintf(`
-			SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-			FROM "%d".%s va
-			JOIN "%d".%s vap ON va.id = vap.viewer_asset_id
-			WHERE vap.package_id = $1
-			ORDER BY va.created_at DESC
-		`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
-
-		return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, packageIntID)
+		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage}
 	}
 
-	query := fmt.Sprintf(`
-		SELECT va.id, va.dataset_id, va.name, va.asset_type, va.properties, va.s3_bucket, va.status, va.created_at
-		FROM "%d".%s va
-		WHERE va.dataset_id = $1
-		  AND va.chat_session_id IS NULL
-		  AND NOT EXISTS (
-		    SELECT 1 FROM "%d".%s vap WHERE vap.viewer_asset_id = va.id
-		  )
-		ORDER BY va.created_at DESC
-	`, orgID, viewerAssetsTable, orgID, viewerAssetPackagesTable)
-
-	return h.runListQuery(ctx, orgID, datasetIntID, datasetNodeID, query, datasetIntID)
+	return h.runListQuery(ctx, datasetNodeID, q)
 }
 
 // handleGet resolves a single viewer asset by ID and returns it with a per-asset
@@ -312,7 +295,7 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 		return h.logAndBuildErrorCause("failed to fetch asset", http.StatusInternalServerError, err), nil
 	}
 
-	pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
+	linked := h.linkedPackagesOrEmpty(ctx, orgID, []string{a.ID})
 
 	resp := getViewerAssetResponse{
 		Asset: viewerAssetResponse{
@@ -323,13 +306,13 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 			AssetURL:      viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties:    &a.Properties,
 			Status:        a.Status,
-			PackageIDs:    pkgIDs,
+			PackageIDs:    packageNodeIDs(linked[a.ID]),
 			ChatSessionID: a.ChatSessionID.String,
 			CreatedAt:     a.CreatedAt.Format(time.RFC3339),
 		},
 	}
 
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID,
+	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID,
 		[]string{cloudFrontPathPrefixForBucket(a.S3Bucket)})
 	if components != nil {
 		resp.CloudFront = components
@@ -345,27 +328,21 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 	return apiResp, nil
 }
 
-// runListQuery executes a viewer-assets list query, builds responses with per-asset
-// CloudFront URLs and signed-policy cookies, and serializes the result. Shared by
-// handleList (package-scoped) and handleListByDataset (dataset-scoped).
-func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIntID int64, datasetNodeID, query string, arg interface{}) (*events.APIGatewayV2HTTPResponse, error) {
-	rows, err := PennsieveDB.QueryContext(ctx, query, arg)
+// runListQuery runs a viewer-assets list query, builds responses with per-asset
+// CloudFront URLs and signed-policy cookies, and serializes the result.
+func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID string, q listQuery) (*events.APIGatewayV2HTTPResponse, error) {
+	orgID, datasetIntID := q.orgID, q.datasetID
+	rows, err := queryViewerAssets(ctx, q)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
-	defer rows.Close()
 
-	var assets []viewerAssetResponse
+	linked := h.linkedPackagesOrEmpty(ctx, orgID, viewerAssetIDs(rows))
+
+	assets := make([]viewerAssetResponse, 0, len(rows))
 	var pathPrefixes []string
-	for rows.Next() {
-		var a viewerAssetRow
-		if err := rows.Scan(&a.ID, &a.DatasetID, &a.Name, &a.AssetType, &a.Properties, &a.S3Bucket, &a.Status, &a.CreatedAt); err != nil {
-			return h.logAndBuildErrorCause("failed to scan asset row", http.StatusInternalServerError, err), nil
-		}
-
-		pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, a.ID)
+	for _, a := range rows {
 		pathPrefixes = append(pathPrefixes, cloudFrontPathPrefixForBucket(a.S3Bucket))
-
 		assets = append(assets, viewerAssetResponse{
 			ID:         a.ID,
 			DatasetID:  datasetNodeID,
@@ -374,16 +351,13 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 			AssetURL:   viewerAssetURL(orgID, datasetIntID, a.ID, a.S3Bucket),
 			Properties: &a.Properties,
 			Status:     a.Status,
-			PackageIDs: pkgIDs,
+			PackageIDs: packageNodeIDs(linked[a.ID]),
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
 	}
-	if assets == nil {
-		assets = []viewerAssetResponse{}
-	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
-	components, cookies := h.signDatasetCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
+	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
 	if components != nil {
 		resp.CloudFront = components
 	}
@@ -396,51 +370,6 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, orgID, datasetIn
 		apiResp.Cookies = cookies
 	}
 	return apiResp, nil
-}
-
-// signDatasetCloudFront generates CloudFront signing components and cookies covering
-// the dataset's assets under O{org}/D{dataset}/ in every bucket named by pathPrefixes
-// (one entry per asset, from cloudFrontPathPrefixForBucket). With no assets it signs
-// for the bucket the organization's new assets go to. Returns (nil, nil) if signing
-// is not configured or fails — callers treat that as "no signing", not an error.
-func (h *ViewerAssetsHandler) signDatasetCloudFront(ctx context.Context, orgID, datasetIntID int64, pathPrefixes []string) (*CloudFrontURLComponents, []string) {
-	if cloudfrontDistributionDomain == "" {
-		return nil, nil
-	}
-	if cloudfrontPrivateKey == nil {
-		if secretName, ok := os.LookupEnv("CLOUDFRONT_SIGNING_KEYS_SECRET_NAME"); ok {
-			cfHandler := CloudFrontSignedURLHandler{RequestHandler: h.RequestHandler}
-			if err := cfHandler.loadKeysFromSecretsManager(ctx, secretName); err != nil {
-				h.logger.LogWarnWithFields(logging.Fields{logging.KeyError: err, logging.KeySecretName: secretName},
-					"failed to load CloudFront signing keys")
-			}
-		}
-	}
-	if cloudfrontPrivateKey == nil {
-		return nil, nil
-	}
-
-	if len(pathPrefixes) == 0 {
-		defaultPrefix, err := defaultViewerAssetPathPrefix(ctx, orgID)
-		if err != nil {
-			h.logger.LogWarnWithFields(logging.Fields{
-				logging.KeyError:          err,
-				logging.KeyOrganizationID: orgID,
-			}, "could not resolve organization storage bucket; signing for the default viewer assets bucket")
-		}
-		pathPrefixes = []string{defaultPrefix}
-	}
-	components, err := signViewerAssetsPolicy(orgID, datasetIntID, pathPrefixes)
-	if err != nil {
-		h.logger.LogWarnWithFields(logging.Fields{
-			logging.KeyError:          err,
-			logging.KeyOrganizationID: orgID,
-			logging.KeyDatasetID:      datasetIntID,
-		}, "failed to sign CloudFront policy for viewer assets")
-		return nil, nil
-	}
-	cookieDomain := "." + os.Getenv("PENNSIEVE_DOMAIN")
-	return components, components.CloudFrontCookies(cookieDomain)
 }
 
 func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) (*events.APIGatewayV2HTTPResponse, error) {
@@ -542,7 +471,7 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 		return h.logAndBuildErrorCause("failed to fetch asset", http.StatusInternalServerError, err), nil
 	}
 
-	pkgIDs := h.linkedPackageNodeIDsOrEmpty(ctx, orgID, asset.ID)
+	linked := h.linkedPackagesOrEmpty(ctx, orgID, []string{asset.ID})
 
 	resp := viewerAssetResponse{
 		ID:            asset.ID,
@@ -551,7 +480,7 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 		AssetType:     asset.AssetType,
 		Properties:    &asset.Properties,
 		Status:        asset.Status,
-		PackageIDs:    pkgIDs,
+		PackageIDs:    packageNodeIDs(linked[asset.ID]),
 		ChatSessionID: asset.ChatSessionID.String,
 		CreatedAt:     asset.CreatedAt.Format(time.RFC3339),
 	}
@@ -701,50 +630,76 @@ func (h *ViewerAssetsHandler) batchInsertPackageLinks(ctx context.Context, orgID
 	return err
 }
 
-// linkedPackageNodeIDsOrEmpty resolves an asset's linked package node IDs,
-// degrading to an empty list on error rather than failing the whole request —
-// the same log-and-continue posture the surrounding handlers take for package
-// link writes and S3 cleanup. The error is logged (it previously was silently
-// discarded, so a failed lookup was indistinguishable in the response and in
-// the logs from an asset that genuinely has no linked packages).
-func (h *ViewerAssetsHandler) linkedPackageNodeIDsOrEmpty(ctx context.Context, orgID int64, assetID string) []string {
-	pkgIDs, err := h.getLinkedPackageNodeIDs(ctx, orgID, assetID)
-	if err != nil {
-		h.logger.LogErrorWithFields(logging.Fields{
-			logging.KeyError:          err,
-			logging.KeyOrganizationID: orgID,
-			logging.KeyViewerAssetID:  assetID,
-		}, "failed to look up linked packages for viewer asset; returning empty package list")
-		return []string{}
+// packageRef is a package linked to a viewer asset.
+type packageRef struct{ NodeID, Name string }
+
+// packageRefsByAsset returns the packages linked to each of the given viewer
+// assets, keyed by asset ID and ordered by package node ID. It is one query for
+// all the assets, not one per asset. Assets with no links are not in the map.
+func packageRefsByAsset(ctx context.Context, orgID int64, assetIDs []string) (map[string][]packageRef, error) {
+	refs := map[string][]packageRef{}
+	if len(assetIDs) == 0 {
+		return refs, nil
 	}
-	return pkgIDs
-}
 
-func (h *ViewerAssetsHandler) getLinkedPackageNodeIDs(ctx context.Context, orgID int64, assetID string) ([]string, error) {
 	query := fmt.Sprintf(`
-		SELECT p.node_id FROM "%d".packages p
-		JOIN "%d".%s vap ON p.id = vap.package_id
-		WHERE vap.viewer_asset_id = $1
-	`, orgID, orgID, viewerAssetPackagesTable)
+		SELECT vap.viewer_asset_id, p.node_id, p.name
+		FROM "%[1]d".%[2]s vap
+		JOIN "%[1]d".packages p ON p.id = vap.package_id
+		WHERE vap.viewer_asset_id = ANY($1::uuid[])
+		ORDER BY p.node_id
+	`, orgID, viewerAssetPackagesTable)
 
-	rows, err := PennsieveDB.QueryContext(ctx, query, assetID)
+	rows, err := PennsieveDB.QueryContext(ctx, query, pq.Array(assetIDs))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query linked packages: %w", err)
 	}
 	defer rows.Close()
 
-	var nodeIDs []string
 	for rows.Next() {
-		var nodeID string
-		if err := rows.Scan(&nodeID); err != nil {
-			return nil, err
+		var assetID string
+		var ref packageRef
+		if err := rows.Scan(&assetID, &ref.NodeID, &ref.Name); err != nil {
+			return nil, fmt.Errorf("failed to scan linked package: %w", err)
 		}
-		nodeIDs = append(nodeIDs, nodeID)
+		refs[assetID] = append(refs[assetID], ref)
 	}
-	if nodeIDs == nil {
-		nodeIDs = []string{}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read linked packages: %w", err)
 	}
-	return nodeIDs, nil
+	return refs, nil
+}
+
+// packageNodeIDs returns the node IDs of refs. It never returns nil, so an
+// asset with no links shows "package_ids": [] in JSON, not null.
+func packageNodeIDs(refs []packageRef) []string {
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.NodeID)
+	}
+	return ids
+}
+
+// linkedPackagesOrEmpty is packageRefsByAsset for the authenticated handlers. A
+// failed lookup is logged and treated as "no links": the assets still come back,
+// with empty package_ids, instead of the whole request failing.
+func (h *ViewerAssetsHandler) linkedPackagesOrEmpty(ctx context.Context, orgID int64, assetIDs []string) map[string][]packageRef {
+	refs, err := packageRefsByAsset(ctx, orgID, assetIDs)
+	if err == nil {
+		return refs
+	}
+	fields := logging.Fields{
+		logging.KeyError:          err,
+		logging.KeyOrganizationID: orgID,
+		logging.KeyCount:          len(assetIDs),
+	}
+	// GET and PATCH look up a single asset: name it so the log says which one.
+	if len(assetIDs) == 1 {
+		fields[logging.KeyViewerAssetID] = assetIDs[0]
+	}
+	// Keep this message as is: it is searched for in the prod logs.
+	h.logger.LogErrorWithFields(fields, "failed to look up linked packages for viewer asset; returning empty package list")
+	return map[string][]packageRef{}
 }
 
 // AWS helpers

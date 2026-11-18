@@ -162,7 +162,7 @@ After all files are uploaded, the processor sets the asset status to `ready`:
 { "status": "ready" }
 ```
 
-The asset is now available for front-end viewers to consume.
+The asset is now available for front-end viewers to consume. Discover lists only `ready` assets, so an asset that never gets this PATCH stays hidden there.
 
 ## Packages-Service API Reference
 
@@ -207,6 +207,13 @@ Delete an asset record and queue its S3 objects for cleanup.
 - **Query params**: `dataset_id` (required)
 - **Returns**: 204
 
+#### Known gap: chat-figure reads (needs a ticket)
+
+Migration `V20260523120300__alter_viewer_assets_for_chat.sql` says chat-scoped reads (`chat_session_id IS NOT NULL`) should be limited to the asset's `created_by` user. The service doesn't enforce that yet:
+
+- `GET /packages/assets/{asset_id}` and `GET /packages/assets` check dataset permissions only.
+- `GET /packages/assets?package_id=` (package mode) still lists chat figures linked to the package.
+
 ### Public Endpoint (Discover)
 
 #### GET /packages/discover/assets
@@ -217,7 +224,8 @@ List viewer assets for a published package or dataset. No authentication require
   - `package_id` — the **source package node ID** (e.g. `N:package:abc-123`). Returns assets linked to that package.
   - `dataset_id` — the **published-dataset PK** as an integer, i.e. `discover.public_datasets.id` (the same numeric ID that appears in `https://discover.pennsieve.io/datasets/{id}` URLs). Returns dataset-scoped assets (those with no package links).
 - **Optional**: `scope=all` (only with `dataset_id`) — returns every asset in the published dataset instead: assets with no package links plus assets linked to a package that has a file in a successfully published (`PUBLISH_SUCCEEDED`) version of the dataset. Use it to load a dataset's gallery thumbnails in one call. Each asset's `package_ids` lists only its published packages; assets linked only to unpublished packages (e.g. files added after publication) are left out.
-- **Chat figures** (`chat_session_id` set) are never returned in dataset mode.
+- **Only finished assets** (`status: ready`) are returned, in every mode. Assets still uploading are hidden.
+- **Chat figures** (`chat_session_id` set) are never returned, in every mode.
 - **Validation**: Checks the Discover database to confirm the package or dataset is published. Note the asymmetry: the package side accepts a *node ID* (because `discover.public_file_versions` stores `source_package_id` as a node ID), while the dataset side accepts the *published-dataset integer PK* (because `discover.public_datasets` does not store the source dataset node ID).
 - **Returns**: Array of assets (each with `asset_url`), newest first, plus CloudFront signing params
 - **Errors**: 400 if neither or both of `package_id`/`dataset_id` are supplied, if `dataset_id` is non-numeric, or if `scope` is anything other than `all` or is combined with `package_id`. 404 if the package/dataset is not published.

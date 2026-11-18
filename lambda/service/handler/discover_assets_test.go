@@ -21,12 +21,10 @@ const discoverTestPublishedDatasetID = 77
 // dataset 77 maps to org 2 / dataset 1.
 func setupDiscoverStub(t *testing.T, db *store.TestDB) {
 	t.Helper()
-	var exists bool
-	require.NoError(t, db.DB.QueryRow(
-		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'discover')`).Scan(&exists))
-	require.False(t, exists, "test database already has a discover schema; the stub would clash with it")
-
+	// Drop first: a run that was interrupted before its cleanup leaves the
+	// schema behind, and that must not break the next run.
 	_, err := db.DB.Exec(`
+		DROP SCHEMA IF EXISTS discover CASCADE;
 		CREATE SCHEMA discover;
 		CREATE TABLE discover.public_datasets (
 			id INT PRIMARY KEY,
@@ -86,9 +84,10 @@ func publishDiscoverVersion(t *testing.T, db *store.TestDB, version int, status 
 	}
 }
 
-// insertDiscoverTestAsset inserts a viewer asset in org 2 / dataset 1, created
-// minutesAgo minutes ago, linked to the given package integer IDs. chatSessionID
-// may be empty. Returns the asset ID.
+// insertDiscoverTestAsset inserts a ready viewer asset in org 2 / dataset 1,
+// created minutesAgo minutes ago, linked to the given package integer IDs.
+// chatSessionID may be empty. Returns the asset ID. Ready, because discover only
+// lists ready assets.
 func insertDiscoverTestAsset(t *testing.T, db *store.TestDB, name string, minutesAgo int, chatSessionID string, packageIntIDs ...int) string {
 	t.Helper()
 	var chat interface{}
@@ -97,8 +96,8 @@ func insertDiscoverTestAsset(t *testing.T, db *store.TestDB, name string, minute
 	}
 	var id string
 	require.NoError(t, db.DB.QueryRow(`
-		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, created_by, chat_session_id, created_at)
-		VALUES (1, $1, 'thumb', '{}', 'test-storage-bucket', 101, $2, NOW() - make_interval(mins => $3)) RETURNING id`,
+		INSERT INTO "2".viewer_assets (dataset_id, name, asset_type, properties, s3_bucket, status, created_by, chat_session_id, created_at)
+		VALUES (1, $1, 'thumb', '{}', 'test-storage-bucket', 'ready', 101, $2, NOW() - make_interval(mins => $3)) RETURNING id`,
 		name, chat, minutesAgo).Scan(&id))
 	for _, pkgID := range packageIntIDs {
 		_, err := db.DB.Exec(`INSERT INTO "2".viewer_asset_packages (viewer_asset_id, package_id) VALUES ($1, $2)`, id, pkgID)
@@ -191,8 +190,8 @@ func TestDiscoverListAssets_ScopeAll_NoPublishedVersion(t *testing.T) {
 }
 
 // TestDiscoverListAssets_DatasetDefault_UnlinkedOnly verifies dataset mode without
-// scope still returns only assets with no package links, and now excludes
-// chat-scoped assets.
+// scope returns only assets with no package links, and excludes chat-scoped
+// assets.
 func TestDiscoverListAssets_DatasetDefault_UnlinkedOnly(t *testing.T) {
 	db := setupAssetsTestDB(t)
 	setupDiscoverStub(t, db)
@@ -206,8 +205,7 @@ func TestDiscoverListAssets_DatasetDefault_UnlinkedOnly(t *testing.T) {
 }
 
 // TestDiscoverListAssets_PackageMode_ReturnsLinkedPackageIDs verifies package mode
-// returns the package's assets with every linked package node ID, now read in the
-// same query as the assets.
+// returns the package's assets with every linked package node ID.
 func TestDiscoverListAssets_PackageMode_ReturnsLinkedPackageIDs(t *testing.T) {
 	db := setupAssetsTestDB(t)
 	setupDiscoverStub(t, db)
@@ -240,4 +238,99 @@ func TestDiscoverListAssets_ScopeValidation(t *testing.T) {
 			assert.Contains(t, resp.Body, "scope")
 		})
 	}
+}
+
+// markDiscoverTestAssetCreated sets an asset's status back to 'created' (the DB
+// default), which is what an asset still being uploaded looks like.
+func markDiscoverTestAssetCreated(t *testing.T, db *store.TestDB, assetID string) {
+	t.Helper()
+	_, err := db.DB.Exec(`UPDATE "2".viewer_assets SET status = 'created' WHERE id = $1`, assetID)
+	require.NoError(t, err)
+}
+
+// TestDiscoverListAssets_PackageMode_ExcludesChatFigures verifies package mode
+// leaves out a chat figure even when it is linked to the package, while a
+// normal asset linked to the same package is still returned.
+func TestDiscoverListAssets_PackageMode_ExcludesChatFigures(t *testing.T) {
+	db := setupAssetsTestDB(t)
+	setupDiscoverStub(t, db)
+	createTestPackages(t, db, 2, 1)
+	sessionID := createTestChatSession(t, db, 2, 1)
+
+	// Both assets are linked to package a (5001); only the second is a chat figure.
+	thumbID := insertDiscoverTestAsset(t, db, "thumb-a", 1, "", 5001)
+	insertDiscoverTestAsset(t, db, "chat-a", 2, sessionID, 5001)
+	publishDiscoverVersion(t, db, 1, publishSucceededStatus, "N:package:test-pkg-a")
+
+	result := listDiscoverAssets(t, map[string]string{"package_id": "N:package:test-pkg-a"})
+
+	assert.Equal(t, []string{thumbID}, assetIDs(result))
+}
+
+// TestDiscoverListAssets_ExcludesCreatedAssets verifies every discover mode
+// (package mode, default dataset mode, scope=all) leaves out assets still in
+// 'created' status. Each mode has a ready asset in the same position (same
+// links) that is returned, so only the status differs.
+func TestDiscoverListAssets_ExcludesCreatedAssets(t *testing.T) {
+	db := setupAssetsTestDB(t)
+	setupDiscoverStub(t, db)
+	createTestPackages(t, db, 2, 1)
+
+	// Newest first: two unlinked assets, then two linked to package a (5001).
+	// In each pair the first is ready and the second is still 'created'.
+	readyUnlinkedID := insertDiscoverTestAsset(t, db, "ready-unlinked", 1, "")
+	createdUnlinkedID := insertDiscoverTestAsset(t, db, "created-unlinked", 2, "")
+	readyLinkedID := insertDiscoverTestAsset(t, db, "ready-a", 3, "", 5001)
+	createdLinkedID := insertDiscoverTestAsset(t, db, "created-a", 4, "", 5001)
+	markDiscoverTestAssetCreated(t, db, createdUnlinkedID)
+	markDiscoverTestAssetCreated(t, db, createdLinkedID)
+
+	publishDiscoverVersion(t, db, 1, publishSucceededStatus, "N:package:test-pkg-a")
+
+	t.Run("package mode", func(t *testing.T) {
+		result := listDiscoverAssets(t, map[string]string{"package_id": "N:package:test-pkg-a"})
+		assert.Equal(t, []string{readyLinkedID}, assetIDs(result))
+	})
+
+	t.Run("default dataset mode", func(t *testing.T) {
+		result := listDiscoverAssets(t, map[string]string{
+			"dataset_id": fmt.Sprint(discoverTestPublishedDatasetID),
+		})
+		assert.Equal(t, []string{readyUnlinkedID}, assetIDs(result))
+	})
+
+	t.Run("scope=all", func(t *testing.T) {
+		result := listDiscoverAssets(t, map[string]string{
+			"dataset_id": fmt.Sprint(discoverTestPublishedDatasetID),
+			"scope":      "all",
+		})
+		assert.Equal(t, []string{readyUnlinkedID, readyLinkedID}, assetIDs(result))
+	})
+}
+
+// TestDiscoverStub_ReplacesLeftoverSchema verifies setupDiscoverStub still works
+// when an interrupted earlier run left a discover schema behind: the old schema
+// (and its tables) is dropped and the stub's tables are created fresh.
+func TestDiscoverStub_ReplacesLeftoverSchema(t *testing.T) {
+	db := setupAssetsTestDB(t)
+
+	// Simulate a leftover schema from a run that never reached its cleanup.
+	_, err := db.DB.Exec(`
+		DROP SCHEMA IF EXISTS discover CASCADE;
+		CREATE SCHEMA discover;
+		CREATE TABLE discover.leftover_junk (id INT);`)
+	require.NoError(t, err)
+
+	setupDiscoverStub(t, db)
+
+	var junkTable *string
+	require.NoError(t, db.DB.QueryRow(`SELECT to_regclass('discover.leftover_junk')::text`).Scan(&junkTable))
+	assert.Nil(t, junkTable, "the leftover table should have been dropped")
+
+	// The stub is usable: a list call against the published dataset succeeds.
+	assetID := insertDiscoverTestAsset(t, db, "unlinked", 1, "")
+	result := listDiscoverAssets(t, map[string]string{
+		"dataset_id": fmt.Sprint(discoverTestPublishedDatasetID),
+	})
+	assert.Equal(t, []string{assetID}, assetIDs(result))
 }
