@@ -165,7 +165,7 @@ func TestStructures(t *testing.T) {
 			assert.Regexpf(t, `^[0-9A-Za-z.+-]+$`, v, "version of %q", s.ID)
 		}
 	}
-	for _, id := range []string{"bids", "sparc-sds", "pennsieve-published-dataset", "ro-crate"} {
+	for _, id := range []string{"bids", "sparc-sds", "pennsieve-published-dataset", "ro-crate", "pennsieve-records"} {
 		assert.Truef(t, seen[id], "%s is listed", id)
 	}
 	ppd, _ := getStructure("pennsieve-published-dataset")
@@ -219,4 +219,5 @@ func TestStructures_PennsieveSpecsArePublished(t *testing.T) {
 		assert.Containsf(t, s.Versions, version, "%s: version %s isn't listed", f, version)
 	}
 	assert.True(t, owned["pennsieve-published-dataset"])
+	assert.True(t, owned["pennsieve-records"])
 }
