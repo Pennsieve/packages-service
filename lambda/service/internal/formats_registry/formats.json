@@ -1215,6 +1215,14 @@
       "uri": "https://schemas.pennsieve.io/structures/pennsieve-records",
       "spec": "https://schemas.pennsieve.io/structures/pennsieve-records/v1.0",
       "versions": ["1.0"]
+    },
+    {
+      "id": "kgx",
+      "name": "Knowledge graph (KGX tables)",
+      "description": "A dataset's metadata records as a knowledge graph in KGX tables: nodes.tsv.gz and edges.tsv.gz (KGX TSV, canonical), the same rows in nodes.parquet and edges.parquet, graph.json (provenance, prefixes, counts) and graph_stats.yaml (kgx graph-summary form). Records are nodes, relationships and coded values (ontology terms) are edges; Biolink where known, not required. What an app gets for a graph input from a dataset view.",
+      "uri": "https://schemas.pennsieve.io/structures/kgx",
+      "spec": "https://schemas.pennsieve.io/structures/kgx/v1.0",
+      "versions": ["1.0"]
     }
   ]
 }
