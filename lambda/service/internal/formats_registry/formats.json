@@ -1207,6 +1207,14 @@
       "description": "A folder described by an ro-crate-metadata.json at its root: the files, their formats (encodingFormat) and which specifications the folder follows (conformsTo). Pennsieve views are RO-Crates.",
       "uri": "https://w3id.org/ro/crate",
       "spec": "https://w3id.org/ro/crate"
+    },
+    {
+      "id": "pennsieve-records",
+      "name": "Pennsieve metadata records",
+      "description": "A dataset's metadata records, one version of each model: models/<model>/schema.json (the model's JSON Schema) and models/<model>/records.jsonl (one record per line), and relationships.csv linking the records by id. What an app gets for an input of records from a dataset view.",
+      "uri": "https://schemas.pennsieve.io/structures/pennsieve-records",
+      "spec": "https://schemas.pennsieve.io/structures/pennsieve-records/v1.0",
+      "versions": ["1.0"]
     }
   ]
 }

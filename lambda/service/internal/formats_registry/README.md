@@ -70,7 +70,8 @@ MEF, NWB, Persyst, TDMS, Open Ephys); leave those without one. App manifests
   version in `structures/<id>/v<version>.md`, published at
   `schemas.<domain>/structures/<id>/v<version>` (`terraform/schemas.tf`
   publishes every such file). Their `spec` links to the current version:
-  [Pennsieve Published Dataset 5.0](structures/pennsieve-published-dataset/v5.0.md).
+  [Pennsieve Published Dataset 5.0](structures/pennsieve-published-dataset/v5.0.md),
+  [Pennsieve metadata records 1.0](structures/pennsieve-records/v1.0.md).
 
 ## Adding or changing a structure
 
