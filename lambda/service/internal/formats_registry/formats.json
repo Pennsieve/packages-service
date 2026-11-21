@@ -1211,7 +1211,7 @@
     {
       "id": "pennsieve-records",
       "name": "Pennsieve metadata records",
-      "description": "A dataset's metadata records, each model under its schema versions: models/<model>/versions/<n>/schema.json (the model version's JSON Schema) and models/<model>/versions/<n>/records.jsonl (one record per line), and relationships.csv linking the records by id. What an app gets for an input of records from a dataset view.",
+      "description": "A dataset's metadata records, each model's records per schema version: models/<model>/versions/<n>/schema.json (the model version's JSON Schema) and models/<model>/versions/<n>/records.jsonl (one record per line), and relationships.csv linking the records by id. What an app gets for an input of records from a dataset view.",
       "uri": "https://schemas.pennsieve.io/structures/pennsieve-records",
       "spec": "https://schemas.pennsieve.io/structures/pennsieve-records/v1.0",
       "versions": ["1.0"]
