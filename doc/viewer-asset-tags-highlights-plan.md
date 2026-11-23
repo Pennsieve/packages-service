@@ -106,5 +106,7 @@ ORDER BY t.position NULLS LAST, va.created_at, va.id;
 2. **Several thumbnails.** Show one or all thumbnails per package?
 3. **Folders.** Can a folder be highlighted? If not, the service must block it;
    a CHECK can't see `packages.type`.
-4. **Discover publication rule.** Show a highlight if its file is in the latest
-   version, or in any `PUBLISH_SUCCEEDED` version?
+4. ~~**Discover publication rule.** Show a highlight if its file is in the latest
+   version, or in any `PUBLISH_SUCCEEDED` version?~~ **Settled:** latest version
+   only. A package counts as published only if it has a file in the dataset's
+   newest `PUBLISH_SUCCEEDED` version. `GET /discover/assets` follows the same rule.

@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,7 +96,9 @@ type viewerAssetResponse struct {
 	AssetURL   string           `json:"asset_url,omitempty"`
 	Properties *json.RawMessage `json:"properties"`
 	Status     string           `json:"status"`
-	PackageIDs []string         `json:"package_ids"`
+	// PackageIDs is the node IDs in Packages. Kept for older callers.
+	PackageIDs []string               `json:"package_ids"`
+	Packages   []assetPackageResponse `json:"packages"`
 	// ChatSessionID is present only while the asset is still a chat-scoped
 	// figure. The frontend uses its presence to distinguish a not-yet-promoted
 	// chat figure (offer "promote") from an already-promoted one (don't).
@@ -107,9 +111,37 @@ type createViewerAssetResponseBody struct {
 	UploadCredentials *uploadCredentialsResponse `json:"upload_credentials"`
 }
 
+// assetPackageResponse is one package linked to a viewer asset.
+type assetPackageResponse struct {
+	PackageID string `json:"package_id"`
+	Name      string `json:"name"`
+	// FilePath is the package's file path inside the published dataset.
+	// Discover only.
+	FilePath string `json:"file_path,omitempty"`
+}
+
 type listViewerAssetsResponse struct {
-	Assets     []viewerAssetResponse    `json:"assets"`
+	Assets []viewerAssetResponse `json:"assets"`
+	// TotalCount, Limit and Offset are only set on a paged list, so an unpaged
+	// list looks exactly like it did before paging existed.
+	TotalCount *int `json:"total_count,omitempty"`
+	Limit      *int `json:"limit,omitempty"`
+	Offset     *int `json:"offset,omitempty"`
+	// Version is the published version discover listed from. Discover only.
+	Version    int                      `json:"version,omitempty"`
 	CloudFront *CloudFrontURLComponents `json:"cloudfront,omitempty"`
+}
+
+// setPage fills in total_count, limit and offset when q is a paged list.
+func (r *listViewerAssetsResponse) setPage(q listQuery, total int) {
+	if !q.paged() {
+		return
+	}
+	r.TotalCount = &total
+	r.Offset = &q.offset
+	if q.limit > 0 {
+		r.Limit = &q.limit
+	}
 }
 
 type getViewerAssetResponse struct {
@@ -140,11 +172,14 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 		return h.logAndBuildErrorCause("failed to resolve dataset", http.StatusBadRequest, err), nil
 	}
 
-	// Batch-resolve package IDs upfront (validates they belong to the dataset)
+	// Batch-resolve package IDs upfront (validates they belong to the dataset),
+	// so a removed package stops the request before the asset is created.
 	var resolvedPkgIDs []int64
-	var attachedNodeIDs []string
 	if len(req.PackageIDs) > 0 {
-		resolvedPkgIDs, attachedNodeIDs, err = h.resolvePackageIDs(ctx, orgID, datasetIntID, req.PackageIDs)
+		resolvedPkgIDs, err = h.resolvePackageIDs(ctx, orgID, datasetIntID, req.PackageIDs)
+		if errors.Is(err, errPackageRemoved) {
+			return h.logAndBuildError(err.Error(), http.StatusNotFound), nil
+		}
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve packages", http.StatusBadRequest, err), nil
 		}
@@ -213,6 +248,10 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 		return h.logAndBuildError("failed to generate upload credentials", http.StatusInternalServerError), nil
 	}
 
+	// Read the links back, like GET and PATCH do, so package_ids and packages
+	// show what was actually linked, without removed packages.
+	linked := h.linkedPackagesOrEmpty(ctx, orgID, []string{asset.ID})
+
 	resp := createViewerAssetResponseBody{
 		Asset: viewerAssetResponse{
 			ID:         asset.ID,
@@ -221,7 +260,8 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 			AssetType:  asset.AssetType,
 			Properties: &asset.Properties,
 			Status:     asset.Status,
-			PackageIDs: attachedNodeIDs,
+			PackageIDs: packageNodeIDs(linked[asset.ID]),
+			Packages:   packageResponses(linked[asset.ID]),
 			CreatedAt:  asset.CreatedAt.Format(time.RFC3339),
 		},
 		UploadCredentials: creds,
@@ -230,9 +270,13 @@ func (h *ViewerAssetsHandler) handleCreate(ctx context.Context) (*events.APIGate
 	return h.buildResponse(resp, http.StatusCreated)
 }
 
-// handleList returns viewer assets for a dataset, in one of two modes:
-//   - if package_id is supplied: assets linked to that package (package-scoped)
-//   - if package_id is absent:   assets with no package links (dataset-scoped)
+// handleList returns viewer assets for a dataset, in one of three modes:
+//   - package_id: assets linked to that package (package-scoped)
+//   - scope=all:  every non-chat asset in the dataset, linked or not
+//   - neither:    assets with no package links (dataset-scoped)
+//
+// Every mode takes the asset_type, status, limit and offset filters. Removed
+// packages (in the trash or replaced) are hidden.
 func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewayV2HTTPResponse, error) {
 	if !authorizer.HasRole(*h.claims, permissions.ViewFiles) {
 		return h.logAndBuildError("unauthorized", http.StatusUnauthorized), nil
@@ -241,6 +285,19 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 	orgID := h.claims.OrgClaim.IntId
 	datasetNodeID := h.queryParams["dataset_id"]
 	packageNodeID := h.queryParams["package_id"]
+	scope := h.queryParams["scope"]
+	status := h.queryParams["status"]
+
+	if err := checkScope(scope, packageNodeID); err != nil {
+		return h.logAndBuildError(err.Error(), http.StatusBadRequest), nil
+	}
+	if status != "" && !isValidAssetStatus(status) {
+		return h.logAndBuildError(invalidStatusMessage, http.StatusBadRequest), nil
+	}
+	limit, offset, err := parsePage(h.queryParams, scope)
+	if err != nil {
+		return h.logAndBuildError(err.Error(), http.StatusBadRequest), nil
+	}
 
 	datasetIntID, err := h.resolveDatasetID(ctx, orgID, datasetNodeID)
 	if err != nil {
@@ -249,16 +306,29 @@ func (h *ViewerAssetsHandler) handleList(ctx context.Context) (*events.APIGatewa
 
 	// Default: the dataset's own assets (no package links), minus chat figures.
 	q := listQuery{orgID: orgID, datasetID: datasetIntID, mode: listDatasetUnlinked, excludeChat: true}
-	if packageNodeID != "" {
+	switch {
+	case packageNodeID != "":
 		packageIntID, err := h.resolvePackageID(ctx, orgID, packageNodeID, datasetIntID)
+		if errors.Is(err, errPackageRemoved) {
+			return h.logAndBuildError(errPackageRemoved.Error(), http.StatusNotFound), nil
+		}
 		if err != nil {
 			return h.logAndBuildErrorCause("failed to resolve package", http.StatusBadRequest, err), nil
 		}
 		q = listQuery{orgID: orgID, datasetID: datasetIntID, packageID: packageIntID, mode: listByPackage}
+	case scope == listScopeAll:
+		q.mode = listDatasetAll
+		q.liveLinksOnly = true
 	}
 
+	q.assetType = h.queryParams["asset_type"]
+	q.status = status
+	q.limit, q.offset = limit, offset
 	return h.runListQuery(ctx, datasetNodeID, q)
 }
+
+// invalidStatusMessage is the 400 message for a status that isn't created or ready.
+const invalidStatusMessage = "'status' must be 'created' or 'ready'"
 
 // handleGet resolves a single viewer asset by ID and returns it with a per-asset
 // CloudFront URL plus dataset-scoped signing cookies. Used by the frontend to
@@ -307,6 +377,7 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 			Properties:    &a.Properties,
 			Status:        a.Status,
 			PackageIDs:    packageNodeIDs(linked[a.ID]),
+			Packages:      packageResponses(linked[a.ID]),
 			ChatSessionID: a.ChatSessionID.String,
 			CreatedAt:     a.CreatedAt.Format(time.RFC3339),
 		},
@@ -332,7 +403,7 @@ func (h *ViewerAssetsHandler) handleGet(ctx context.Context, assetID string) (*e
 // CloudFront URLs and signed-policy cookies, and serializes the result.
 func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID string, q listQuery) (*events.APIGatewayV2HTTPResponse, error) {
 	orgID, datasetIntID := q.orgID, q.datasetID
-	rows, err := queryViewerAssets(ctx, q)
+	rows, total, err := queryViewerAssets(ctx, q)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to query assets", http.StatusInternalServerError, err), nil
 	}
@@ -352,11 +423,13 @@ func (h *ViewerAssetsHandler) runListQuery(ctx context.Context, datasetNodeID st
 			Properties: &a.Properties,
 			Status:     a.Status,
 			PackageIDs: packageNodeIDs(linked[a.ID]),
+			Packages:   packageResponses(linked[a.ID]),
 			CreatedAt:  a.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
 	resp := listViewerAssetsResponse{Assets: assets}
+	resp.setPage(q, total)
 	components, cookies := h.signViewerAssetsCloudFront(ctx, orgID, datasetIntID, pathPrefixes)
 	if components != nil {
 		resp.CloudFront = components
@@ -381,6 +454,10 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 	if err := json.Unmarshal([]byte(h.body), &req); err != nil {
 		return h.logAndBuildError("invalid request body", http.StatusBadRequest), nil
 	}
+	// Check before any write, so a bad status changes nothing.
+	if req.Status != nil && !isValidAssetStatus(*req.Status) {
+		return h.logAndBuildError(invalidStatusMessage, http.StatusBadRequest), nil
+	}
 
 	orgID := h.claims.OrgClaim.IntId
 	datasetNodeID := h.queryParams["dataset_id"]
@@ -388,6 +465,19 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 	datasetIntID, err := h.resolveDatasetID(ctx, orgID, datasetNodeID)
 	if err != nil {
 		return h.logAndBuildErrorCause("failed to resolve dataset", http.StatusBadRequest, err), nil
+	}
+
+	// Resolve the new links before any write, so a removed package (404) or a
+	// failed lookup leaves the asset and its links exactly as they were.
+	var resolvedPkgIDs []int64
+	if req.PackageIDs != nil && len(*req.PackageIDs) > 0 {
+		resolvedPkgIDs, err = h.resolvePackageIDs(ctx, orgID, datasetIntID, *req.PackageIDs)
+		if errors.Is(err, errPackageRemoved) {
+			return h.logAndBuildError(err.Error(), http.StatusNotFound), nil
+		}
+		if err != nil {
+			return h.logAndBuildErrorCause("failed to resolve packages", http.StatusInternalServerError, err), nil
+		}
 	}
 
 	// Build dynamic UPDATE
@@ -434,7 +524,14 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 
 	// Update package links if provided
 	if req.PackageIDs != nil {
-		deleteQuery := fmt.Sprintf(`DELETE FROM "%d".%s WHERE viewer_asset_id = $1`, orgID, viewerAssetPackagesTable)
+		// Only replace links to live packages. The client never sees links to
+		// removed packages, so it can't send them back; deleting them here would
+		// break a later restore from the trash.
+		deleteQuery := fmt.Sprintf(`
+			DELETE FROM "%[1]d".%[2]s vap
+			USING "%[1]d".packages p
+			WHERE vap.viewer_asset_id = $1 AND p.id = vap.package_id AND %[3]s
+		`, orgID, viewerAssetPackagesTable, livePackageSQL("p"))
 		if _, err := PennsieveDB.ExecContext(ctx, deleteQuery, assetID); err != nil {
 			h.logger.LogErrorWithFields(logging.Fields{
 				logging.KeyError:         err,
@@ -442,15 +539,12 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 			}, "failed to delete existing package links")
 		}
 
-		if len(*req.PackageIDs) > 0 {
-			resolvedPkgIDs, _, err := h.resolvePackageIDs(ctx, orgID, datasetIntID, *req.PackageIDs)
-			if err == nil && len(resolvedPkgIDs) > 0 {
-				if err := h.batchInsertPackageLinks(ctx, orgID, assetID, resolvedPkgIDs); err != nil {
-					h.logger.LogErrorWithFields(logging.Fields{
-						logging.KeyError:         err,
-						logging.KeyViewerAssetID: assetID,
-					}, "failed to attach packages")
-				}
+		if len(resolvedPkgIDs) > 0 {
+			if err := h.batchInsertPackageLinks(ctx, orgID, assetID, resolvedPkgIDs); err != nil {
+				h.logger.LogErrorWithFields(logging.Fields{
+					logging.KeyError:         err,
+					logging.KeyViewerAssetID: assetID,
+				}, "failed to attach packages")
 			}
 		}
 	}
@@ -481,6 +575,7 @@ func (h *ViewerAssetsHandler) handleUpdate(ctx context.Context, assetID string) 
 		Properties:    &asset.Properties,
 		Status:        asset.Status,
 		PackageIDs:    packageNodeIDs(linked[asset.ID]),
+		Packages:      packageResponses(linked[asset.ID]),
 		ChatSessionID: asset.ChatSessionID.String,
 		CreatedAt:     asset.CreatedAt.Format(time.RFC3339),
 	}
@@ -545,20 +640,35 @@ func (h *ViewerAssetsHandler) resolveDatasetID(ctx context.Context, orgID int64,
 	return id, nil
 }
 
+// errPackageRemoved means the package exists in the dataset but is in the trash
+// or was replaced by a newer upload. Callers answer 404, not 400.
+var errPackageRemoved = errors.New("package is in the trash or was replaced")
+
+// resolvePackageID returns the integer ID of a package in the dataset. A removed
+// package returns errPackageRemoved; an unknown package, or one from another
+// dataset, returns a plain error.
 func (h *ViewerAssetsHandler) resolvePackageID(ctx context.Context, orgID int64, packageNodeID string, datasetIntID int64) (int64, error) {
-	query := fmt.Sprintf(`SELECT id FROM "%d".packages WHERE node_id = $1 AND dataset_id = $2`, orgID)
+	query := fmt.Sprintf(`SELECT p.id, %[2]s FROM "%[1]d".packages p WHERE p.node_id = $1 AND p.dataset_id = $2`,
+		orgID, livePackageSQL("p"))
 	var id int64
-	if err := PennsieveDB.QueryRowContext(ctx, query, packageNodeID, datasetIntID).Scan(&id); err != nil {
+	var live bool
+	if err := PennsieveDB.QueryRowContext(ctx, query, packageNodeID, datasetIntID).Scan(&id, &live); err != nil {
 		return 0, fmt.Errorf("package not found or does not belong to dataset: %s", packageNodeID)
+	}
+	if !live {
+		return 0, errPackageRemoved
 	}
 	return id, nil
 }
 
-// resolvePackageIDs batch-resolves package node IDs to integer IDs, returning
-// the resolved int IDs and the corresponding node IDs (intersection of valid ones).
-func (h *ViewerAssetsHandler) resolvePackageIDs(ctx context.Context, orgID, datasetIntID int64, packageNodeIDs []string) ([]int64, []string, error) {
+// resolvePackageIDs batch-resolves package node IDs in the dataset to integer
+// IDs. Unknown packages, and packages from another dataset, are skipped. If any
+// of the packages is removed (in the trash or replaced), it links nothing and
+// returns errPackageRemoved naming them, so the caller can answer 404 before
+// writing anything.
+func (h *ViewerAssetsHandler) resolvePackageIDs(ctx context.Context, orgID, datasetIntID int64, packageNodeIDs []string) ([]int64, error) {
 	if len(packageNodeIDs) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	placeholders := make([]string, len(packageNodeIDs))
@@ -569,27 +679,39 @@ func (h *ViewerAssetsHandler) resolvePackageIDs(ctx context.Context, orgID, data
 		args[i+1] = nodeID
 	}
 
-	query := fmt.Sprintf(`SELECT id, node_id FROM "%d".packages WHERE dataset_id = $1 AND node_id IN (%s)`,
-		orgID, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT p.id, p.node_id, %[3]s FROM "%[1]d".packages p WHERE p.dataset_id = $1 AND p.node_id IN (%[2]s)`,
+		orgID, strings.Join(placeholders, ", "), livePackageSQL("p"))
 
 	rows, err := PennsieveDB.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to resolve package IDs: %w", err)
+		return nil, fmt.Errorf("failed to resolve package IDs: %w", err)
 	}
 	defer rows.Close()
 
 	var intIDs []int64
-	var nodeIDs []string
+	var removed []string
 	for rows.Next() {
 		var intID int64
 		var nodeID string
-		if err := rows.Scan(&intID, &nodeID); err != nil {
-			return nil, nil, err
+		var live bool
+		if err := rows.Scan(&intID, &nodeID, &live); err != nil {
+			return nil, err
+		}
+		if !live {
+			removed = append(removed, nodeID)
+			continue
 		}
 		intIDs = append(intIDs, intID)
-		nodeIDs = append(nodeIDs, nodeID)
 	}
-	return intIDs, nodeIDs, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read package IDs: %w", err)
+	}
+
+	if len(removed) > 0 {
+		sort.Strings(removed) // a stable message, whatever order the rows came in
+		return nil, fmt.Errorf("%w: %s", errPackageRemoved, strings.Join(removed, ", "))
+	}
+	return intIDs, nil
 }
 
 // resolveStorageBucket returns the bucket new viewer assets of the organization go
@@ -630,25 +752,35 @@ func (h *ViewerAssetsHandler) batchInsertPackageLinks(ctx context.Context, orgID
 	return err
 }
 
-// packageRef is a package linked to a viewer asset.
-type packageRef struct{ NodeID, Name string }
+// packageRef is a package linked to a viewer asset. FilePath is only set by
+// discover, for packages in the latest published version.
+type packageRef struct{ NodeID, Name, FilePath string }
 
 // packageRefsByAsset returns the packages linked to each of the given viewer
 // assets, keyed by asset ID and ordered by package node ID. It is one query for
 // all the assets, not one per asset. Assets with no links are not in the map.
-func packageRefsByAsset(ctx context.Context, orgID int64, assetIDs []string) (map[string][]packageRef, error) {
+//
+// liveOnly leaves out removed packages (in the trash or replaced). The
+// authenticated handlers pass true. Discover passes false: there the gate is
+// whether the package is published, not its state in the workspace.
+func packageRefsByAsset(ctx context.Context, orgID int64, assetIDs []string, liveOnly bool) (map[string][]packageRef, error) {
 	refs := map[string][]packageRef{}
 	if len(assetIDs) == 0 {
 		return refs, nil
 	}
 
+	liveFilter := ""
+	if liveOnly {
+		liveFilter = "AND " + livePackageSQL("p")
+	}
 	query := fmt.Sprintf(`
 		SELECT vap.viewer_asset_id, p.node_id, p.name
 		FROM "%[1]d".%[2]s vap
 		JOIN "%[1]d".packages p ON p.id = vap.package_id
 		WHERE vap.viewer_asset_id = ANY($1::uuid[])
+		  %[3]s
 		ORDER BY p.node_id
-	`, orgID, viewerAssetPackagesTable)
+	`, orgID, viewerAssetPackagesTable, liveFilter)
 
 	rows, err := PennsieveDB.QueryContext(ctx, query, pq.Array(assetIDs))
 	if err != nil {
@@ -680,11 +812,22 @@ func packageNodeIDs(refs []packageRef) []string {
 	return ids
 }
 
-// linkedPackagesOrEmpty is packageRefsByAsset for the authenticated handlers. A
-// failed lookup is logged and treated as "no links": the assets still come back,
-// with empty package_ids, instead of the whole request failing.
+// packageResponses turns refs into the `packages` response field. It never
+// returns nil, so an asset with no links shows "packages": [] in JSON.
+func packageResponses(refs []packageRef) []assetPackageResponse {
+	packages := make([]assetPackageResponse, 0, len(refs))
+	for _, ref := range refs {
+		packages = append(packages, assetPackageResponse{PackageID: ref.NodeID, Name: ref.Name, FilePath: ref.FilePath})
+	}
+	return packages
+}
+
+// linkedPackagesOrEmpty is packageRefsByAsset for the authenticated handlers, so
+// removed packages are left out. A failed lookup is logged and treated as "no
+// links": the assets still come back, with empty package_ids and packages,
+// instead of the whole request failing.
 func (h *ViewerAssetsHandler) linkedPackagesOrEmpty(ctx context.Context, orgID int64, assetIDs []string) map[string][]packageRef {
-	refs, err := packageRefsByAsset(ctx, orgID, assetIDs)
+	refs, err := packageRefsByAsset(ctx, orgID, assetIDs, true)
 	if err == nil {
 		return refs
 	}
@@ -693,7 +836,7 @@ func (h *ViewerAssetsHandler) linkedPackagesOrEmpty(ctx context.Context, orgID i
 		logging.KeyOrganizationID: orgID,
 		logging.KeyCount:          len(assetIDs),
 	}
-	// GET and PATCH look up a single asset: name it so the log says which one.
+	// GET, POST and PATCH look up a single asset: name it so the log says which one.
 	if len(assetIDs) == 1 {
 		fields[logging.KeyViewerAssetID] = assetIDs[0]
 	}

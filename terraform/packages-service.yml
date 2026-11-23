@@ -148,8 +148,19 @@ paths:
         dataset node ID.
 
         In every mode, only finished assets (`status: ready`) are returned;
-        assets still uploading are hidden. Chat figures (`chat_session_id` set)
-        are never returned.
+        assets still uploading are hidden, so this endpoint has no `status`
+        filter. Chat figures (`chat_session_id` set) are never returned.
+
+        Only the dataset's **latest** `PUBLISH_SUCCEEDED` version counts. A
+        package is public only if it has a file in that version. Packages that
+        are only in a failed version, or only in an older version, are not
+        public. Each asset's `package_ids` and `packages` list only packages in
+        the latest version.
+
+        Results are ordered by `created_at`, newest first; ties are broken by
+        asset `id`, so pages are stable. The list is paginated when `limit` or a
+        non-zero `offset` is passed, or with `scope=all` (where `limit` defaults to 100).
+        Otherwise every match is returned, as before.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: discoverListViewerAssets
@@ -164,6 +175,8 @@ paths:
           description: |
             Source package node id (e.g. `N:package:uuid`). Returns viewer assets
             linked to that package. Mutually exclusive with `dataset_id`.
+            404 if the package has no file in the dataset's latest
+            `PUBLISH_SUCCEEDED` version.
         - in: query
           name: dataset_id
           schema:
@@ -175,7 +188,9 @@ paths:
             the same numeric ID used in `https://discover.pennsieve.io/datasets/{id}`
             URLs). By default returns dataset-scoped viewer assets (those with no
             package links); with `scope=all`, every asset in the dataset.
-            Mutually exclusive with `package_id`.
+            Mutually exclusive with `package_id`. 404 unless the dataset has at
+            least one `PUBLISH_SUCCEEDED` version (a failed or embargoed
+            publish alone is not public).
         - in: query
           name: scope
           schema:
@@ -184,11 +199,37 @@ paths:
           required: false
           description: |
             Only with `dataset_id`. `all` returns every viewer asset in the
-            published dataset: assets with no package links plus assets linked
-            to a package that is in a successfully published version of the
-            dataset (e.g. the thumbnails for a gallery), newest first. Each
-            asset's `package_ids` lists only its published packages. Omit for
-            the default dataset-scoped list.
+            published dataset: assets with no package links plus assets with at
+            least one link to a package in the latest `PUBLISH_SUCCEEDED`
+            version (e.g. the thumbnails for a gallery). This filter runs
+            before paging. `limit` defaults to 100. Omit for the default
+            dataset-scoped list.
+        - in: query
+          name: asset_type
+          schema:
+            type: string
+          required: false
+          description: |
+            Only return assets with this `asset_type` (exact match, e.g.
+            `thumb`). Works in every mode.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          required: false
+          description: |
+            Page size, 1–500. Defaults to 100 with `scope=all`. In the other
+            modes the list is only paginated when `limit` or `offset` is
+            passed.
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: Number of matching assets to skip. Must be 0 or more.
       responses:
         '200':
           description: List of viewer assets with CloudFront access
@@ -209,6 +250,9 @@ paths:
       description: |
         Creates a viewer asset record and returns temporary AWS credentials
         scoped to the asset's S3 prefix for direct upload to the storage bucket.
+        404 if `package_ids` includes a package that is in the trash or was
+        replaced; the message names them and no asset is created. Unknown
+        packages, or packages from another dataset, are skipped.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: createViewerAsset
@@ -238,6 +282,8 @@ paths:
                 $ref: '#/components/schemas/createViewerAssetResponse'
         '409':
           description: Conflict
+        '404':
+          description: A package in `package_ids` is in the trash or was replaced
         '4XX':
           $ref: '#/components/responses/Unauthorized'
         '5XX':
@@ -250,13 +296,33 @@ paths:
         To access files, append the relative path and signing params:
         `{asset_url}{path}?Policy={policy}&Signature={signature}&Key-Pair-Id={key_pair_id}`
 
-        Operates in one of two modes depending on `package_id`:
+        Operates in one of three modes:
           - **package_id supplied** — returns assets linked to that package
             (package-scoped assets).
           - **package_id omitted** — returns assets in the dataset that have
             no package links and no chat session (dataset-scoped assets).
             Chat-scoped figures are excluded; resolve them individually via
             `GET /assets/{asset_id}`.
+          - **scope=all** — returns every non-chat asset in the dataset,
+            linked to packages or not.
+
+        `asset_type` and `status` filter in every mode.
+
+        Results are ordered by `created_at`, newest first; ties are broken by
+        asset `id`, so pages are stable. The list is paginated when `limit` or a
+        non-zero `offset` is passed, or with `scope=all` (where `limit` defaults to 100).
+        Otherwise every match is returned, as before.
+
+        Removed packages are hidden. A package is removed when it is in the
+        trash (`state` `DELETING` or `DELETED`) or was replaced by a newer
+        upload (`replaced_by_package_id` set):
+          - removed packages are left out of each asset's `package_ids` and
+            `packages`;
+          - with `scope=all`, an asset whose package links all point to
+            removed packages is not listed (assets with no links still are);
+          - `package_id` set to a removed package returns 404.
+        Links are never deleted, so restoring a package from the trash brings
+        its assets back.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: listViewerAssets
@@ -279,7 +345,54 @@ paths:
           description: |
             Optional package node id. When supplied, returns assets linked to
             that package. When omitted, returns dataset-scoped assets (those
-            with no package links).
+            with no package links). Cannot be combined with `scope`.
+            400 if the package is unknown or in another dataset. 404 if the
+            package is in the trash or was replaced.
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [all]
+          required: false
+          description: |
+            `all` returns every non-chat asset in the dataset, linked to
+            packages or not. `limit` defaults to 100. 400 with `package_id` or
+            with any other value.
+        - in: query
+          name: asset_type
+          schema:
+            type: string
+          required: false
+          description: |
+            Only return assets with this `asset_type` (exact match, e.g.
+            `thumb`). Works in every mode.
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [created, ready]
+          required: false
+          description: |
+            Only return assets with this status. Works in every mode. Any
+            other value is a 400.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          required: false
+          description: |
+            Page size, 1–500. Defaults to 100 with `scope=all`. In the other
+            modes the list is only paginated when `limit` or `offset` is
+            passed.
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+          required: false
+          description: Number of matching assets to skip. Must be 0 or more.
       responses:
         '200':
           description: List of viewer assets with CloudFront access
@@ -287,6 +400,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/listViewerAssetsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: The `package_id` package is in the trash or was replaced
         '4XX':
           $ref: '#/components/responses/Unauthorized'
         '5XX':
@@ -340,6 +457,13 @@ paths:
       summary: Update a viewer asset
       description: |
         Updates status, properties, or package links for an existing viewer asset.
+        `status`, when given, must be `created` or `ready`. Any other value
+        (including `Ready` or `complete`) is a 400 and nothing is changed.
+        404 if `package_ids` includes a package that is in the trash or was
+        replaced; the message names them and nothing is changed. Unknown
+        packages, or packages from another dataset, are skipped. Replacing
+        `package_ids` keeps hidden links to removed packages, so a restore
+        from the trash brings them back.
       x-amazon-apigateway-integration:
         $ref: '#/components/x-amazon-apigateway-integrations/packages-service'
       operationId: updateViewerAsset
@@ -374,6 +498,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/viewerAsset'
+        '404':
+          description: Asset not found, or a package in `package_ids` is in the trash or was replaced
         '4XX':
           $ref: '#/components/responses/Unauthorized'
         '5XX':
@@ -648,9 +774,38 @@ components:
           type: array
           items:
             type: string
+          description: |
+            Node ids of the linked packages. Kept for compatibility; `packages`
+            has the same packages with their names.
+        packages:
+          type: array
+          description: |
+            The linked packages, `[]` when there are none. The authenticated
+            endpoints leave out packages in the trash or replaced. Discover
+            lists only packages in the latest published version.
+          items:
+            $ref: '#/components/schemas/viewerAssetPackage'
         created_at:
           type: string
           format: date-time
+
+    viewerAssetPackage:
+      type: object
+      properties:
+        package_id:
+          type: string
+          description: Package node id
+          example: "N:package:abc-123"
+        name:
+          type: string
+          description: Package name
+          example: "scan.png"
+        file_path:
+          type: string
+          description: |
+            Discover only. The package's file path inside the published
+            dataset.
+          example: "files/scan.png"
 
     updateViewerAssetRequest:
       type: object
@@ -658,6 +813,7 @@ components:
         status:
           type: string
           enum: [created, ready]
+          description: Any other value is a 400 and nothing is changed.
         properties:
           type: object
           additionalProperties: true
@@ -701,6 +857,24 @@ components:
             $ref: '#/components/schemas/viewerAsset'
         cloudfront:
           $ref: '#/components/schemas/cloudfrontURLComponents'
+        total_count:
+          type: integer
+          description: |
+            Number of assets that match, ignoring `limit` and `offset`. Only
+            present when the list is paginated (`limit` or a non-zero `offset`
+            passed, or `scope=all`).
+        limit:
+          type: integer
+          description: |
+            The page size used. Only present when the list is paginated with a
+            limit (absent when only `offset` was passed).
+        offset:
+          type: integer
+          description: The offset used. Only present when the list is paginated.
+        version:
+          type: integer
+          description: |
+            Discover only. The latest published version number used.
 
     getViewerAssetResponse:
       type: object
