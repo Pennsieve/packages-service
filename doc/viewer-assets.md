@@ -177,19 +177,38 @@ Create a viewer asset and receive temporary upload credentials.
 - **Permission**: `EditFiles`
 - **Query params**: `dataset_id` (required)
 - **Returns**: 201 with asset record and `upload_credentials`
+- **Errors**: 404 if `package_ids` includes a package that is in the trash or was replaced. The message names those packages, and no asset is created. Unknown packages, or packages from another dataset, are skipped as before.
 
 #### GET /packages/assets
 
-List viewer assets for a dataset. Operates in two modes:
+List viewer assets for a dataset. Operates in three modes:
 
 - **`package_id` supplied** — returns assets linked to that package (*package-scoped*).
 - **`package_id` omitted** — returns assets in the dataset that have **no package links** (*dataset-scoped*).
+- **`scope=all`** — returns every non-chat asset in the dataset, linked to packages or not.
 
 Settings:
 
 - **Permission**: `ViewFiles`
-- **Query params**: `dataset_id` (required), `package_id` (optional)
-- **Returns**: Array of assets (each with `asset_url`) plus CloudFront signing params
+- **Query params**:
+  - `dataset_id` (required)
+  - `package_id` (optional)
+  - `scope` (optional) — only `all`. Any other value → 400. `scope` with `package_id` → 400.
+  - `asset_type` (optional) — exact match, e.g. `thumb`. Works in every mode.
+  - `status` (optional) — `created` or `ready`. Anything else → 400. Works in every mode.
+  - `limit` (optional) — 1–500, else 400. Defaults to 100 with `scope=all`.
+  - `offset` (optional) — 0 or more, else 400.
+- **Order**: `created_at`, newest first. Ties are broken by asset `id`, so pages are stable.
+- **Paging**: with `scope=all` the list is always paginated. In the other two modes it is only paginated when `limit` or a non-zero `offset` is passed, so existing callers get the same result as before.
+- **Returns**: Array of assets (each with `asset_url`, `package_ids` and `packages`) plus CloudFront signing params. Paginated lists also have `total_count`, `limit` and `offset` (see [List response fields](#list-response-fields)).
+- **Errors**: 400 for a bad `scope`, `status`, `limit` or `offset`, or for a `package_id` that is unknown or in another dataset. 404 for a `package_id` that is in the trash or was replaced.
+
+**Removed packages are hidden.** A package is *removed* when it is in the trash (`state` `DELETING` or `DELETED`) or was replaced by a newer upload (`replaced_by_package_id` set). This applies to the list, single GET, PATCH and POST responses:
+
+- Removed packages are left out of each asset's `package_ids` and `packages`.
+- With `scope=all`, an asset whose package links **all** point to removed packages is not listed. Assets with no links still are.
+- `?package_id=<removed package>` returns 404 ("package is in the trash or was replaced").
+- Links are never deleted. Restoring a package from the trash brings its assets back.
 
 #### PATCH /packages/assets/{asset_id}
 
@@ -198,6 +217,8 @@ Update an asset's status, properties, or linked packages.
 - **Permission**: `EditFiles`
 - **Query params**: `dataset_id` (required)
 - **Body fields** (all optional): `status`, `properties`, `package_ids`
+- **Validation**: `status`, when given, must be `created` or `ready`. Anything else (including `Ready` or `complete`) → 400, and nothing is changed.
+- **Errors**: 404 if `package_ids` includes a package that is in the trash or was replaced. The message names those packages, and nothing is changed (not the links, not the other fields). Unknown packages, or packages from another dataset, are skipped as before. Replacing `package_ids` keeps the asset's hidden links to removed packages, so a restore from the trash still brings them back.
 
 #### DELETE /packages/assets/{asset_id}
 
@@ -223,12 +244,49 @@ List viewer assets for a published package or dataset. No authentication require
 - **Query params**: exactly one of
   - `package_id` — the **source package node ID** (e.g. `N:package:abc-123`). Returns assets linked to that package.
   - `dataset_id` — the **published-dataset PK** as an integer, i.e. `discover.public_datasets.id` (the same numeric ID that appears in `https://discover.pennsieve.io/datasets/{id}` URLs). Returns dataset-scoped assets (those with no package links).
-- **Optional**: `scope=all` (only with `dataset_id`) — returns every asset in the published dataset instead: assets with no package links plus assets linked to a package that has a file in a successfully published (`PUBLISH_SUCCEEDED`) version of the dataset. Use it to load a dataset's gallery thumbnails in one call. Each asset's `package_ids` lists only its published packages; assets linked only to unpublished packages (e.g. files added after publication) are left out.
+- **Latest version only**: only the dataset's **latest** `PUBLISH_SUCCEEDED` version counts. A package is public only if it has a file in that version.
+  - `package_id` mode: 404 if the package is not in the latest succeeded version. That includes a package that is only in a failed version, or only in an older version.
+  - Each asset's `package_ids` and `packages` list only packages in the latest version.
+- **Optional**:
+  - `scope=all` (only with `dataset_id`) — returns every asset in the published dataset instead: assets with no package links, plus assets with at least one link to a package in the latest version. This filter runs before paging. Use it to load a dataset's gallery thumbnails in one call. Assets linked only to unpublished packages (e.g. files added after publication) are left out.
+  - `asset_type` — exact match, e.g. `thumb`. Works in every mode.
+  - `limit` — 1–500, else 400. Defaults to 100 with `scope=all`.
+  - `offset` — 0 or more, else 400.
+  - There is no `status` param. Discover only returns `ready` assets.
 - **Only finished assets** (`status: ready`) are returned, in every mode. Assets still uploading are hidden.
 - **Chat figures** (`chat_session_id` set) are never returned, in every mode.
 - **Validation**: Checks the Discover database to confirm the package or dataset is published. Note the asymmetry: the package side accepts a *node ID* (because `discover.public_file_versions` stores `source_package_id` as a node ID), while the dataset side accepts the *published-dataset integer PK* (because `discover.public_datasets` does not store the source dataset node ID).
-- **Returns**: Array of assets (each with `asset_url`), newest first, plus CloudFront signing params
-- **Errors**: 400 if neither or both of `package_id`/`dataset_id` are supplied, if `dataset_id` is non-numeric, or if `scope` is anything other than `all` or is combined with `package_id`. 404 if the package/dataset is not published.
+- **Order and paging**: same as the authenticated list. Newest first, ties broken by asset `id`. Always paginated with `scope=all`; otherwise only when `limit` or a non-zero `offset` is passed.
+- **Returns**: Array of assets (each with `asset_url`, `package_ids` and `packages`) plus CloudFront signing params. Each `packages` entry also has `file_path`. The list also has `version` (see [List response fields](#list-response-fields)).
+- **Errors**: 400 if neither or both of `package_id`/`dataset_id` are supplied, if `dataset_id` is non-numeric, if `scope` is anything other than `all` or is combined with `package_id`, or if `limit` or `offset` is out of range. 404 if the package/dataset is not published, the package is not in the latest published version, or the dataset has no `PUBLISH_SUCCEEDED` version (e.g. only a failed or embargoed one).
+
+### Response Fields
+
+#### `packages` on each asset
+
+Every asset, on both endpoints, has a `packages` array. This covers the list, single GET, PATCH and POST responses.
+
+```json
+"packages": [
+  { "package_id": "N:package:abc-123", "name": "scan.png" }
+]
+```
+
+- `package_id` is the package node ID. `name` is the package name.
+- On Discover, each entry also has `file_path`: the package's file path inside the published dataset, e.g. `files/scan.png`.
+- `packages` is `[]` when there are none.
+- `package_ids` is unchanged and still returned, for compatibility.
+
+#### List response fields
+
+| Field | When present | Meaning |
+|-------|--------------|---------|
+| `total_count` | Paginated lists only | All matching assets, ignoring `limit` and `offset` |
+| `limit` | Paginated lists with a limit (absent when only `offset` is passed) | The page size used |
+| `offset` | Paginated lists only | The offset used |
+| `version` | Discover only | The latest published version number used |
+
+A list is paginated when `limit` or a non-zero `offset` is passed, or with `scope=all`. An unpaginated authenticated list looks exactly like before, apart from the new `packages` field.
 
 ## Accessing Viewer Assets from the Front-End
 
@@ -248,7 +306,10 @@ Example response:
       "asset_type": "ome-zarr",
       "asset_url": "https://assets.pennsieve.net/abc123ef/O19/D2049/a1b2c3d4-.../",
       "status": "ready",
-      "package_ids": ["N:package:..."]
+      "package_ids": ["N:package:..."],
+      "packages": [
+        { "package_id": "N:package:...", "name": "scan.png" }
+      ]
     }
   ],
   "cloudfront": {
@@ -258,6 +319,8 @@ Example response:
   }
 }
 ```
+
+With `scope=all` (or `limit` / a non-zero `offset`) the response also has `total_count`, `limit` and `offset`. On Discover it also has `version`, and each `packages` entry has `file_path`.
 
 Example file URL construction:
 ```

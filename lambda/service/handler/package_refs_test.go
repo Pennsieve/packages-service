@@ -19,7 +19,7 @@ func TestPackageRefsByAsset_ZeroOneAndTwoLinks(t *testing.T) {
 	oneLink := insertDiscoverTestAsset(t, db, "one-link", 0, "", 5002)
 	twoLinks := insertDiscoverTestAsset(t, db, "two-links", 0, "", 5001, 5003)
 
-	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{noLinks, oneLink, twoLinks})
+	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{noLinks, oneLink, twoLinks}, false)
 	require.NoError(t, err)
 
 	_, found := refs[noLinks]
@@ -45,7 +45,7 @@ func TestPackageRefsByAsset_ReturnsNodeIDAndName(t *testing.T) {
 
 	assetID := insertDiscoverTestAsset(t, db, "linked-to-c", 0, "", 5003)
 
-	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{assetID})
+	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{assetID}, false)
 	require.NoError(t, err)
 
 	require.Len(t, refs[assetID], 1)
@@ -62,7 +62,7 @@ func TestPackageRefsByAsset_OrderedByNodeID(t *testing.T) {
 	// Link c (5003) first, then a (5001).
 	assetID := insertDiscoverTestAsset(t, db, "linked-c-then-a", 0, "", 5003, 5001)
 
-	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{assetID})
+	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{assetID}, false)
 	require.NoError(t, err)
 
 	// a comes before c.
@@ -79,12 +79,12 @@ func TestPackageRefsByAsset_EmptyInput(t *testing.T) {
 	PennsieveDB = nil
 	t.Cleanup(func() { PennsieveDB = originalDB })
 
-	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{})
+	refs, err := packageRefsByAsset(context.Background(), assetsTestOrgID, []string{}, false)
 	require.NoError(t, err)
 	assert.NotNil(t, refs)
 	assert.Empty(t, refs)
 
-	refs, err = packageRefsByAsset(context.Background(), assetsTestOrgID, nil)
+	refs, err = packageRefsByAsset(context.Background(), assetsTestOrgID, nil, false)
 	require.NoError(t, err)
 	assert.NotNil(t, refs)
 	assert.Empty(t, refs)
